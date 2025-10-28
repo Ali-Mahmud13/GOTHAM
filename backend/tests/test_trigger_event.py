@@ -5,7 +5,6 @@ import json
 
 
 def trigger_test_event():
-    """Send a test event to the Inngest dev server."""
     
     event = {
         "name": "app/my_function",
@@ -22,12 +21,12 @@ def trigger_test_event():
     )
     
     if response.status_code == 200:
-        print("✅ Event sent successfully!")
+        print("Event sent successfully!")
         print(f"Event name: {event['name']}")
         print(f"Event data: {event['data']}")
         print("\nCheck http://localhost:8288 to see the function run!")
     else:
-        print(f"❌ Error: {response.status_code}")
+        print(f" Error: {response.status_code}")
         print(response.text)
 
 
