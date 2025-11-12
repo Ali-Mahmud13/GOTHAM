@@ -1,6 +1,14 @@
 """Test script to trigger Inngest background assessment.
 
 Uses official Inngest SDK: inngest_client.send(inngest.Event(...))
+
+Run with:
+    cd backend
+    python tests/test_inngest_trigger.py
+
+Prerequisites:
+    1. Inngest dev server: npx inngest-cli@latest dev
+    2. FastAPI server: uvicorn app.main:app --reload
 """
 
 import asyncio
@@ -10,13 +18,7 @@ from app.inngest.client import inngest_client
 
 
 async def test_trigger_assessment():
-    """
-    Test triggering a background assessment via Inngest.
-    
-    Prerequisites:
-        1. Inngest dev server running: npx inngest-cli@latest dev
-        2. FastAPI server running: uvicorn app.main:app --reload
-    """
+    """Test triggering a background assessment via Inngest."""
     assessment_id = str(uuid4())
     session_id = str(uuid4())
     
@@ -28,19 +30,19 @@ async def test_trigger_assessment():
     print("=" * 60)
     
     try:
-        # Trigger the background assessment
-        success = await send_event(
-            "agent/assessment.request",
-            {
-                "assessment_id": assessment_id,
-                "message": "Assess risk for patient P-001",
-                "session_id": session_id,
-                "patient_id": "P-001",
-            }
+        # Trigger the background assessment using official SDK
+        await inngest_client.send(
+            inngest.Event(
+                name="agent/assessment.request",
+                data={
+                    "assessment_id": assessment_id,
+                    "message": "Assess risk for patient P-001",
+                    "session_id": session_id,
+                    "patient_id": "P-001",
+                },
+                id=assessment_id
+            )
         )
-        
-        if not success:
-            raise Exception("Failed to send event")
         
         print("\n✓ Successfully triggered background assessment!")
         print("\nNext steps:")
@@ -57,100 +59,54 @@ async def test_trigger_assessment():
         print("  2. FastAPI server is running")
         print("     Run: uvicorn app.main:app --reload")
         print("\n" + "=" * 60)
+        raise
 
 
-async def test_trigger_maternal():
-    """Test triggering maternal prediction."""
-    assessment_id = str(uuid4())
+async def test_trigger_risk_processing():
+    """Test triggering risk processing example."""
+    job_id = str(uuid4())
     
-    print("\nTesting Maternal Prediction...")
-    print(f"Assessment ID: {assessment_id}")
+    print("\n" + "=" * 60)
+    print("Testing Risk Processing Function")
+    print("=" * 60)
+    print(f"Job ID: {job_id}")
+    print("=" * 60)
     
     try:
-        await send_event(
-            "prediction/maternal.run",
-            {
-                "assessment_id": assessment_id,
-                "patient_data": {
-                    "age": 28,
-                    "blood_sugar": 140,
-                    "bmi": 27.5,
+        await inngest_client.send(
+            inngest.Event(
+                name="risk/process",
+                data={
+                    "job_id": job_id,
+                    "model": "gdp_risk",
+                    "features": {
+                        "age": 28,
+                        "blood_sugar": 140,
+                        "bmi": 27.5,
+                    }
                 },
-                "models": ["gdp"],
-            }
+                id=job_id
+            )
         )
         
-        print("✓ Maternal prediction triggered!")
+        print("\n✓ Risk processing triggered!")
+        print(f"Check dashboard for job: {job_id}")
+        print("\n" + "=" * 60)
         
     except Exception as e:
-        print(f"✗ Error: {str(e)}")
-
-
-async def test_trigger_fetal():
-    """Test triggering fetal prediction."""
-    assessment_id = str(uuid4())
-    
-    print("\nTesting Fetal Prediction...")
-    print(f"Assessment ID: {assessment_id}")
-    
-    try:
-        await send_event(
-            "prediction/fetal.run",
-            {
-                "assessment_id": assessment_id,
-                "patient_data": {
-                    "heart_rate": 145,
-                    "movements": 8,
-                },
-                "models": ["fetal_health"],
-            }
-        )
-        
-        print("✓ Fetal prediction triggered!")
-        
-    except Exception as e:
-        print(f"✗ Error: {str(e)}")
-
-
-async def test_trigger_rag():
-    """Test triggering RAG retrieval."""
-    assessment_id = str(uuid4())
-    
-    print("\nTesting RAG Retrieval...")
-    print(f"Assessment ID: {assessment_id}")
-    
-    try:
-        await send_event(
-            "rag/retrieve",
-            {
-                "assessment_id": assessment_id,
-                "keywords": "gestational diabetes risk factors treatment",
-                "query": "What are the risk factors for gestational diabetes?",
-            }
-        )
-        
-        print("✓ RAG retrieval triggered!")
-        
-    except Exception as e:
-        print(f"✗ Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}")
+        print("\n" + "=" * 60)
+        raise
 
 
 async def main():
-    """Run all tests."""
+    """Run tests."""
     import sys
     
-    if len(sys.argv) > 1:
-        test_type = sys.argv[1]
-        if test_type == "maternal":
-            await test_trigger_maternal()
-        elif test_type == "fetal":
-            await test_trigger_fetal()
-        elif test_type == "rag":
-            await test_trigger_rag()
-        else:
-            await test_trigger_assessment()
+    if len(sys.argv) > 1 and sys.argv[1] == "risk":
+        await test_trigger_risk_processing()
     else:
-        # Default: test full assessment
+        # Default: test agent assessment
         await test_trigger_assessment()
 
 
