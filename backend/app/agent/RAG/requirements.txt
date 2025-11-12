@@ -1,0 +1,20 @@
+# Environment & Config
+python-dotenv==1.0.1
+
+# Vector Database
+pinecone-client==4.1.0
+
+# Embedding Models
+sentence-transformers==3.2.0
+transformers==4.44.2
+torch==2.4.1
+huggingface-hub==0.24.6
+
+# Data Loading & Processing
+requests==2.32.3
+beautifulsoup4==4.12.3
+pymupdf==1.24.5
+tqdm==4.66.5
+
+numpy==1.26.4
+pandas===2.2.2
