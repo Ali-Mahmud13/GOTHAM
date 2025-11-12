@@ -1,6 +1,8 @@
-"""Medical agent module."""
+"""Agent module - Contains the medical agent graph and related components."""
 
-from app.agent.graph import medical_agent
+from .main_agent.graph import create_graph
 
-__all__ = ["medical_agent"]
+__all__ = ["create_graph"]
+
+
 
