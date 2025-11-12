@@ -3,7 +3,7 @@ from pathlib import Path
 
 # Get absolute path relative to this file
 current_file = Path(__file__)
-DATA_PATH = current_file.parent / "data.csv"
+DATA_PATH = current_file.parent / "GDP_testing_data.csv"
 
 async def fetch_patient_data(patient_identifier: str) -> dict:
     df = pd.read_csv(DATA_PATH)

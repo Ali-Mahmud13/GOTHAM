@@ -42,6 +42,8 @@ INNGEST_DEV=1 uvicorn app.main:app --reload
 
 ```bash
 npx inngest-cli@latest dev
+
+
 ```
 
 ## Testing
@@ -50,6 +52,11 @@ npx inngest-cli@latest dev
 
 ```bash
 python tests/test_trigger_event.py
+
+```
+### Check the agent setup
+```bash
+python -m app.agent.cli
 ```
 
 Then check http://localhost:8288 to see the function run with 3 steps.
