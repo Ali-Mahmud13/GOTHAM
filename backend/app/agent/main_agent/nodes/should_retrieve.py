@@ -1,8 +1,7 @@
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from ..state import AgentState
 from ..system_prompt import SHOULD_RETRIEVE_PROMPT
-from config import GROQ_API_KEY, MODEL_NAME
+from app.core.llm import get_llm
 import logging
 
 logging.basicConfig(
@@ -12,7 +11,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def should_retrieve_node(state: AgentState) -> AgentState:
-    llm = ChatGroq(api_key=GROQ_API_KEY, model=MODEL_NAME, temperature=0)
+    llm = get_llm(temperature=0)
     
     user_message = state["messages"][-1].content
     

@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -16,11 +17,19 @@ if not DATABASE_URL:
         "Example: DATABASE_URL=postgresql://user:pass@host/database"
     )
 
+# LLM Settings
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+
 # Inngest Settings
 INNGEST_APP_ID = os.getenv("INNGEST_APP_ID", "GOTHAM")
 
 # App Settings
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+# Paths
+BASE_DIR = Path(__file__).parent.parent.parent
+DATA_DIR = BASE_DIR / "data"
 
 
 def setup_logging():
