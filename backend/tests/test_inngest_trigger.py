@@ -1,8 +1,12 @@
-"""Test script to trigger Inngest background assessment."""
+"""Test script to trigger Inngest background assessment.
+
+Uses official Inngest SDK: inngest_client.send(inngest.Event(...))
+"""
 
 import asyncio
+import inngest
 from uuid import uuid4
-from app.inngest.event_sender import send_event
+from app.inngest.client import inngest_client
 
 
 async def test_trigger_assessment():

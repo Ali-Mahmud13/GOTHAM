@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from typing import Optional
 from uuid import uuid4
 from app.services.agent_service import get_agent_service
-from app.inngest.event_sender import send_event
+from app.inngest.client import inngest_client
+import inngest
 import logging
 
 logger = logging.getLogger(__name__)
@@ -107,22 +108,19 @@ async def assess_risk(request: AssessmentRequest):
             f"for patient {request.patient_id}"
         )
         
-        # Trigger Inngest background job
-        success = await send_event(
-            "agent/assessment.request",
-            {
-                "assessment_id": assessment_id,
-                "message": request.message,
-                "session_id": session_id,
-                "patient_id": request.patient_id,
-            }
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=503,
-                detail="Failed to trigger background assessment. Is Inngest dev server running?"
+        # Trigger Inngest background job using official SDK
+        await inngest_client.send(
+            inngest.Event(
+                name="agent/assessment.request",
+                data={
+                    "assessment_id": assessment_id,
+                    "message": request.message,
+                    "session_id": session_id,
+                    "patient_id": request.patient_id,
+                },
+                id=assessment_id
             )
+        )
         
         return AssessmentResponse(
             assessment_id=assessment_id,

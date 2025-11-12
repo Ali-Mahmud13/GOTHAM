@@ -45,7 +45,8 @@ async def run_direct():
 
 async def run_inngest():
     """Run the agent via Inngest background jobs."""
-    from app.inngest.event_sender import send_event
+    import inngest
+    from app.inngest.client import inngest_client
     
     thread_id = str(uuid4())
     
@@ -73,21 +74,19 @@ async def run_inngest():
         print(f"\n[Triggering background assessment: {assessment_id}]\n")
         
         try:
-            # Trigger Inngest event
-            success = await send_event(
-                "agent/assessment.request",
-                {
-                    "assessment_id": assessment_id,
-                    "message": user_input,
-                    "session_id": thread_id,
-                    "patient_id": "CLI-TEST",
-                }
+            # Trigger Inngest event using official SDK
+            await inngest_client.send(
+                inngest.Event(
+                    name="agent/assessment.request",
+                    data={
+                        "assessment_id": assessment_id,
+                        "message": user_input,
+                        "session_id": thread_id,
+                        "patient_id": "CLI-TEST",
+                    },
+                    id=assessment_id
+                )
             )
-            
-            if not success:
-                print("Error: Failed to send event to Inngest")
-                print("Make sure Inngest dev server is running!\n")
-                continue
             
             print(f"✓ Assessment triggered successfully!")
             print(f"  Assessment ID: {assessment_id}")
@@ -96,7 +95,7 @@ async def run_inngest():
             
         except Exception as e:
             print(f"Error: {str(e)}")
-            print("Make sure Inngest dev server is running!\n")
+            print("Make sure Inngest dev server is running at http://localhost:8288\n")
 
 
 async def main():
