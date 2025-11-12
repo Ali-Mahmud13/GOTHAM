@@ -3,7 +3,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from uuid import uuid4
 from app.services.agent_service import get_agent_service
+from app.inngest.event_sender import send_event
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,21 @@ class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     response: str
     session_id: str
+
+
+class AssessmentRequest(BaseModel):
+    """Request model for background assessment endpoint."""
+    message: str
+    session_id: Optional[str] = None
+    patient_id: Optional[str] = None
+
+
+class AssessmentResponse(BaseModel):
+    """Response model for background assessment endpoint."""
+    assessment_id: str
+    session_id: str
+    status: str
+    message: str
 
 
 @router.post("", response_model=ChatResponse)
@@ -63,4 +80,60 @@ async def chat(request: ChatRequest):
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred"
+        )
+
+
+@router.post("/assess", response_model=AssessmentResponse)
+async def assess_risk(request: AssessmentRequest):
+    """
+    Trigger a background risk assessment.
+    
+    This endpoint immediately returns an assessment_id while the
+    assessment runs in the background via Inngest.
+    
+    Args:
+        request: Assessment request containing message, session_id, and patient_id
+        
+    Returns:
+        AssessmentResponse with assessment_id and status
+    """
+    try:
+        # Generate IDs
+        assessment_id = str(uuid4())
+        session_id = request.session_id or str(uuid4())
+        
+        logger.info(
+            f"Triggering background assessment {assessment_id} "
+            f"for patient {request.patient_id}"
+        )
+        
+        # Trigger Inngest background job
+        success = await send_event(
+            "agent/assessment.request",
+            {
+                "assessment_id": assessment_id,
+                "message": request.message,
+                "session_id": session_id,
+                "patient_id": request.patient_id,
+            }
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=503,
+                detail="Failed to trigger background assessment. Is Inngest dev server running?"
+            )
+        
+        return AssessmentResponse(
+            assessment_id=assessment_id,
+            session_id=session_id,
+            status="processing",
+            message="Risk assessment started. Check status using assessment_id."
+        )
+        
+    except Exception as e:
+        logger.error(f"Error triggering assessment: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to trigger assessment"
         )
