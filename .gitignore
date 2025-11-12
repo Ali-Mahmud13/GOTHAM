@@ -67,10 +67,13 @@ docker-compose.override.yml
 
 # Node modules (if any frontend dependencies)
 node_modules/
+
+
 REFACTORING_SUMMARY.md
 ARCHITECTURE.md
 PROJECT_STRUCTURE.md
 QUICK_START.md
 INNGEST_SUCCESS.md
 INNGEST_NOTES.md
+INNGEST_SETUP.md
 TESTING_GUIDE.md
