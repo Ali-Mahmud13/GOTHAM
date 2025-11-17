@@ -5,6 +5,7 @@ import inngest
 from typing import Dict, Any
 from app.inngest.client import inngest_client
 from app.services.agent_service import get_agent_service
+from app.services.assessment_results import store_assessment_result
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,8 @@ async def process_agent_assessment(ctx: inngest.Context) -> Dict[str, Any]:
     
     logger.info(f"Completed assessment {assessment_id}")
     
-    return {
+    # Store the result for polling
+    assessment_result = {
         "assessment_id": assessment_id,
         "session_id": session_id,
         "patient_id": patient_id,
@@ -50,6 +52,10 @@ async def process_agent_assessment(ctx: inngest.Context) -> Dict[str, Any]:
         "success": result.get("success"),
         "status": "completed"
     }
+    
+    store_assessment_result(assessment_id, assessment_result)
+    
+    return assessment_result
 
 
 async def run_agent_workflow(message: str, session_id: str) -> Dict[str, Any]:

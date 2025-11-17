@@ -16,7 +16,11 @@ app = FastAPI(title="GOTHAM - Medical Agent System")
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:3000",  # Next.js default
+        "http://localhost:5173",  # Vite default
+        "http://localhost:8080",  # Current Vite config
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
