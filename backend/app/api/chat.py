@@ -2,10 +2,14 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import uuid4
 from app.services.agent_service import get_agent_service
 from app.inngest.client import inngest_client
+from app.services.assessment_results import (
+    get_assessment_result,
+    mark_assessment_processing
+)
 import inngest
 import logging
 
@@ -108,6 +112,9 @@ async def assess_risk(request: AssessmentRequest):
             f"for patient {request.patient_id}"
         )
         
+        # Mark as processing
+        mark_assessment_processing(assessment_id)
+        
         # Trigger Inngest background job using official SDK
         await inngest_client.send(
             inngest.Event(
@@ -135,3 +142,25 @@ async def assess_risk(request: AssessmentRequest):
             status_code=500,
             detail="Failed to trigger assessment"
         )
+
+
+@router.get("/assess/{assessment_id}")
+async def get_assessment_status(assessment_id: str) -> Dict[str, Any]:
+    """
+    Get the status and result of a background assessment.
+    
+    Args:
+        assessment_id: The ID of the assessment to check
+        
+    Returns:
+        Status and result (if completed)
+    """
+    result = get_assessment_result(assessment_id)
+    
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Assessment not found"
+        )
+    
+    return result

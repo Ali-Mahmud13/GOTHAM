@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 35 30% 97%;
+    --foreground: 220 15% 25%;
+
+    --card: 35 25% 99%;
+    --card-foreground: 220 15% 25%;
+
+    --popover: 35 25% 99%;
+    --popover-foreground: 220 15% 25%;
+
+    --primary: 200 60% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 340 45% 65%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 35 20% 94%;
+    --muted-foreground: 220 10% 50%;
+
+    --accent: 340 50% 95%;
+    --accent-foreground: 340 50% 40%;
+
+    --destructive: 0 65% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 35 20% 88%;
+    --input: 35 20% 90%;
+    --ring: 200 60% 55%;
+
+    --radius: 1rem;
+    
+    --medical-blue: 200 60% 55%;
+    --medical-blue-light: 200 50% 75%;
+    --medical-pink: 340 45% 65%;
+    --medical-pink-light: 340 40% 80%;
+    --warm-white: 35 30% 97%;
+    
+    --gradient-chatbot: linear-gradient(135deg, hsl(340 45% 65%) 0%, hsl(340 40% 80%) 100%);
+    --gradient-glow: linear-gradient(90deg, hsl(340 45% 65%) 0%, hsl(200 60% 55%) 100%);
+    
+    --shadow-soft: 0 4px 20px -2px hsl(220 15% 25% / 0.06);
+    --shadow-glow-pink: 0 0 30px hsl(340 45% 65% / 0.2);
+    --shadow-glow-blue: 0 0 30px hsl(200 60% 55% / 0.2);
+    
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 220 20% 14%;
+    --foreground: 35 30% 95%;
+
+    --card: 220 18% 17%;
+    --card-foreground: 35 30% 95%;
+
+    --popover: 220 18% 17%;
+    --popover-foreground: 35 30% 95%;
+
+    --primary: 200 60% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 340 45% 60%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 15% 22%;
+    --muted-foreground: 35 15% 65%;
+
+    --accent: 340 40% 28%;
+    --accent-foreground: 340 40% 80%;
+
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 24%;
+    --input: 220 15% 22%;
+    --ring: 200 60% 60%;
+    
+    --medical-blue: 200 60% 60%;
+    --medical-blue-light: 200 50% 70%;
+    --medical-pink: 340 45% 60%;
+    --medical-pink-light: 340 40% 75%;
+    
+    --shadow-soft: 0 4px 20px -2px hsl(0 0% 0% / 0.25);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background-image: 
+      radial-gradient(ellipse 800px 600px at 20% 30%, hsl(340 45% 65% / 0.05), transparent),
+      radial-gradient(ellipse 600px 800px at 80% 70%, hsl(200 60% 55% / 0.05), transparent);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .card-glow-hover {
+    position: relative;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .card-glow-hover::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 1rem;
+    padding: 2px;
+    background: linear-gradient(135deg, hsl(330 75% 65%), hsl(195 85% 45%));
+    -webkit-mask: 
+      linear-gradient(#fff 0 0) content-box, 
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+  
+  .card-glow-hover:hover::before {
+    opacity: 1;
+  }
+  
+  .card-glow-hover::after {
+    content: '';
+    position: absolute;
+    inset: -20px;
+    background: radial-gradient(circle at center, hsl(330 75% 65% / 0.2), transparent 70%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: -1;
+    filter: blur(20px);
+  }
+  
+  .card-glow-hover:hover::after {
+    opacity: 1;
+  }
+}
