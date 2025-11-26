@@ -1,20 +1,21 @@
 """CLI runner for the medical agent - for testing and development."""
 
 import asyncio
+import sys
 from langchain_core.messages import HumanMessage
 from .main_agent.graph import create_graph
 from uuid import uuid4
 
 
-async def main():
-    """Run the agent in CLI mode."""
+async def run_direct():
+    """Run the agent directly (without Inngest)."""
     graph = create_graph()
     
     thread_id = str(uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     
     print("=" * 60)
-    print("Antenatal Care Assistant - CLI Mode")
+    print("Antenatal Care Assistant - CLI Mode (Direct)")
     print("=" * 60)
     print("Type 'exit' or 'quit' to end the conversation\n")
     
@@ -42,7 +43,69 @@ async def main():
             print(f"Error: {str(e)}\n")
 
 
+async def run_inngest():
+    """Run the agent via Inngest background jobs."""
+    import inngest
+    from app.inngest.client import inngest_client
+    
+    thread_id = str(uuid4())
+    
+    print("=" * 60)
+    print("Antenatal Care Assistant - CLI Mode (Inngest)")
+    print("=" * 60)
+    print("⚠️  Make sure Inngest dev server is running!")
+    print("   Run: npx inngest-cli@latest dev")
+    print("   Dashboard: http://localhost:8288")
+    print("=" * 60)
+    print("Type 'exit' or 'quit' to end the conversation\n")
+    
+    while True:
+        user_input = input("You: ")
+        
+        if user_input.lower() in ['exit', 'quit']:
+            print("\nGoodbye!")
+            break
+        
+        if not user_input.strip():
+            continue
+        
+        assessment_id = str(uuid4())
+        
+        print(f"\n[Triggering background assessment: {assessment_id}]\n")
+        
+        try:
+            # Trigger Inngest event using official SDK
+            await inngest_client.send(
+                inngest.Event(
+                    name="agent/assessment.request",
+                    data={
+                        "assessment_id": assessment_id,
+                        "message": user_input,
+                        "session_id": thread_id,
+                        "patient_id": "CLI-TEST",
+                    },
+                    id=assessment_id
+                )
+            )
+            
+            print(f"✓ Assessment triggered successfully!")
+            print(f"  Assessment ID: {assessment_id}")
+            print(f"  Check Inngest dashboard: http://localhost:8288")
+            print(f"  (Results will appear in the dashboard)\n")
+            
+        except Exception as e:
+            print(f"Error: {str(e)}")
+            print("Make sure Inngest dev server is running at http://localhost:8288\n")
+
+
+async def main():
+    """Main CLI entry point."""
+    # Check if user wants Inngest mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--inngest":
+        await run_inngest()
+    else:
+        await run_direct()
+
+
 if __name__ == "__main__":
     asyncio.run(main())
-
-
