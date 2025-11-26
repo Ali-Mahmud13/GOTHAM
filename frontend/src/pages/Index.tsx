@@ -60,7 +60,7 @@ const Index = () => {
                 title="New Data Entry"
                 icon={FileInput}
                 variant="dual-glow"
-                onClick={() => console.log("Navigate to new entry")}
+                onClick={() => navigate("/data-entry")}
               />
             </div>
 
@@ -141,7 +141,7 @@ const Index = () => {
               onShowReport={setShowReport}
             />
           </div>
-          
+
           {/* Report Panel in Chat View */}
           {showReport && (
             <div className="w-full max-w-2xl h-[80vh] ml-6 animate-in slide-in-from-right duration-500">
