@@ -48,7 +48,7 @@ const Index = () => {
                 title="Patients"
                 icon={Users}
                 variant="dual-glow"
-                onClick={() => console.log("Navigate to patients")}
+                onClick={() => navigate("/patients")}
               />
               <DashboardCard
                 title="AI Assistant"
