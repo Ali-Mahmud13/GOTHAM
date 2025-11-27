@@ -1,0 +1,8 @@
+requirements:
+  - modelpath  # Path to the model (not a patient feature)
+  - Age
+  - SystolicBP
+  - DiastolicBP
+  - BS  # Blood sugar
+  - BodyTemp
+  - HeartRate

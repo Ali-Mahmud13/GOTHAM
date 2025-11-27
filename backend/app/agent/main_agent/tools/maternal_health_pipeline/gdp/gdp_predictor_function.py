@@ -35,7 +35,6 @@ FEATURE_NAMES = [
 
 
 async def predict_gdm(
-    model_path,
     age,
     bmi,
     dia_bp,
@@ -52,49 +51,10 @@ async def predict_gdm(
     sedentary_lifestyle,
     prediabetes
 ):
-    """
-    Predict gestational diabetes and provide explainable AI analysis
     
-    Parameters:
-    -----------
-    model_path : str
-        Path to the pretrained model pickle file
-    age : float
-        Age in years (18-50)
-    bmi : float
-        Body Mass Index (15-50)
-    dia_bp : float
-        Diastolic Blood Pressure in mmHg (40-100)
-    hdl : float
-        HDL Cholesterol in mg/dL (20-100)
-    hemoglobin : float
-        Hemoglobin level in g/dL (8-18)
-    no_of_pregnancy : int
-        Number of pregnancies (0-15)
-    ogtt : float
-        Oral Glucose Tolerance Test in mg/dL (70-200)
-    sys_bp : float
-        Systolic Blood Pressure in mmHg (80-200)
-    gestation_in_previous_pregnancy : float
-        Gestation weeks in previous pregnancy (0-42)
-    family_history : int
-        Family history of diabetes (0=No, 1=Yes)
-    unexplained_prenatal_loss : int
-        History of unexplained prenatal loss (0=No, 1=Yes)
-    large_child_or_birth_default : int
-        History of large child or birth defect (0=No, 1=Yes)
-    pcos : int
-        Polycystic Ovary Syndrome (0=No, 1=Yes)
-    sedentary_lifestyle : int
-        Sedentary lifestyle (0=No, 1=Yes)
-    prediabetes : int
-        History of prediabetes (0=No, 1=Yes)
-    
-    Returns:
-    --------
-    dict
-        Dictionary containing prediction results and explainable AI analysis
-    """
+    # Construct model path relative to this file
+    current_file = Path(__file__)
+    model_path = str(current_file.parent / "GDP_model.pkl")
     
     # Load model
     model = await asyncio.to_thread(load_gdp_model, model_path)
@@ -418,7 +378,6 @@ async def format_result_for_llm(result):
     return "\n".join(output)
 
 async def predict_gdp(
-    model_path,
     age,
     bmi,
     dia_bp,
@@ -437,12 +396,7 @@ async def predict_gdp(
 ):
     """Wrapper that calls predict_gdm and formats the result for LLM consumption."""
 
-    if model_path is None:
-            current_file = Path(__file__)
-            model_path = str(current_file.parent / "GDP_model.pkl")
-
     result = await predict_gdm(
-        model_path=model_path,
         age=age,
         bmi=bmi,
         dia_bp=dia_bp,

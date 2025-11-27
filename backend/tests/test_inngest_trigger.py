@@ -14,7 +14,14 @@ Prerequisites:
 import asyncio
 import inngest
 from uuid import uuid4
+import sys
+from pathlib import Path
+# Add backend directory to path
+backend_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(backend_root))
+# Now your imports will work
 from app.inngest.client import inngest_client
+
 
 
 async def test_trigger_assessment():

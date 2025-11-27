@@ -1,5 +1,4 @@
 required_features:
-  - model_path
   - age
   - bmi
   - dia_bp

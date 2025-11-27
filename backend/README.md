@@ -35,13 +35,17 @@ python scripts/init_db.py
 
 ```bash
 cd backend
-INNGEST_DEV=1 uvicorn app.main:app --reload
+INNGEST_DEV=1 uvicorn app.main:app --reload (for windows: $env:INNGEST_DEV=1; uvicorn app.main:app --reload)
 ```
+
 
 ### 2. Start Inngest Dev Server (new terminal)
 
 ```bash
 npx inngest-cli@latest dev
+or
+install -g inngest-cli
+inngest dev
 
 
 ```
