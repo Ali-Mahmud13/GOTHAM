@@ -5,12 +5,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { ChatPage } from "./pages/ChatPage";
-<<<<<<< HEAD
 import PatientsPage from "./pages/PatientsPage";
 import PatientProfilePage from "./pages/PatientProfilePage";
-=======
 import DataEntry from "./pages/DataEntry";
->>>>>>> origin/Data-Entry-Frontend+CSV_repladed
 
 const queryClient = new QueryClient({
   defaultOptions: {
