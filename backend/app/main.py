@@ -47,7 +47,7 @@ app.add_middleware(
 inngest.fast_api.serve(app, inngest_client, ALL_FUNCTIONS)
 
 # Register API routes
-app.include_router(chat_router, prefix="/api")
+app.include_router(chat_router)
 app.include_router(data_entry_router)
 app.include_router(patients_router)
 app.include_router(patient_profiles_router)

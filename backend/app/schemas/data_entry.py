@@ -34,7 +34,10 @@ class ExtractedField(BaseModel):
     name: str = Field(description="Field name (e.g., 'BMI', 'Blood Pressure')")
     value: str | int | float = Field(description="Extracted value")
     confidence: str = Field(description="Confidence level: high, medium, low")
-    db_field: Optional[str] = Field(default=None, description="Database field name for mapping")
+    db_field: Optional[str] = Field(default=None, description="Database field name for mapping", alias="dbField")
+    
+    class Config:
+        populate_by_name = True  # Allow both db_field and dbField
 
 
 class MissingField(BaseModel):
