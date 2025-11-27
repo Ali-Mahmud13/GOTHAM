@@ -1,65 +1,69 @@
 """Patient service - Handles patient data fetching and management."""
 
 from typing import Dict, Optional
-import pandas as pd
-from pathlib import Path
+from sqlmodel import Session
+from app.db.session import engine
+from app.repositories import PatientRepository, VisitRepository
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class PatientService:
-    """Service class for managing patient data."""
+    """Service class for managing patient data via database using repository pattern."""
     
-    def __init__(self, data_path: Optional[Path] = None):
+    def __init__(self):
+        """Initialize the patient service."""
+        logger.info("Patient service initialized with database connection")
+    
+    def _get_repositories(self, session: Session) -> tuple[PatientRepository, VisitRepository]:
         """
-        Initialize the patient service.
+        Get repository instances for a session.
         
         Args:
-            data_path: Optional path to the patient data CSV file
+            session: Database session
+            
+        Returns:
+            Tuple of (PatientRepository, VisitRepository)
         """
-        if data_path is None:
-            # Default to data_temp location for now
-            # TODO: Move data to a proper location (e.g., /data directory)
-            data_path = Path(__file__).parent.parent / "agent" / "data_temp" / "data.csv"
-        
-        self.data_path = data_path
-        logger.info(f"Patient service initialized with data path: {data_path}")
+        return PatientRepository(session), VisitRepository(session)
     
     async def get_patient_data(self, patient_identifier: str) -> Dict:
         """
-        Fetch patient data by patient ID.
+        Fetch patient data by patient ID, combining static features with latest visit data.
         
         Args:
             patient_identifier: The patient ID to search for
             
         Returns:
-            Dictionary containing patient data, or empty dict if not found
+            Dictionary containing combined patient and latest visit data, or empty dict if not found
         """
         try:
             logger.info(f"Fetching data for patient: {patient_identifier}")
             
-            # Read the CSV file
-            df = pd.read_csv(self.data_path)
-            
-            # Search for patient by ID
-            patient_row = df[
-                (df['Patient_ID'].astype(str) == str(patient_identifier))
-            ]
-            
-            if patient_row.empty:
-                logger.warning(f"No data found for patient: {patient_identifier}")
-                return {}
-            
-            # Convert to dictionary
-            patient_data = patient_row.iloc[0].to_dict()
-            logger.info(f"Patient data retrieved successfully for: {patient_identifier}")
-            
-            return patient_data
-            
-        except FileNotFoundError:
-            logger.error(f"Patient data file not found: {self.data_path}")
-            return {}
+            with Session(engine) as session:
+                patient_repo, visit_repo = self._get_repositories(session)
+                
+                # Fetch patient with static features
+                patient = patient_repo.get_by_identifier(patient_identifier)
+                
+                if not patient:
+                    logger.warning(f"No patient found with identifier: {patient_identifier}")
+                    return {}
+                
+                # Fetch latest visit for this patient
+                latest_visit = visit_repo.get_latest_for_patient(patient.id)
+                
+                # Combine patient and visit data
+                patient_data = self._build_patient_response(patient, latest_visit)
+                
+                if latest_visit:
+                    logger.info(f"Patient data with latest visit from {latest_visit.visit_date} retrieved successfully")
+                else:
+                    logger.info(f"Patient found but no visits recorded yet")
+                
+                return patient_data
+                
         except Exception as e:
             logger.error(f"Error fetching patient data: {str(e)}", exc_info=True)
             return {}
@@ -75,12 +79,91 @@ class PatientService:
             True if patient exists, False otherwise
         """
         try:
-            df = pd.read_csv(self.data_path)
-            patient_exists = (df['Patient_ID'].astype(str) == str(patient_identifier)).any()
-            return patient_exists
+            with Session(engine) as session:
+                patient_repo, _ = self._get_repositories(session)
+                return patient_repo.exists(patient_identifier)
         except Exception as e:
             logger.error(f"Error validating patient ID: {str(e)}")
             return False
+    
+    async def get_patient_visit_history(self, patient_identifier: str) -> list[Dict]:
+        """
+        Get all visits for a patient, ordered by date (most recent first).
+        
+        Args:
+            patient_identifier: The patient ID
+            
+        Returns:
+            List of visit dictionaries
+        """
+        try:
+            with Session(engine) as session:
+                patient_repo, visit_repo = self._get_repositories(session)
+                
+                # Get patient
+                patient = patient_repo.get_by_identifier(patient_identifier)
+                
+                if not patient:
+                    logger.warning(f"No patient found with identifier: {patient_identifier}")
+                    return []
+                
+                # Get all visits
+                visits = visit_repo.get_all_for_patient(patient.id)
+                
+                return [self._build_visit_response(visit) for visit in visits]
+                
+        except Exception as e:
+            logger.error(f"Error fetching visit history: {str(e)}", exc_info=True)
+            return []
+    
+    def _build_patient_response(self, patient, latest_visit=None) -> Dict:
+        """
+        Build patient data response dictionary.
+        
+        Args:
+            patient: Patient model instance
+            latest_visit: Optional latest Visit model instance
+            
+        Returns:
+            Dictionary with patient and visit data
+        """
+        response = {
+            "Patient_ID": patient.patient_identifier,
+            "family_history": patient.family_history,
+            "pcos": patient.pcos,
+            "unexplained_prenatal_loss": patient.unexplained_prenatal_loss,
+            "large_child_or_birth_default": patient.large_child_or_birth_default,
+            "prediabetes": patient.prediabetes,
+        }
+        
+        if latest_visit:
+            response.update(self._build_visit_response(latest_visit))
+        
+        return response
+    
+    def _build_visit_response(self, visit) -> Dict:
+        """
+        Build visit data response dictionary.
+        
+        Args:
+            visit: Visit model instance
+            
+        Returns:
+            Dictionary with visit data
+        """
+        return {
+            "age": visit.age,
+            "bmi": visit.bmi,
+            "sys_bp": visit.sys_bp,
+            "dia_bp": visit.dia_bp,
+            "hdl": visit.hdl,
+            "hemoglobin": visit.hemoglobin,
+            "ogtt": visit.ogtt,
+            "no_of_pregnancy": visit.no_of_pregnancy,
+            "gestation_in_previous_pregnancy": visit.gestation_in_previous_pregnancy,
+            "sedentary_lifestyle": visit.sedentary_lifestyle,
+            "visit_date": visit.visit_date.isoformat() if visit.visit_date else None,
+        }
 
 
 # Singleton instance

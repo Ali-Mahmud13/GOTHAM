@@ -30,13 +30,20 @@ CURRENT USER MESSAGE:
 
 A message is COMPLETE if:
 - It contains enough information to understand what the user wants
-- Patient identifier (name or ID) is mentioned OR was mentioned in previous messages OR is already being tracked
+- Patient identifier (name or ID like P001, P002, etc.) is mentioned OR was mentioned in previous messages OR is already being tracked
 - The request is fully formed (not cut off mid-sentence)
+- If just a patient ID is mentioned (e.g., "P004"), it's COMPLETE if the conversation context indicates they want an assessment
 
 A message is INCOMPLETE if:
 - It's a fragment or unclear reference without context
 - Missing critical information that cannot be inferred from history
 - Appears to be cut off or unfinished
+- Ambiguous abbreviations without medical context
+
+SPECIAL CASES (these are COMPLETE):
+- Just a patient ID like "P001" or "P004" (assume they want assessment)
+- Followup references like "what about patient P002" (clear intent from context)
+- "assess P001" or "check P002" (clear intent even if brief)
 
 Consider the FULL conversation history. If previous messages provide context, the current message may be complete.
 
@@ -78,13 +85,18 @@ CURRENT USER MESSAGE:
 A message is CLEAR if:
 - The intent is understandable
 - The request makes sense in context of the conversation
-- It's not ambiguous or confusing
+-It's not ambiguous or confusing
 - You can determine what action/information the user wants
 
 A message is UNCLEAR if:
 - The intent is ambiguous or confusing
 - Contains contradictory information
 - Too vague to act upon even with conversation context
+
+SPECIAL CASES (these are CLEAR):
+- Patient ID references like "P001", "P004", "patient P002" (intent: assess this patient)
+- Follow-up questions like "what about patient X" after discussing another patient (intent: assess patient X)
+- Brief commands like "assess P001", "check P002" (intent is obvious)
 
 Consider the FULL conversation history for context.
 

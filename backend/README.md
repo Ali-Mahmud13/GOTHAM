@@ -54,7 +54,7 @@ npx inngest-cli@latest dev
 python tests/test_trigger_event.py
 
 ```
-### Check the agent setup
+### Check the agent setupYeah, no
 ```bash
 python -m app.agent.cli
 ```

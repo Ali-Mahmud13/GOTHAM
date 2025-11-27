@@ -1,8 +1,7 @@
 """Database models."""
 
-# Import your models here as you create them
-# from app.models.user import User
-# from app.models.post import Post
+from app.models.example import User
+from app.models.patient import Patient, Visit
 
-__all__ = []
+__all__ = ["User", "Patient", "Visit"]
 
