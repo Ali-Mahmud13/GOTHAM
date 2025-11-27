@@ -8,6 +8,7 @@ import logging
 from app.core.config import setup_logging
 from app.inngest import inngest_client, ALL_FUNCTIONS
 from app.api.chat import router as chat_router
+from app.api.data_entry import router as data_entry_router
 from app.db.init_db import create_db_and_tables
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,8 @@ app.add_middleware(
 inngest.fast_api.serve(app, inngest_client, ALL_FUNCTIONS)
 
 # Register API routes
-app.include_router(chat_router, prefix="/api")
+app.include_router(chat_router)
+app.include_router(data_entry_router)
 
 
 

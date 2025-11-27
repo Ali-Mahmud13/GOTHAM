@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface Patient {
     id: string;
@@ -19,6 +20,7 @@ interface ExtractedField {
     name: string;
     value: string | number;
     confidence: "high" | "medium" | "low";
+    dbField?: string;
 }
 
 interface MissingField {
@@ -26,38 +28,65 @@ interface MissingField {
     category: string;
 }
 
-// Mock patient data
-const mockPatients: Patient[] = [
-    { id: "P001", name: "Sarah Johnson", age: 32, gestationalAge: "26 weeks", lastVisit: "2 days ago", riskLevel: "high" },
-    { id: "P002", name: "Maria Garcia", age: 28, gestationalAge: "28 weeks", lastVisit: "1 week ago", riskLevel: "medium" },
-    { id: "P003", name: "Jennifer Wilson", age: 35, gestationalAge: "24 weeks", lastVisit: "3 days ago", riskLevel: "high" },
-    { id: "P004", name: "Emily Davis", age: 29, gestationalAge: "30 weeks", lastVisit: "5 days ago", riskLevel: "low" },
-    { id: "P005", name: "Amanda Brown", age: 31, gestationalAge: "22 weeks", lastVisit: "1 week ago", riskLevel: "medium" },
-];
+const API_BASE = "http://localhost:8000/api";
 
 const DataEntry = () => {
     const navigate = useNavigate();
+    const { toast } = useToast();
+    const [patients, setPatients] = useState<Patient[]>([]);
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [showPatientSearch, setShowPatientSearch] = useState(false);
-    const [filteredPatients, setFilteredPatients] = useState<Patient[]>(mockPatients);
+    const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]);
     const [notes, setNotes] = useState("");
     const [extractedFields, setExtractedFields] = useState<ExtractedField[]>([]);
     const [missingFields, setMissingFields] = useState<MissingField[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isLoadingPatients, setIsLoadingPatients] = useState(true);
+
+    // Fetch patients on mount
+    useEffect(() => {
+        const fetchPatients = async () => {
+            try {
+                const response = await fetch(`${API_BASE}/patients`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setPatients(data);
+                    setFilteredPatients(data);
+                } else {
+                    toast({
+                        title: "Error",
+                        description: "Failed to fetch patients",
+                        variant: "destructive",
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching patients:", error);
+                toast({
+                    title: "Error",
+                    description: "Failed to connect to server",
+                    variant: "destructive",
+                });
+            } finally {
+                setIsLoadingPatients(false);
+            }
+        };
+
+        fetchPatients();
+    }, []);
 
     // Filter patients based on search
     useEffect(() => {
         if (searchQuery.trim()) {
-            const filtered = mockPatients.filter(patient =>
-                patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            const filtered = patients.filter(patient =>
                 patient.id.toLowerCase().includes(searchQuery.toLowerCase())
             );
             setFilteredPatients(filtered);
         } else {
-            setFilteredPatients(mockPatients);
+            setFilteredPatients(patients);
         }
-    }, [searchQuery]);
+    }, [searchQuery, patients]);
 
     const handlePatientSelect = (patient: Patient) => {
         setSelectedPatient(patient);
@@ -65,31 +94,124 @@ const DataEntry = () => {
         setSearchQuery("");
     };
 
-    // Simulated AI extraction (will be replaced with actual API call)
+    // AI extraction from clinical notes
+    // AI extraction from clinical notes
     const handleNotesChange = (value: string) => {
         setNotes(value);
+    };
 
-        // Simulate extraction delay
-        if (value.length > 10) {
-            setIsProcessing(true);
-            setTimeout(() => {
-                // Mock extraction
-                const mockFields: ExtractedField[] = [
-                    { name: "Gestational Age", value: "26 weeks", confidence: "high" },
-                    { name: "Blood Pressure", value: "130/85", confidence: "medium" },
-                    { name: "BMI", value: 27.3, confidence: "high" },
-                    { name: "Fasting Glucose", value: "105 mg/dL", confidence: "high" },
-                ];
+    // Debounced parsing effect
+    useEffect(() => {
+        const parseNotes = async () => {
+            if (notes.length > 5) {
+                setIsProcessing(true);
+                try {
+                    const response = await fetch(`${API_BASE}/notes/parse`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            notes: notes,
+                            patient_id: selectedPatient?.id
+                        }),
+                    });
 
-                const mockMissing: MissingField[] = [
-                    { name: "Hemoglobin", category: "Lab Results" },
-                    { name: "Fetal Heart Rate", category: "Fetal Assessment" },
-                ];
+                    if (response.ok) {
+                        const data = await response.json();
+                        setExtractedFields(data.extracted_fields || []);
+                        setMissingFields(data.missing_fields || []);
+                    } else {
+                        const errorData = await response.json();
+                        console.error("Failed to parse notes:", errorData);
+                        toast({
+                            title: "AI Busy",
+                            description: "Rate limit reached. Please wait a moment.",
+                            variant: "destructive",
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error parsing notes:", error);
+                    toast({
+                        title: "Connection Error",
+                        description: "Failed to connect to AI service.",
+                        variant: "destructive",
+                    });
+                } finally {
+                    setIsProcessing(false);
+                }
+            } else {
+                setExtractedFields([]);
+                setMissingFields([]);
+            }
+        };
 
-                setExtractedFields(mockFields);
-                setMissingFields(mockMissing);
-                setIsProcessing(false);
-            }, 500);
+        const timeoutId = setTimeout(parseNotes, 1000); // 1 second debounce
+        return () => clearTimeout(timeoutId);
+    }, [notes, selectedPatient]);
+
+    const handleFieldChange = (index: number, newValue: string) => {
+        const updatedFields = [...extractedFields];
+        updatedFields[index] = {
+            ...updatedFields[index],
+            value: newValue
+        };
+        setExtractedFields(updatedFields);
+    };
+
+    // Save patient data as new visit
+    const handleSave = async () => {
+        if (!selectedPatient) return;
+
+        setIsSaving(true);
+
+        try {
+            // Build visit data from extracted fields
+            const visitData: any = {
+                patient_id: selectedPatient.id,
+                visit_type: "clinical_notes",
+                notes: notes,
+            };
+
+            // Map extracted fields to visit data
+            extractedFields.forEach(field => {
+                if (field.dbField) {
+                    visitData[field.dbField] = field.value;
+                }
+            });
+
+            const response = await fetch(`${API_BASE}/visits`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(visitData),
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                toast({
+                    title: "Success",
+                    description: "Patient data saved successfully",
+                });
+
+                // Reset form
+                setNotes("");
+                setExtractedFields([]);
+                setMissingFields([]);
+            } else {
+                toast({
+                    title: "Error",
+                    description: result.message || "Failed to save patient data",
+                    variant: "destructive",
+                });
+            }
+        } catch (error) {
+            console.error("Error saving visit:", error);
+            toast({
+                title: "Error",
+                description: "Failed to connect to server",
+                variant: "destructive",
+            });
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -273,11 +395,21 @@ const DataEntry = () => {
 
                             <div className="mt-4 flex gap-3">
                                 <Button
+                                    onClick={handleSave}
                                     className="flex-1 bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-lg transition-all duration-300 hover:scale-[1.02]"
-                                    disabled={!notes.trim() || !selectedPatient}
+                                    disabled={!notes.trim() || !selectedPatient || isSaving || extractedFields.length === 0}
                                 >
-                                    <Save className="h-4 w-4 mr-2" />
-                                    Save Patient Data
+                                    {isSaving ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Saving...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Save className="h-4 w-4 mr-2" />
+                                            Save Patient Data
+                                        </>
+                                    )}
                                 </Button>
                             </div>
                         </div>
@@ -310,7 +442,7 @@ const DataEntry = () => {
                                     Extracted Data
                                 </h2>
                                 {extractedFields.length > 0 && (
-                                    <span className="ml-auto text-xs font-medium bg-green-50/80 text-green-600 px-2 py-1 rounded-full">
+                                    <span className="ml-auto text-xs font-medium bg-medical-blue/10 text-medical-blue px-2 py-1 rounded-full">
                                         {extractedFields.length} fields
                                     </span>
                                 )}
@@ -328,6 +460,7 @@ const DataEntry = () => {
                                     </p>
                                 </div>
                             ) : (
+                                // ... (keeping existing JSX structure)
                                 <div className="space-y-3">
                                     {extractedFields.map((field, idx) => (
                                         <div
@@ -337,7 +470,7 @@ const DataEntry = () => {
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                                        <CheckCircle2 className="h-4 w-4 text-medical-blue" />
                                                         <label className="text-xs font-medium text-muted-foreground">
                                                             {field.name}
                                                         </label>
@@ -352,8 +485,8 @@ const DataEntry = () => {
                                                     </div>
                                                     <Input
                                                         value={field.value}
+                                                        onChange={(e) => handleFieldChange(idx, e.target.value)}
                                                         className="h-8 text-sm border-border/50 bg-white/50 focus-visible:ring-medical-blue/50"
-                                                        readOnly
                                                     />
                                                 </div>
                                             </div>
@@ -365,13 +498,13 @@ const DataEntry = () => {
 
                         {/* Missing Fields Alert */}
                         {missingFields.length > 0 && (
-                            <div className="relative bg-orange-50/40 backdrop-blur-xl rounded-2xl p-6 border border-orange-200/60 shadow-soft">
+                            <div className="relative bg-card/30 backdrop-blur-xl rounded-2xl p-6 border border-medical-pink/20 shadow-soft">
                                 <div className="flex items-center gap-2 mb-4">
-                                    <AlertCircle className="h-5 w-5 text-orange-500" />
+                                    <AlertCircle className="h-5 w-5 text-medical-pink" />
                                     <h3 className="text-sm font-semibold text-foreground">
                                         Missing Data for Assessment
                                     </h3>
-                                    <span className="ml-auto text-xs font-medium bg-orange-100/80 text-orange-600 px-2 py-1 rounded-full">
+                                    <span className="ml-auto text-xs font-medium bg-medical-pink/10 text-medical-pink px-2 py-1 rounded-full">
                                         {missingFields.length} required
                                     </span>
                                 </div>
@@ -380,7 +513,7 @@ const DataEntry = () => {
                                     {missingFields.map((field, idx) => (
                                         <div
                                             key={idx}
-                                            className="flex items-center justify-between p-2 rounded-lg bg-white/60"
+                                            className="flex items-center justify-between p-2 rounded-lg bg-white/40 hover:bg-white/60 transition-colors border border-transparent hover:border-medical-pink/10"
                                         >
                                             <div>
                                                 <p className="text-sm font-medium text-foreground">
@@ -392,8 +525,8 @@ const DataEntry = () => {
                                             </div>
                                             <Button
                                                 size="sm"
-                                                variant="outline"
-                                                className="h-7 text-xs bg-white/80 hover:bg-white"
+                                                variant="ghost"
+                                                className="h-7 text-xs text-medical-pink hover:text-medical-pink hover:bg-medical-pink/10"
                                             >
                                                 Add
                                             </Button>
@@ -404,8 +537,8 @@ const DataEntry = () => {
                         )}
                     </div>
                 </div>
-            </main>
-        </div>
+            </main >
+        </div >
     );
 };
 
