@@ -21,11 +21,42 @@ class Patient(SQLModel, table=True):
     prediabetes: Optional[bool] = Field(default=None, description="Pre-existing prediabetes condition")
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime. utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationship to visits
     visits: List["Visit"] = Relationship(back_populates="patient")
+    
+    # NEW: Relationship to profile
+    profile: Optional["PatientProfile"] = Relationship(back_populates="patient")
+
+
+class PatientProfile(SQLModel, table=True):
+    """Patient profile with personal information and clinical notes."""
+    
+    __tablename__ = "patient_profiles"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_identifier: str = Field(unique=True, foreign_key="patients.patient_identifier", index=True)
+    
+    # Personal Information
+    name: str = Field(description="Patient full name")
+    age: int = Field(description="Patient age")
+    contact_number: str = Field(description="Patient contact number")
+    
+    # Clinical Information
+    doctor_notes: Optional[str] = Field(default=None, description="Doctor's clinical notes")
+    ai_report: Optional[str] = Field(default=None, description="AI-generated risk assessment report")
+    
+    # Risk Level (calculated or manually set)
+    risk_level: str = Field(default="low", description="Risk level: low, medium, high")
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Relationship back to patient
+    patient: Optional[Patient] = Relationship(back_populates="profile")
 
 
 class Visit(SQLModel, table=True):
@@ -58,7 +89,7 @@ class Visit(SQLModel, table=True):
     sedentary_lifestyle: Optional[bool] = Field(default=None, description="Sedentary lifestyle assessment")
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime. utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationship to patient

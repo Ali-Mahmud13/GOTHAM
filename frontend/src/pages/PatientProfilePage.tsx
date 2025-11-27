@@ -1,48 +1,154 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle, Activity } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
+import { VitalsChart } from "@/components/charts/VitalsChart";
 import { cn } from "@/lib/utils";
 
-// Mock data - only first 3 patients have profile data
-const mockPatients = [
-  {
-    id: 'P001',
-    name: 'Sarah Johnson',
-    age: '28',
-    contactNumber: '+1 (555) 123-4567',
-    riskLevel: 'low' as const,
-    doctorNotes: 'Patient shows consistent progress with regular checkups.  Vitals are stable and within normal ranges.  Continue current treatment plan.',
-    aiReport: 'Based on historical data and current health metrics, the patient demonstrates a low-risk profile.  Recommended follow-up in 3 months.  All vital signs are within acceptable parameters.  Suggest maintaining current lifestyle and medication regimen.',
-  },
-  {
-    id: 'P002',
-    name: 'Jennifer Wilson',
-    age: '34',
-    contactNumber: '+1 (555) 234-5678',
-    riskLevel: 'high' as const,
-    doctorNotes: 'Requires immediate attention.  Blood pressure elevated during last visit. Scheduled for additional tests next week.',
-    aiReport: 'High-risk assessment based on recent vital readings and medical history. Elevated cardiovascular markers detected. Immediate consultation recommended. Close monitoring required for the next 2 weeks.',
-  },
-  {
-    id: 'P003',
-    name: 'Emily Davis',
-    age: '26',
-    contactNumber: '+1 (555) 345-6789',
-    riskLevel: 'low' as const,
-    doctorNotes: 'Healthy patient with no major concerns. Annual checkup completed successfully.',
-    aiReport: 'Low-risk profile maintained.  All systems functioning normally. Continue preventive care routine.  Next checkup recommended in 6 months.',
-  },
-];
+const API_URL = "http://localhost:8000";
+
+interface PatientProfile {
+  id: number;
+  patient_identifier: string;
+  name: string;
+  age: number;
+  contact_number: string;
+  doctor_notes: string | null;
+  ai_report: string | null;
+  risk_level: 'high' | 'medium' | 'low';
+  created_at: string;
+  updated_at: string;
+}
+
+interface PatientMedical {
+  id: number;
+  patient_identifier: string;
+  family_history: boolean | null;
+  pcos: boolean | null;
+  unexplained_prenatal_loss: boolean | null;
+  large_child_or_birth_default: boolean | null;
+  prediabetes: boolean | null;
+}
 
 const PatientProfilePage = () => {
   const { patientId } = useParams();
   const navigate = useNavigate();
+  const [patient, setPatient] = useState<PatientProfile | null>(null);
+  const [medicalData, setMedicalData] = useState<PatientMedical | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Find patient by ID - if not found in mock data, return null
-  const patient = mockPatients.find(p => p.id === patientId);
+  useEffect(() => {
+    fetchPatientData();
+  }, [patientId]);
 
-  // If patient doesn't exist in our mock data, show message or redirect
-  if (!patient) {
+  const fetchPatientData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch patient profile
+      const profileResponse = await fetch(`${API_URL}/api/patient-profiles/${patientId}`);
+      if (profileResponse.status === 404) {
+        setPatient(null);
+        setError("not_found");
+        return;
+      }
+      if (!profileResponse.ok) {
+        throw new Error('Failed to fetch patient profile');
+      }
+      const profileData = await profileResponse.json();
+      setPatient(profileData);
+
+      // Fetch medical data
+      const medicalResponse = await fetch(`${API_URL}/api/patients/${patientId}`);
+      if (medicalResponse.ok) {
+        const medicalDataResponse = await medicalResponse.json();
+        setMedicalData(medicalDataResponse);
+      }
+      
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching patient data:', err);
+      setError('error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getRiskColor = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'high':
+        return 'bg-red-500';
+      case 'medium':
+        return 'bg-orange-500';
+      case 'low':
+        return 'bg-green-500';
+      default:
+        return 'bg-gray-400';
+    }
+  };
+
+  const getRiskLabel = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'high':
+        return 'High Risk';
+      case 'medium':
+        return 'Medium Risk';
+      case 'low':
+        return 'Low Risk';
+      default:
+        return 'Unknown';
+    }
+  };
+
+  const getRiskTextColor = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'high':
+        return 'text-red-600';
+      case 'medium':
+        return 'text-orange-600';
+      case 'low':
+        return 'text-green-600';
+      default:
+        return 'text-gray-600';
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
+        <Navbar />
+        <main className="container mx-auto px-6 py-10">
+          <button
+            onClick={() => navigate('/patients')}
+            className="flex items-center gap-2 text-gray-600 hover:text-medical-blue transition-colors mb-6 group"
+          >
+            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="font-semibold">Back to Patients</span>
+          </button>
+          <div className="text-center text-lg">
+            <div className="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent rounded-full text-medical-blue mb-4" />
+            <p>Loading patient profile...</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // If patient doesn't exist in database
+  if (error === "not_found" || !patient) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
         <Navbar />
@@ -69,44 +175,32 @@ const PatientProfilePage = () => {
     );
   }
 
-  const getRiskColor = () => {
-    switch (patient. riskLevel) {
-      case 'high':
-        return 'bg-red-500';
-      case 'medium':
-        return 'bg-orange-500';
-      case 'low':
-        return 'bg-green-500';
-      default:
-        return 'bg-gray-400';
-    }
-  };
-
-  const getRiskLabel = () => {
-    switch (patient.riskLevel) {
-      case 'high':
-        return 'High Risk';
-      case 'medium':
-        return 'Medium Risk';
-      case 'low':
-        return 'Low Risk';
-      default:
-        return 'Unknown';
-    }
-  };
-
-  const getRiskTextColor = () => {
-    switch (patient.riskLevel) {
-      case 'high':
-        return 'text-red-600';
-      case 'medium':
-        return 'text-orange-600';
-      case 'low':
-        return 'text-green-600';
-      default:
-        return 'text-gray-600';
-    }
-  };
+  // Error state
+  if (error === 'error') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
+        <Navbar />
+        <main className="container mx-auto px-6 py-10">
+          <button
+            onClick={() => navigate('/patients')}
+            className="flex items-center gap-2 text-gray-600 hover:text-medical-blue transition-colors mb-6 group"
+          >
+            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="font-semibold">Back to Patients</span>
+          </button>
+          <div className="text-center text-red-500">
+            <p>Failed to load patient profile.  Please try again.</p>
+            <button 
+              onClick={fetchPatientData}
+              className="mt-4 px-6 py-2 bg-medical-blue text-white rounded-lg hover:bg-medical-blue/90"
+            >
+              Retry
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
@@ -137,7 +231,7 @@ const PatientProfilePage = () => {
                 <div>
                   <p className="text-sm text-gray-500 font-medium">Patient ID</p>
                   <p className="text-2xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
-                    {patient.id}
+                    {patient.patient_identifier}
                   </p>
                 </div>
               </div>
@@ -145,10 +239,10 @@ const PatientProfilePage = () => {
               {/* Risk Level Badge */}
               <div className={cn(
                 "px-6 py-3 rounded-full text-white font-bold shadow-lg flex items-center gap-2",
-                getRiskColor()
+                getRiskColor(patient.risk_level)
               )}>
                 <AlertCircle className="w-5 h-5" />
-                {getRiskLabel()}
+                {getRiskLabel(patient.risk_level)}
               </div>
             </div>
 
@@ -177,7 +271,7 @@ const PatientProfilePage = () => {
                 </div>
                 <div>
                   <p className="text-xs text-gray-600 font-semibold uppercase">Contact</p>
-                  <p className="text-sm font-bold text-gray-900">{patient.contactNumber}</p>
+                  <p className="text-sm font-bold text-gray-900">{patient.contact_number}</p>
                 </div>
               </div>
 
@@ -188,11 +282,25 @@ const PatientProfilePage = () => {
                 </div>
                 <div>
                   <p className="text-xs text-gray-600 font-semibold uppercase">Last Updated</p>
-                  <p className="text-sm font-bold text-gray-900">Nov 26, 2025</p>
+                  <p className="text-sm font-bold text-gray-900">{formatDate(patient.updated_at)}</p>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Vitals Chart Section - ONLY THIS CHART */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 mb-8 border border-gray-100">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="bg-gradient-to-r from-purple-500 to-indigo-500 p-3 rounded-xl">
+              <Activity className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Vitals Tracking</h2>
+              <p className="text-sm text-gray-500">Monitor key health metrics over time</p>
+            </div>
+          </div>
+          <VitalsChart />
         </div>
 
         {/* Two Column Layout for Notes and AI Report */}
@@ -208,14 +316,14 @@ const PatientProfilePage = () => {
 
             <div className="bg-gradient-to-br from-blue-50/50 to-cyan-50/50 rounded-xl p-6 border-l-4 border-blue-500">
               <p className="text-gray-700 leading-relaxed">
-                {patient.doctorNotes}
+                {patient.doctor_notes || "No doctor notes available yet. "}
               </p>
             </div>
 
             {/* Timestamp */}
             <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
               <Calendar className="w-4 h-4" />
-              <span>Last updated: Nov 26, 2025 at 10:30 AM</span>
+              <span>Last updated: {formatDate(patient.updated_at)}</span>
             </div>
           </div>
 
@@ -233,18 +341,18 @@ const PatientProfilePage = () => {
 
             <div className="bg-gradient-to-br from-pink-50/50 to-purple-50/50 rounded-xl p-6 border-l-4 border-medical-pink">
               <p className="text-gray-700 leading-relaxed mb-4">
-                {patient. aiReport}
+                {patient. ai_report || "AI analysis report will be generated soon."}
               </p>
 
               {/* Risk Assessment Summary */}
               <div className={cn(
                 "mt-4 p-4 rounded-lg border-2",
-                patient.riskLevel === 'high' ?  'bg-red-50 border-red-200' :
-                patient. riskLevel === 'medium' ? 'bg-orange-50 border-orange-200' :
+                patient.risk_level === 'high' ?    'bg-red-50 border-red-200' :
+                patient. risk_level === 'medium' ? 'bg-orange-50 border-orange-200' :
                 'bg-green-50 border-green-200'
               )}>
-                <p className={cn("font-bold text-sm", getRiskTextColor())}>
-                  ⚡ Risk Assessment: {getRiskLabel()}
+                <p className={cn("font-bold text-sm", getRiskTextColor(patient. risk_level))}>
+                  ⚡ Risk Assessment: {getRiskLabel(patient.risk_level)}
                 </p>
               </div>
             </div>
@@ -252,7 +360,7 @@ const PatientProfilePage = () => {
             {/* Timestamp */}
             <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
               <Brain className="w-4 h-4" />
-              <span>Generated: Nov 26, 2025 at 10:35 AM</span>
+              <span>Generated: {formatDate(patient.created_at)}</span>
             </div>
           </div>
         </div>
