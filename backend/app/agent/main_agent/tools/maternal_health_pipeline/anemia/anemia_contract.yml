@@ -1,0 +1,9 @@
+required_features:
+  - WBC
+  - RBC
+  - HGB
+  - HCT
+  - MCV
+  - MCH
+  - MCHC
+  - PLT
