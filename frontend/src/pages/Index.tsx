@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Users, Bot, FileInput } from "lucide-react";
+import { Users, Bot, FileInput, Activity, AlertTriangle, BrainCircuit } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { DashboardCard } from "@/components/DashboardCard";
@@ -9,6 +9,9 @@ import { HighRiskCase } from "@/components/HighRiskCase";
 import { RecentPatient } from "@/components/RecentPatient";
 import { ChatInterface } from "@/components/ChatInterface";
 import { RiskReportPanel } from "@/components/RiskReportPanel";
+import { MetricsCard } from "@/components/MetricsCard";
+import { RiskOverviewChart } from "@/components/RiskOverviewChart";
+import { RiskTrendChart } from "@/components/RiskTrendChart";
 import { cn } from "@/lib/utils";
 
 const Index = () => {
@@ -30,7 +33,7 @@ const Index = () => {
             showReport ? "w-[60%]" : "w-full"
           )}>
             {/* Welcome Section */}
-            <div className="mb-10">
+            <div className="mb-8">
               <div className="inline-block">
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-medical-pink via-medical-blue to-medical-pink bg-clip-text text-transparent mb-3 animate-float">
                   Welcome back, Dr. Mahmud
@@ -40,6 +43,37 @@ const Index = () => {
               <p className="text-muted-foreground mt-3 text-lg">
                 Your comprehensive dashboard overview for today
               </p>
+            </div>
+
+            {/* Metrics Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <MetricsCard
+                title="Total Active Patients"
+                value="124"
+                subtext="vs last month"
+                icon={Users}
+                trend="up"
+                trendValue="12%"
+                color="blue"
+              />
+              <MetricsCard
+                title="High-Risk Alerts"
+                value="12"
+                subtext="new cases"
+                icon={AlertTriangle}
+                trend="down"
+                trendValue="4%"
+                color="pink"
+              />
+              <MetricsCard
+                title="AI Assessments"
+                value="48"
+                subtext="this week"
+                icon={BrainCircuit}
+                trend="up"
+                trendValue="24%"
+                color="purple"
+              />
             </div>
 
             {/* Main Action Cards */}
@@ -62,6 +96,16 @@ const Index = () => {
                 variant="dual-glow"
                 onClick={() => navigate("/data-entry")}
               />
+            </div>
+
+            {/* Charts Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-12">
+              <div className="lg:col-span-1">
+                <RiskOverviewChart />
+              </div>
+              <div className="lg:col-span-2">
+                <RiskTrendChart />
+              </div>
             </div>
 
             {/* Summary Panels */}
