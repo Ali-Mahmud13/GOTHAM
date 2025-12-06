@@ -45,9 +45,10 @@ Thumbs.db
 .env
 .env.local
 
-# Data files
+# Data files (only ignore JSON in data directories, not config files!)
 *.csv
-*.json
+data/**/*.json
+notebooks/**/*.json
 *.h5
 *.pkl
 *.pickle
@@ -82,3 +83,4 @@ INTEGRATION_COMPLETE.md
 INNGEST_SETUP.md
 backend/DATABASE_MIGRATION.md
 backend/PERFORMANCE_OPTIMIZATION_TODO.md
+docs
