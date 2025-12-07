@@ -50,7 +50,6 @@ Thumbs.db
 data/**/*.json
 notebooks/**/*.json
 *.h5
-*.pkl
 *.pickle
 
 # Models
