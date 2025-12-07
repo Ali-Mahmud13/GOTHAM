@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Users, Bot, FileInput, Activity, AlertTriangle, BrainCircuit } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
@@ -14,10 +14,56 @@ import { RiskOverviewChart } from "@/components/RiskOverviewChart";
 import { RiskTrendChart } from "@/components/RiskTrendChart";
 import { cn } from "@/lib/utils";
 
+const API_URL = "http://localhost:8000";
+
+interface DashboardStats {
+  total_patients: number;
+  high_risk_count: number;
+  medium_risk_count: number;
+  low_risk_count: number;
+  total_visits: number;
+  assessments_this_week: number;
+  high_risk_patients: Array<{
+    id: number;
+    patient_identifier: string;
+    name: string;
+    risk_level: string;
+    clinical_notes: string | null;
+    updated_at: string | null;
+  }>;
+  recent_patients: Array<{
+    id: number;
+    patient_identifier: string;
+    name: string;
+    risk_level: string;
+    updated_at: string | null;
+  }>;
+}
+
 const Index = () => {
   const navigate = useNavigate();
   const [showChat, setShowChat] = useState(false);
   const [showReport, setShowReport] = useState(false);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchDashboardStats();
+  }, []);
+
+  const fetchDashboardStats = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/dashboard/stats`);
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch dashboard stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -49,29 +95,29 @@ const Index = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <MetricsCard
                 title="Total Active Patients"
-                value="124"
-                subtext="vs last month"
+                value={loading ? "..." : String(stats?.total_patients || 0)}
+                subtext="active in system"
                 icon={Users}
                 trend="up"
-                trendValue="12%"
+                trendValue=""
                 color="blue"
               />
               <MetricsCard
                 title="High-Risk Alerts"
-                value="12"
-                subtext="new cases"
+                value={loading ? "..." : String(stats?.high_risk_count || 0)}
+                subtext="need attention"
                 icon={AlertTriangle}
                 trend="down"
-                trendValue="4%"
+                trendValue=""
                 color="pink"
               />
               <MetricsCard
                 title="AI Assessments"
-                value="48"
+                value={loading ? "..." : String(stats?.assessments_this_week || 0)}
                 subtext="this week"
                 icon={BrainCircuit}
                 trend="up"
-                trendValue="24%"
+                trendValue=""
                 color="purple"
               />
             </div>
@@ -132,29 +178,38 @@ const Index = () => {
 
               <SummaryPanel title="High-Risk Cases" gradient="pink">
                 <div className="space-y-2">
-                  <HighRiskCase
-                    patientName="Jennifer Wilson"
-                    riskLevel="High"
-                    condition="Gestational Diabetes"
-                  />
-                  <HighRiskCase
-                    patientName="Amanda Brown"
-                    riskLevel="Medium"
-                    condition="Preeclampsia Risk"
-                  />
-                  <HighRiskCase
-                    patientName="Lisa Anderson"
-                    riskLevel="High"
-                    condition="Multiple Pregnancy"
-                  />
+                  {loading ? (
+                    <p className="text-sm text-gray-500">Loading...</p>
+                  ) : stats && stats.high_risk_patients.length > 0 ? (
+                    stats.high_risk_patients.slice(0, 3).map((patient) => (
+                      <HighRiskCase
+                        key={patient.id}
+                        patientName={patient.name}
+                        riskLevel="High"
+                        condition={patient.clinical_notes?.substring(0, 50) || "Requires attention"}
+                      />
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500">No high-risk cases</p>
+                  )}
                 </div>
               </SummaryPanel>
 
               <SummaryPanel title="Recent Patients" gradient="neutral">
                 <div className="space-y-2">
-                  <RecentPatient name="Rachel Green" lastVisit="2 days ago" />
-                  <RecentPatient name="Monica Geller" lastVisit="5 days ago" />
-                  <RecentPatient name="Phoebe Buffay" lastVisit="1 week ago" />
+                  {loading ? (
+                    <p className="text-sm text-gray-500">Loading...</p>
+                  ) : stats && stats.recent_patients.length > 0 ? (
+                    stats.recent_patients.slice(0, 3).map((patient) => (
+                      <RecentPatient
+                        key={patient.id}
+                        name={patient.name}
+                        lastVisit={patient.updated_at ? new Date(patient.updated_at).toLocaleDateString() : "Unknown"}
+                      />
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500">No recent patients</p>
+                  )}
                 </div>
               </SummaryPanel>
             </div>

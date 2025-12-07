@@ -10,9 +10,12 @@ interface PatientProfile {
   name: string;
   age: number;
   contact_number: string;
-  doctor_notes: string | null;
-  ai_report: string | null;
+  clinical_notes: string | null;
   risk_level: 'high' | 'medium' | 'low';
+  number_of_pregnancies: number | null;
+  bmi_category: number | null;
+  family_history: boolean | null;
+  pcos: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,7 +36,7 @@ const PatientsPage = () => {
   const fetchPatients = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_URL}/api/patient-profiles/`);
+      const response = await fetch(`${API_URL}/api/patients/`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch patients');
@@ -73,26 +76,24 @@ const PatientsPage = () => {
         throw new Error(errorData.detail || 'Failed to create patient record');
       }
 
-      // Then, create the patient profile
-      const profileResponse = await fetch(`${API_URL}/api/patient-profiles/`, {
-        method: 'POST',
+      //Merged patient creation - update patient with profile data
+      const updateResponse = await fetch(`${API_URL}/api/patients/${newPatient.id}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          patient_identifier: newPatient.id,
           name: newPatient.name,
           age: parseInt(newPatient.age),
           contact_number: newPatient.phone,
-          doctor_notes: null,
-          ai_report: null,
+          clinical_notes: null,
           risk_level: 'low',
         }),
       });
 
-      if (!profileResponse.ok) {
-        const errorData = await profileResponse.json();
-        throw new Error(errorData.detail || 'Failed to create patient profile');
+      if (!updateResponse.ok) {
+        const errorData = await updateResponse.json();
+        throw new Error(errorData.detail || 'Failed to update patient profile');
       }
 
       await fetchPatients(); // Refresh the list

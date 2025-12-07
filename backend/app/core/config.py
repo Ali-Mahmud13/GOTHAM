@@ -38,3 +38,8 @@ def setup_logging():
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    
+    # Reduce verbose logging to prevent terminal overflow
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("inngest").setLevel(logging.WARNING)
