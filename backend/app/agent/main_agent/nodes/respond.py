@@ -37,7 +37,7 @@ async def respond_node(state: AgentState) -> AgentState:
         
         maternal_report = state.get("maternal_report", "") or "Not assessed"
         fetal_report = state.get("fetal_report", "") or "Not assessed"
-        rag_context = state.get("rag_context", "") or "No additional guidance available"
+        rag_context = state.get("rag_context", "") or "No Docuemnts available"
         patient_data = state.get("patient_data", {})
         
         patient_data_str = "\n".join([f"{k}: {v}" for k, v in patient_data.items()]) if patient_data else "Not available"

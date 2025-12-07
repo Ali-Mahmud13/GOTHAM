@@ -16,7 +16,7 @@ async def should_retrieve_node(state: AgentState) -> AgentState:
     user_message = state["messages"][-1].content
     
     logger.info("="*60)
-    logger.info("SHOULD RETRIEVE - Checking if new retrieval needed")
+    logger.info("SHOULD LOAD PATIENT - Checking if patient data needs loading")
     logger.info("="*60)
     logger.info(f"User message: '{user_message}'")
     
@@ -25,36 +25,27 @@ async def should_retrieve_node(state: AgentState) -> AgentState:
         for msg in state["messages"][:-1]
     ])
     
+    current_patient_id = state.get("current_patient_id", "None")
     has_patient_data = "yes" if state.get("patient_data") else "no"
-    has_maternal_report = "yes" if state.get("maternal_report") else "no"
-    has_fetal_report = "yes" if state.get("fetal_report") else "no"
-    has_rag_context = "yes" if state.get("rag_context") else "no"
     
-    # Prepare summaries
+    # Prepare patient data summary
     patient_data_summary = ""
     if state.get("patient_data"):
         patient_data = state["patient_data"]
-        patient_data_summary = f"Patient ID: {patient_data.get('Patient_ID', 'N/A')}, Age: {patient_data.get('Age', 'N/A')}, BMI: {patient_data.get('BMI', 'N/A')}"
+        patient_data_summary = f"Patient ID: {patient_data.get('Patient_ID', 'N/A')}, Name: {patient_data.get('Name', 'N/A')}, Age: {patient_data.get('Age', 'N/A')}"
     
-    rag_context_preview = ""
-    if state.get("rag_context"):
-        rag_context_preview = state["rag_context"][:500] + "..." if len(state["rag_context"]) > 500 else state["rag_context"]
-    
-    logger.info(f"Available data:")
+    logger.info(f"Current state:")
+    logger.info(f"  - current_patient_id: {current_patient_id}")
     logger.info(f"  - has_patient_data: {has_patient_data}")
-    logger.info(f"  - has_maternal_report: {has_maternal_report}")
-    logger.info(f"  - has_fetal_report: {has_fetal_report}")
-    logger.info(f"  - has_rag_context: {has_rag_context}")
+    if patient_data_summary:
+        logger.info(f"  - patient_data_summary: {patient_data_summary}")
     
     prompt = SHOULD_RETRIEVE_PROMPT.format(
         user_message=user_message,
         conversation_history=conversation_history,
+        current_patient_id=current_patient_id,
         has_patient_data=has_patient_data,
-        has_maternal_report=has_maternal_report,
-        has_fetal_report=has_fetal_report,
-        has_rag_context=has_rag_context,
-        patient_data_summary=patient_data_summary,
-        rag_context_preview=rag_context_preview
+        patient_data_summary=patient_data_summary
     )
     
     response = await llm.ainvoke([HumanMessage(content=prompt)])
@@ -62,13 +53,36 @@ async def should_retrieve_node(state: AgentState) -> AgentState:
     
     logger.info(f"LLM response: '{response.content}'")
     
-    # Validate
-    if decision not in ["retrieve", "not_retrieve"]:
-        logger.warning(f"Invalid response '{decision}', defaulting to 'not_retrieve'")
-        decision = "not_retrieve"
+    # Validate and normalize the decision
+    valid_decisions = ["load", "not_load"]
     
-    state["should_retrieve_decision"] = decision
+    # Try to normalize common variations
+    decision_lower = decision.lower()
+    if "load" in decision_lower and "not" not in decision_lower:
+        decision = "load"
+    elif "not_load" in decision_lower or "not load" in decision_lower or "dont_load" in decision_lower:
+        decision = "not_load"
+    elif "no" in decision_lower or "skip" in decision_lower:
+        decision = "not_load"
+    elif "yes" in decision_lower or "do" in decision_lower:
+        decision = "load"
+    
+    # Final validation
+    if decision not in valid_decisions:
+        logger.warning(f"Invalid response '{decision}', analyzing message for patient reference")
+        # Simple heuristic: if message contains patient ID pattern, default to load
+        import re
+        if re.search(r'P\d{3}', user_message) or "patient" in user_message.lower():
+            decision = "load"
+        else:
+            decision = "not_load"
+    
+    # Store decision
+    state["should_load_patient"] = decision
+    state["needs_patient_data"] = (decision == "load")
+    
     logger.info(f"Decision: {decision}")
+    logger.info(f"Needs patient data: {state['needs_patient_data']}")
     logger.info("="*60 + "\n")
     
     return state

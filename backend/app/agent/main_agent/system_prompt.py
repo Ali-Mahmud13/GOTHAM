@@ -315,7 +315,7 @@ Instructions:
 
 Return ONLY the patient identifier (name or ID)."""
 
-GENERATE_KEYWORDS_PROMPT = """Generate search keywords for medical literature retrieval based on the user's question and health assessment reports.
+GGENERATE_KEYWORDS_PROMPT = """Generate simple, direct search keywords/phrases for finding medical management information.
 
 USER QUESTION:
 {user_message}
@@ -326,18 +326,35 @@ MATERNAL HEALTH REPORT:
 FETAL HEALTH REPORT:
 {fetal_report}
 
-Instructions:
-- Extract key medical concepts from the user's question
-- Extract key risk factors and conditions from the reports
-- Generate 5-10 targeted keywords/phrases for medical literature search
-- Focus on: conditions, symptoms, medications, treatments, management protocols, guidelines
-- Format as comma-separated keywords
+INSTRUCTION:
+Look at the health reports and user question. Identify the main health issues mentioned. For each issue, create simple keywords about how to manage it during pregnancy.
 
-Example output: gestational diabetes management, insulin therapy pregnancy, blood glucose monitoring, dietary recommendations GDM, postpartum glucose screening
+GENERATE KEYWORDS LIKE (BASED ON THE REPORTS) EXAMPLES:
+- "management for gestational diabetes"
+- "lowering blood pressure in pregnancy" 
+- "treating anemia in pregnant women"
+- "managing morning sickness"
+- "fetal growth monitoring"
+
+RULES:
+1. Keep it SIMPLE and DIRECT
+2. Focus on MANAGEMENT/TREATMENT
+3. Make 5-8 phrases.
+
+
+EXAMPLES:
+If report shows: gestational diabetes, hypertension
+Good keywords: "managing diabetes in pregnancy, lowering blood pressure when pregnant, diet for gestational diabetes, safe blood pressure medication pregnancy"
+
+If report shows: anemia, nausea
+Good keywords: "treating anemia in pregnancy, managing morning sickness, iron supplements for pregnant women, reducing nausea during pregnancy"
+
+If report shows: fetal growth issues
+Good keywords: "managing fetal growth restriction, monitoring baby growth in womb, when to deliver small baby"
 
 Generate keywords:"""
 
-SHOULD_RETRIEVE_PROMPT = """Determine if new RAG retrieval is needed to answer the user's question, or if existing data is sufficient.
+SHOULD_RETRIEVE_PROMPT = """Determine if patient data needs to be loaded for the current user request.
 
 USER QUESTION:
 {user_message}
@@ -345,28 +362,61 @@ USER QUESTION:
 CONVERSATION HISTORY:
 {conversation_history}
 
-AVAILABLE DATA:
+CURRENT STATE:
+- Current Patient ID in State: {current_patient_id}
 - Has Patient Data: {has_patient_data}
-- Has Maternal Report: {has_maternal_report}
-- Has Fetal Report: {has_fetal_report}
-- Has RAG Context: {has_rag_context}
 
 Patient Data Summary (if available):
 {patient_data_summary}
 
-Existing RAG Context (if available):
-{rag_context_preview}
+EXTRACTION RULES:
+1. Extract patient identifier from the message:
+   - Patient IDs: P001, P002, P003, etc.
+   - Patient names: Sarah, Mrs. Johnson, etc.
+   - Pronouns: "she", "he", "the patient", "her", "him" (check history for reference)
+   - Implicit references: "check the patient", "assess", "update" (if patient context exists)
 
-DECISION RULES:
-- Can the question be answered from patient data? → not_retrieve
-- Can the question be answered from existing reports? → not_retrieve
-- Can the question be answered from conversation history? → not_retrieve
-- Can the question be answered from existing RAG context? → not_retrieve
-- Does the question ask something NEW requiring medical literature? → retrieve
+2. If NO patient identifier can be found → not_load
 
-Respond with ONLY: retrieve or not_retrieve"""
+DECISION LOGIC:
 
-RAG_RESPONSE_PROMPT = """Provide a comprehensive answer to the user's question based on retrieved medical literature.
+LOAD PATIENT DATA if:
+- User mentions a SPECIFIC patient ID (P001, P004, etc.) AND that patient is NOT the current patient in state
+- User mentions a patient name AND no matching patient data exists
+- User asks for patient-specific information (name, age, test results, history)
+- User requests an ASSESSMENT of a specific patient
+- Current patient context exists but patient data is NOT loaded
+
+DO NOT LOAD if:
+- NO patient identifier is mentioned in the message
+- The mentioned patient is ALREADY the current patient in state AND data is loaded
+- General medical questions without patient reference
+- Greetings, thanks, or procedural messages
+- Question can be answered from existing conversation history without new data
+
+EXAMPLES:
+- "What is patient P004's name?" → load (needs P004's data)
+- "How is Sarah doing?" → load (needs Sarah's data)
+- "Update on P001" (and P001 is NOT current patient) → load
+- "Assess P002" → load
+- "What were her latest test results?" (if "her" refers to current patient with data) → not_load
+- "What is preeclampsia?" → not_load (no patient reference)
+- "Hello" → not_load
+
+SPECIAL CASES:
+- If user says "same patient" or continues conversation about current patient → not_load
+- Brief references like "check her" when current patient exists → not_load
+- "Switch to P003" or "What about P002?" → load
+
+ANALYSIS STEPS:
+1. Extract patient identifier from message
+2. Check if identifier matches current patient in state
+3. Check if patient data is already loaded for that identifier
+4. Decide: load (needs new data) or not_load (data exists or not needed)
+
+Respond with ONLY: load or not_load"""
+
+RAG_RESPONSE_PROMPT = """Provide a medically accurate response based ONLY on the available context. Do not use any external knowledge.
 
 RETRIEVED MEDICAL CONTEXT:
 {rag_context}
@@ -378,42 +428,117 @@ Fetal Report: {fetal_report}
 USER QUESTION:
 {user_question}
 
-Instructions:
-- Provide accurate, evidence-based information
-- Use the retrieved context as your primary source
-- If maternal/fetal reports are relevant to the question, incorporate them
-- Be clear and accessible in your explanation
-- Include relevant warnings or precautions
-- Use markdown formatting for clarity
-- End with a reminder to consult healthcare providers for personal medical decisions"""
+STRICT RESPONSE RULES:
+1. **STRICT CONTEXT-ONLY POLICY**: Use ONLY information from the provided context above
+2. **NO EXTRAPOLATION**: Do not infer, assume, or add information not explicitly in context
+3. **ACCURACY MANDATE**: If information is not in context, state this clearly
+4. **NO GENERALIZATION**: Do not provide general medical advice not supported by context
+5. **CITATION REQUIREMENT**: Reference specific information from context when possible
 
-ASSESSMENT_RESPONSE_PROMPT = """Generate a comprehensive health assessment report and management plan.
+RESPONSE STRUCTURE:
+1. **Direct Answer**: Based strictly on retrieved context
+2. **Limitations**: Clearly state if information is incomplete or missing
+3. **No Speculation**: Do not fill gaps with general knowledge
 
-MATERNAL HEALTH REPORT:
-{maternal_report}
+SPECIAL CASES:
+- If user asks about a topic NOT covered in context → "The available medical literature does not contain specific information about [topic]. Please consult clinical guidelines or a healthcare provider."
+- If context is incomplete for the question → "Based on the available information, [partial answer]. However, complete information on [missing aspect] is not provided in the retrieved context."
+- If no relevant context at all → "No specific medical information is available in the retrieved context to address this question. Please refer to current clinical guidelines."
 
-FETAL HEALTH REPORT:
-{fetal_report}
+MEDICAL PRECAUTIONS:
+- Always emphasize that this is informational support only
+- Recommend consultation with healthcare providers
+- Note that medical management requires individual assessment
 
-RETRIEVED MEDICAL GUIDANCE:
-{rag_context}
+Generate response:"""
 
-PATIENT DATA:
-{patient_data}
+PREDICTION_DECISION_PROMPT = """Analyze the user's message and current state to determine what action is needed.
 
-Instructions:
-- Provide a structured health assessment based on available reports
-- If only maternal report: focus on maternal health
-- If only fetal report: focus on fetal health
-- If both: provide comprehensive assessment of both
-- Incorporate medical guidance from retrieved literature into management recommendations
-- Use markdown formatting with clear sections:
-  * ## Health Assessment Summary
-  * ## Risk Factors Identified
-  * ## Management Recommendations
-  * ## Follow-up Care
-- Be professional, compassionate, and evidence-based
-- End with reminder to consult healthcare providers"""
+CURRENT STATE CONTEXT:
+- Current Patient ID: {current_patient_id}
+- Has Maternal Report: {has_maternal_report}
+- Has Fetal Report: {has_fetal_report}
+- Has Patient Data: {has_patient_data}
+- Has RAG Context: {has_rag_context}
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT USER MESSAGE:
+{user_message}
+
+CLASSIFICATION RULES:
+
+1. REASSESSMENT DETECTION:
+   If user explicitly requests reassessment using words like "recheck", "reassess", "again", "test again", "redo", "update assessment":
+   - ALWAYS classify as the requested assessment type (maternal/fetal/both) even if reports already exist
+   - This forces a new assessment to be run
+
+2. NEW PATIENT DETECTION:
+   If a different patient ID/name is mentioned than the current patient:
+   - Clear context and assess as new patient
+
+3. ASSESSMENT CATEGORIES:
+   - "maternal": Maternal health RISK ASSESSMENT needed (gestational diabetes, pregnancy complications)
+     * ONLY classify as maternal if user asks for ASSESSMENT/TEST/CHECK of MATERNAL health
+     * Examples: "assess P001 for gestational diabetes", "test for anemia", "check maternal health"
+     * NOT: "what is gestational diabetes?" (that's rag)
+   
+   - "fetal": Fetal health RISK ASSESSMENT needed (baby's health prediction)
+     * ONLY classify as fetal if user asks for ASSESSMENT/TEST/CHECK of FETAL health
+     * Examples: "assess fetal health", "check baby's wellbeing"
+   
+   - "both": Both maternal AND fetal assessments needed
+     * Only if user explicitly requests both assessments
+     * Examples: "full assessment", "complete checkup"
+
+4. KNOWLEDGE QUERY:
+   - "rag": Medical/clinical QUESTIONS requiring literature retrieval:
+     * Medical information questions (what, how, when, why)
+     * "what is gestational diabetes?" → rag
+     * "how is anemia treated in pregnancy?" → rag  
+     * "symptoms of preeclampsia" → rag
+     * "medications safe during pregnancy" → rag
+     * "clinical guidelines for GD management" → rag
+     * BUT: If existing RAG context already answers this question → respond
+
+5. FOLLOWUP/CLARIFICATION:
+   - "respond": User is asking about existing data, following up, or casual conversation:
+     * Questions about existing patient data/reports
+     * Follow-up questions on previous assessments
+     * Clarification requests
+     * Greetings, thanks, small talk
+     * Medical questions already answered in existing RAG context
+
+6. RAG CONTEXT CHECK:
+   - Before classifying as "rag", check if question can be answered from existing RAG context
+   - If user asks about a topic already covered in existing RAG context → respond
+   - Only use "rag" if question requires NEW medical literature retrieval
+
+DECISION FLOWCHART:
+1. Does user request REASSESSMENT? → maternal/fetal/both
+2. Does user request NEW PATIENT assessment? → maternal/fetal/both
+3. Is this a MEDICAL KNOWLEDGE question?
+   - Yes: Check if existing RAG context answers it
+     - If yes → respond
+     - If no → rag
+4. Is this a PATIENT ASSESSMENT request?
+   - Maternal assessment request → maternal
+   - Fetal assessment request → fetal  
+   - Both assessment request → both
+5. Otherwise → respond
+
+SPECIFIC EXAMPLES:
+- "what is gestational diabetes?" → rag (medical knowledge)
+- "assess P001 for gestational diabetes" → maternal (assessment request)
+- "what are the symptoms of anemia?" → rag (medical knowledge)  
+- "check patient for anemia" → maternal (assessment request)
+- "explain my last report" → respond (follow-up on existing)
+- "hello" → respond (casual)
+- "what was the blood pressure reading?" → respond (data inquiry)
+- "how to manage hypertension in pregnancy?" → rag (medical knowledge)
+
+Respond with ONLY one word: maternal, fetal, both, rag, or respond"""
 
 RESPOND_PROMPT = """Generate an appropriate response based on the available context.
 
