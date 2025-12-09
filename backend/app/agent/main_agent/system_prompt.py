@@ -33,33 +33,44 @@ SECURITY & ETHICAL MANDATES:
 
 Remember: You are GOTHAM—a decision support augmentation tool. All clinical decisions remain the responsibility of the treating healthcare provider."""
 
-COMPLETENESS_CHECK_PROMPT = """You are checking if a user's message appears to be CUT OFF or UNFINISHED.
+COMPLETENESS_CHECK_PROMPT = """You are checking if a user's message appears to be CUT OFF or TECHNICALLY UNFINISHED.
 
 CURRENT USER MESSAGE:
 {user_message}
 
-A message is INCOMPLETE if:
-- It literally ends mid-sentence (like "I want to" or "Check patient")
-- Has trailing conjunctions without completion (like "and", "but", "however" at the end)
-- Has trailing ellipsis "..." indicating more to come
-- Is clearly truncated by character limit
-- Is a single word fragment that doesn't make sense alone
+ONLY CHECK FOR THESE TECHNICAL CUT-OFF SIGNS:
+1. **Mid-sentence stop**: Ends with a conjunction (and, but, or, however)
+2. **Trailing fragment**: Ends with an article or preposition (the, a, of, for, to)
+3. **Ellipsis**: Ends with "..." suggesting more text was intended
+4. **Character limit**: Feels abruptly truncated (last word cut off)
+5. **Unfinished thought**: Clearly incomplete syntax (missing object, predicate)
 
-A message is COMPLETE if:
-- It contains a complete question or request
-- It's a clear phrase that can be understood
-- It's any patient reference (ID, name)
-- It's any greeting or conversational phrase
-- It has clear intent that can be acted upon
-- It's a medical term or condition name being asked about
+DO NOT CONSIDER:
+- Whether the message makes sense
+- Whether it's a complete thought logically
+- Whether abbreviations are used
+- Whether grammar is perfect
+- Whether typos are present
+- Whether it's brief or concise
 
-SPECIAL CASES (ALWAYS COMPLETE):
-- Medical questions: "what is X", "how to Y", "symptoms of Z"
-- Patient assessments: "assess P001", "check patient"
-- Patient references: "P001", "Sarah"
-- Greetings: "hello", "hi", "thank you"
+EXAMPLES OF INCOMPLETE (mark "no"):
+- "I want to assess the" (ends with article)
+- "Check patient P001 for" (ends with preposition)
+- "What about gestational diabetes and" (ends with conjunction)
+- "The results show that..." (ends with ellipsis)
+- "How to manage high blood pressu" (word cut off)
 
-DEFAULT BEHAVIOR: When in doubt, mark as COMPLETE
+EXAMPLES OF COMPLETE (mark "yes"):
+- "how to lower bp" (makes no medical sense but not cut off)
+- "assess P001" (brief but complete)
+- "what is gd" (abbreviation but complete)
+- "her blood pressure" (fragment but not cut off)
+- "bp management" (makes little sense but not cut off)
+
+DECISION RULE:
+- ONLY check if the message appears TECHNICALLY INTERRUPTED
+- Ignore all semantic/logical/content concerns
+- If unsure whether it's cut off, default to "yes" (complete)
 
 Respond with ONLY: yes or no"""
 
@@ -137,10 +148,7 @@ Based on both the message content AND conversation history, is this in scope for
 
 Respond with ONLY: yes or no"""
 
-CLARITY_CHECK_PROMPT = """You are checking if a user's message is CLEAR for GOTHAM (Guided Obstetric Triage for Antenatal Monitoring).
-
-CONTEXT:
-GOTHAM is used by antenatal healthcare providers for patient assessments, clinical decision support, and antenatal care information.
+CLARITY_CHECK_PROMPT = """You are checking if a user's message is CLEAR for an antenatal care system used by healthcare providers.
 
 CONVERSATION HISTORY:
 {conversation_history}
@@ -148,45 +156,44 @@ CONVERSATION HISTORY:
 CURRENT USER MESSAGE:
 {user_message}
 
-A message is CLEAR if:
-- Intent is understandable in clinical context
-- Request makes sense given conversation history
-- You can determine appropriate action or response
-- Patient identifier is clear (name, ID like P001, P002, etc.) OR can be inferred from history
-- The question or command is logically complete
+DECISION PROCESS (Follow these steps in order):
 
-A message is UNCLEAR if:
-- Intent is ambiguous even after considering conversation history
-- Contains contradictory or conflicting information
-- Too vague to determine appropriate clinical response
-- Missing critical information that cannot be reasonably inferred
-- Uses ambiguous abbreviations without medical context
-- Refers to unknown entities without previous mention
+STEP 1: INDEPENDENT CLARITY CHECK
+- Read the current user message alone
+- Does it make sense as a standalone medical/clinical question or statement?
+- If YES → CLEAR (stop here, respond "yes")
+- If NO or UNCERTAIN → proceed to STEP 2
 
-SPECIAL CASES (CLEAR - mark "yes"):
-- Patient IDs alone: "P001", "P004", "P002" (assume assessment intent)
-- Patient names: "Sarah", "Mrs. Jones" (assume assessment intent)
-- Clear commands: "assess P001", "check patient Sarah", "run assessment on P003"
-- Follow-ups with context: "what about P002?" (after discussing other patients)
-- "her", "him", "that patient" when antecedent exists in history
-- Medical questions with clear scope: "symptoms of preeclampsia", "gestational diabetes screening"
-- Brief but complete: "assess", "check", "update" when patient context exists
-- Clarification questions: "what do you mean?", "can you elaborate?"
-- Polite conversation: "thank you", "hello", "good morning"
+STEP 2: CONTEXTUAL CLARITY CHECK  
+- Review the conversation history
+- Does the user message make sense when combined with the history?
+- Can pronouns, references, or follow-ups be resolved from context?
+- If YES → CLEAR (respond "yes")
+- If NO → proceed to STEP 3
 
-HISTORY CONSIDERATION:
-- Use history to resolve pronouns and references
-- If previous message establishes patient context, current message may be clear
-- Ongoing assessments provide implicit context for follow-ups
-- History can make brief messages clear ("Next?" after assessment report)
+STEP 3: FINAL DECISION
+- Only mark as UNCLEAR if:
+  1. Message doesn't make sense alone
+  2. AND doesn't make sense with conversation history
+  3. AND cannot be understood as a medical question
+- Otherwise → CLEAR
 
-DEFAULT BEHAVIOR:
-- When in doubt, mark as CLEAR
-- Assume clinical professional users
-- Allow for terse/concise clinical communication
-- Only mark UNCLEAR if truly confusing or contradictory
+CLINICAL COMMUNICATION PATTERNS (Usually CLEAR):
+- Medical questions (symptoms, treatments, conditions)
+- Common abbreviations (BP, GD, BMI, OGTT)
+- Patient assessment requests
+- Follow-up questions with context
+- Brief clinical language
 
-Based on both message content AND conversation history, is this message CLEAR?
+AMBIGUITY THRESHOLDS:
+- Minor typos or missing words → STILL CLEAR
+- Medical abbreviations without explanation → STILL CLEAR
+- Pronouns with clear antecedents → STILL CLEAR
+- Only mark UNCLEAR for genuine confusion
+
+DEFAULT RULE: When in doubt between CLEAR and UNCLEAR, choose CLEAR.
+
+Final decision: is the message CLEAR given the context?
 
 Respond with ONLY: yes or no"""
 
@@ -207,10 +214,10 @@ INSTRUCTION:
 Generate ONE clarification question or statement that addresses ALL identified issues. Choose the most appropriate response type based on the issues:
 
 1. FOR INCOMPLETE MESSAGES:
-   - Ask specifically for the missing information needed for antenatal assessment
-   - Be precise about what's needed (patient ID, specific symptoms, timeframes)
-   - Example: "Could you please specify which patient you'd like me to assess? I need a patient ID or name to proceed."
-
+   - Ask the user if the message got cut off and what thier intent was. 
+   - Ask specifically for the missing information or urge the user to complete their thought.
+   - Be precise about what's needed
+   
 2. FOR OUT OF SCOPE REQUESTS:
    - Politely explain that GOTHAM specializes in antenatal/obstetric care only
    - Briefly restate what you can help with (patient assessments, pregnancy-related questions)
@@ -270,17 +277,14 @@ CLASSIFICATION RULES:
 
 3. ASSESSMENT CATEGORIES:
    - "maternal": Maternal health RISK ASSESSMENT needed (gestational diabetes, pregnancy complications)
-     * ONLY classify as maternal if user asks for ASSESSMENT/TEST/CHECK of MATERNAL health
-     * Examples: "assess P001 for gestational diabetes", "test for anemia", "check maternal health"
-     * NOT: "what is gestational diabetes?" (that's rag)
+     * Only classify if: maternal_report doesn't exist OR reassessment explicitly requested
    
    - "fetal": Fetal health RISK ASSESSMENT needed (baby's health prediction)
-     * ONLY classify as fetal if user asks for ASSESSMENT/TEST/CHECK of FETAL health
-     * Examples: "assess fetal health", "check baby's wellbeing"
+     * Only classify if: fetal_report doesn't exist OR reassessment explicitly requested
    
    - "both": Both maternal AND fetal assessments needed
-     * Only if user explicitly requests both assessments
-     * Examples: "full assessment", "complete checkup"
+     * Only classify if: neither report exists OR reassessment explicitly requested
+     * If one report exists and user asks for both, classify as the missing one
 
 4. KNOWLEDGE QUERY:
    - "rag": Medical/clinical QUESTIONS requiring literature retrieval:
@@ -294,39 +298,22 @@ CLASSIFICATION RULES:
 
 5. FOLLOWUP/CLARIFICATION:
    - "respond": User is asking about existing data, following up, or casual conversation:
-     * Questions about existing patient data/reports
-     * Follow-up questions on previous assessments
-     * Clarification requests
+     * Questions about existing patient data (e.g., "what was the HDL value?")
+     * Clarification requests (e.g., "explain further", "what does that mean?")
      * Greetings, thanks, small talk
-     * Medical questions already answered in existing RAG context
+     * References to previous responses
 
 6. RAG CONTEXT CHECK:
    - Before classifying as "rag", check if question can be answered from existing RAG context
    - If user asks about a topic already covered in existing RAG context → respond
    - Only use "rag" if question requires NEW medical literature retrieval
 
-DECISION FLOWCHART:
-1. Does user request REASSESSMENT? → maternal/fetal/both
-2. Does user request NEW PATIENT assessment? → maternal/fetal/both
-3. Is this a MEDICAL KNOWLEDGE question?
-   - Yes: Check if existing RAG context answers it
-     - If yes → respond
-     - If no → rag
-4. Is this a PATIENT ASSESSMENT request?
-   - Maternal assessment request → maternal
-   - Fetal assessment request → fetal  
-   - Both assessment request → both
-5. Otherwise → respond
-
-SPECIFIC EXAMPLES:
-- "what is gestational diabetes?" → rag (medical knowledge)
-- "assess P001 for gestational diabetes" → maternal (assessment request)
-- "what are the symptoms of anemia?" → rag (medical knowledge)  
-- "check patient for anemia" → maternal (assessment request)
-- "explain my last report" → respond (follow-up on existing)
-- "hello" → respond (casual)
-- "what was the blood pressure reading?" → respond (data inquiry)
-- "how to manage hypertension in pregnancy?" → rag (medical knowledge)
+IMPORTANT DISTINCTIONS:
+- "assess patient X for GD" → maternal (if no report) or respond (if report exists, unless reassessment requested)
+- "what are symptoms of GD?" → rag
+- "what was patient X's BMI?" → respond (data inquiry)
+- "explain the risk score" → respond (followup on existing report)
+- "recheck patient X" → maternal/fetal/both (reassessment)
 
 Respond with ONLY one word: maternal, fetal, both, rag, or respond"""
 
@@ -463,28 +450,30 @@ USER QUESTION:
 {user_question}
 
 STRICT RESPONSE RULES:
-1. **STRICT CONTEXT-ONLY POLICY**: Use ONLY information from the provided context above
-2. **NO EXTRAPOLATION**: Do not infer, assume, or add information not explicitly in context
-3. **ACCURACY MANDATE**: If information is not in context, state this clearly
-4. **NO GENERALIZATION**: Do not provide general medical advice not supported by context
-5. **CITATION REQUIREMENT**: Reference specific information from context when possible
+1. Use ONLY information from the provided context above
+2. Do not infer, assume, or add information not explicitly in context
+3. If information is not in context, state this clearly
+4. Do not provide general medical advice not supported by context
+5. Reference specific information from context when possible
 
-RESPONSE STRUCTURE:
-1. **Direct Answer**: Based strictly on retrieved context
-2. **Limitations**: Clearly state if information is incomplete or missing
-3. **No Speculation**: Do not fill gaps with general knowledge
+RESPONSE FORMAT REQUIREMENTS:
+- Do NOT use section headers like "Direct Answer", "Limitations", etc.
+- Write in natural paragraph format
+- Include citations from context when helpful
+- Be concise and clear
 
-SPECIAL CASES:
-- If user asks about a topic NOT covered in context → "The available medical literature does not contain specific information about [topic]. Please consult clinical guidelines or a healthcare provider."
-- If context is incomplete for the question → "Based on the available information, [partial answer]. However, complete information on [missing aspect] is not provided in the retrieved context."
-- If no relevant context at all → "No specific medical information is available in the retrieved context to address this question. Please refer to current clinical guidelines."
+RESPONSE CONTENT:
+1. Start with the direct answer based on retrieved context
+2. Include supporting details from the context
+3. State any limitations or missing information
+4. Emphasize the need for professional consultation
 
-MEDICAL PRECAUTIONS:
-- Always emphasize that this is informational support only
-- Recommend consultation with healthcare providers
-- Note that medical management requires individual assessment
+SPECIAL HANDLING:
+- If topic NOT covered in context → "No specific information about [topic] is available in the retrieved context."
+- If context incomplete → "The available information covers [covered aspects] but not [missing aspects]."
+- If no relevant context → "The retrieved context does not contain information to address this question."
 
-Generate response:"""
+Generate a natural, flowing response without structural headers:"""
 
 ASSESSMENT_RESPONSE_PROMPT = """Generate a health assessment report using ONLY the provided information.
 
