@@ -40,22 +40,22 @@ class PatientService:
                 
                 logger.info(f"Found patient: {patient.name} (ID: {patient.id})")
                 
-                # Fetch latest visit
+                # Fetch ALL visits (newest to oldest) for field-level aggregation
                 visit_statement = (
                     select(Visit)
                     .where(Visit.patient_id == patient.id)
                     .order_by(Visit.visit_date.desc())
                 )
-                latest_visit = session.exec(visit_statement).first()
+                all_visits = session.exec(visit_statement).all()
                 
-                if latest_visit:
-                    logger.info(f"Found latest visit: {latest_visit.visit_date}")
+                if all_visits:
+                    logger.info(f"Found {len(all_visits)} visits for patient (latest: {all_visits[0].visit_date})")
                 else:
                     logger.info("No visits found for patient")
                 
-                # Build response - this accesses all relationships
+                # Build response with field-level aggregation across all visits
                 try:
-                    patient_data = self._build_patient_response(patient, latest_visit, session)
+                    patient_data = self._build_patient_response(patient, all_visits, session)
                     logger.info(f"Successfully built patient response with {len(patient_data)} fields")
                 except Exception as build_error:
                     logger.error(f"Error building patient response: {str(build_error)}", exc_info=True)
@@ -124,17 +124,20 @@ class PatientService:
             logger.error(f"Error fetching visit history: {str(e)}", exc_info=True)
             return []
     
-    def _build_patient_response(self, patient: Patient, latest_visit: Optional[Visit], session: Session) -> Dict:
+    def _build_patient_response(self, patient: Patient, visits: List[Visit], session: Session) -> Dict:
         """
-        Build patient data response dictionary compatible with agent's expected format.
+        Build patient data response dictionary with field-level aggregation across all visits.
+        
+        For each assessment field, uses the latest non-null value across all visits.
+        This ensures complete data even when doctors enter partial information per visit.
         
         Args:
             patient: Patient model instance
-            latest_visit: Optional latest Visit instance
+            visits: List of Visit instances (ordered newest to oldest)
             session: Database session for querying assessments
             
         Returns:
-            Dictionary with patient data and latest assessments
+            Dictionary with patient data and aggregated assessment fields
         """
         response = {
             # Patient identifier
@@ -166,69 +169,161 @@ class PatientService:
             "hemoglobin": 12.0,
         }
         
-        # Add latest visit data if available
-        if latest_visit:
+        # Add visit metadata from latest visit if available
+        if visits:
+            latest_visit = visits[0]  # Already sorted newest first
             response["visit_date"] = latest_visit.visit_date.isoformat()
             response["visit_type"] = latest_visit.visit_type
             response["visit_notes"] = latest_visit.notes
             
-            # Fetch latest assessments for this visit
-            gdm = session.exec(
-                select(GDMAssessment).where(GDMAssessment.visit_id == latest_visit.id)
-            ).first()
+            # Aggregate assessments across all visits
+            merged_gdm = self._merge_gdm_assessments(visits, session)
+            merged_anemia = self._merge_anemia_assessments(visits, session)
+            merged_fetal = self._merge_fetal_assessments(visits, session)
             
-            anemia = session.exec(
-                select(AnemiaAssessment).where(AnemiaAssessment.visit_id == latest_visit.id)
-            ).first()
+            # Add merged GDM data
+            if merged_gdm:
+                response.update(merged_gdm)
             
-            fhp = session.exec(
-                select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == latest_visit.id)
-            ).first()
+            # Add merged Anemia data
+            if merged_anemia:
+                response.update(merged_anemia)
             
-            # Add GDM data if available (using ML model field names)
-            if gdm:
-                response.update({
-                    # For display/logging
-                    "glucose_level": gdm.glucose_level,
-                    "gestation_weeks": gdm.gestation_weeks,
-                    "gdm_risk_level": gdm.risk_level,
-                    "gdm_confidence": gdm.confidence,
-                    # For ML models (using contract field names)
-                    "sys_bp": gdm.blood_pressure_systolic,
-                    "dia_bp": gdm.blood_pressure_diastolic,
-                    "bmi": gdm.bmi,
-                    "ogtt": gdm.ogtt,
-                })
-            
-            # Add Anemia data if available (using ML model field names)
-            if anemia:
-                response.update({
-                    # For display/logging
-                    "anemia_diagnosis": anemia.diagnosis,
-                    "anemia_confidence": anemia.confidence,
-                    # For ML models (using contract field names - uppercase)
-                    "WBC": anemia.wbc,
-                    "RBC": anemia.rbc,
-                    "HGB": anemia.hgb,
-                    "HCT": anemia.hct,
-                    "MCV": anemia.mcv,
-                    "MCH": anemia.mch,
-                    "MCHC": anemia.mchc,
-                    "PLT": anemia.plt,
-                    # Also lowercase for backward compatibility
-                    "hemoglobin": anemia.hgb,
-                })
-            
-            # Add Fetal Health data if available
-            if fhp:
-                response.update({
-                    "fetal_heart_rate_baseline": fhp.baseline_value,
-                    "fetal_accelerations": fhp.accelerations,
-                    "fetal_status": fhp.status,
-                    "fetal_confidence": fhp.confidence,
-                })
+            # Add merged Fetal Health data
+            if merged_fetal:
+                response.update(merged_fetal)
         
         return response
+    
+    def _merge_gdm_assessments(self, visits: List[Visit], session: Session) -> Dict:
+        """
+        Merge GDM assessment data across all visits, taking latest non-null value per field.
+        
+        Args:
+            visits: List of visits (newest to oldest)
+            session: Database session
+            
+        Returns:
+            Dictionary with merged GDM fields
+        """
+        merged = {}
+        
+        for visit in visits:
+            gdm = session.exec(
+                select(GDMAssessment).where(GDMAssessment.visit_id == visit.id)
+            ).first()
+            
+            if not gdm:
+                continue
+            
+            # For each field, use first non-null value encountered (newest first)
+            if "glucose_level" not in merged and gdm.glucose_level is not None:
+                merged["glucose_level"] = gdm.glucose_level
+            if "gestation_weeks" not in merged and gdm.gestation_weeks is not None:
+                merged["gestation_weeks"] = gdm.gestation_weeks
+            if "gdm_risk_level" not in merged and gdm.risk_level is not None:
+                merged["gdm_risk_level"] = gdm.risk_level
+            if "gdm_confidence" not in merged and gdm.confidence is not None:
+                merged["gdm_confidence"] = gdm.confidence
+            if "sys_bp" not in merged and gdm.blood_pressure_systolic is not None:
+                merged["sys_bp"] = gdm.blood_pressure_systolic
+            if "dia_bp" not in merged and gdm.blood_pressure_diastolic is not None:
+                merged["dia_bp"] = gdm.blood_pressure_diastolic
+            if "bmi" not in merged and gdm.bmi is not None:
+                merged["bmi"] = gdm.bmi
+            if "ogtt" not in merged and gdm.ogtt is not None:
+                merged["ogtt"] = gdm.ogtt
+            if "hdl" not in merged and gdm.hdl is not None:
+                merged["hdl"] = gdm.hdl
+            if "insulin_level" not in merged and gdm.insulin_level is not None:
+                merged["insulin_level"] = gdm.insulin_level
+            if "sedentary_lifestyle" not in merged and gdm.sedentary_lifestyle is not None:
+                merged["sedentary_lifestyle"] = gdm.sedentary_lifestyle
+        
+        return merged
+    
+    def _merge_anemia_assessments(self, visits: List[Visit], session: Session) -> Dict:
+        """
+        Merge Anemia/CBC assessment data across all visits, taking latest non-null value per field.
+        
+        Args:
+            visits: List of visits (newest to oldest)
+            session: Database session
+            
+        Returns:
+            Dictionary with merged Anemia fields
+        """
+        merged = {}
+        
+        for visit in visits:
+            anemia = session.exec(
+                select(AnemiaAssessment).where(AnemiaAssessment.visit_id == visit.id)
+            ).first()
+            
+            if not anemia:
+                continue
+            
+            # For each field, use first non-null value encountered
+            if "anemia_diagnosis" not in merged and anemia.diagnosis is not None:
+                merged["anemia_diagnosis"] = anemia.diagnosis
+            if "anemia_confidence" not in merged and anemia.confidence is not None:
+                merged["anemia_confidence"] = anemia.confidence
+            
+            # CBC parameters (uppercase for ML models)
+            if "WBC" not in merged and anemia.wbc is not None:
+                merged["WBC"] = anemia.wbc
+            if "RBC" not in merged and anemia.rbc is not None:
+                merged["RBC"] = anemia.rbc
+            if "HGB" not in merged and anemia.hgb is not None:
+                merged["HGB"] = anemia.hgb
+                merged["hemoglobin"] = anemia.hgb  # Also add lowercase for compatibility
+            if "HCT" not in merged and anemia.hct is not None:
+                merged["HCT"] = anemia.hct
+            if "MCV" not in merged and anemia.mcv is not None:
+                merged["MCV"] = anemia.mcv
+            if "MCH" not in merged and anemia.mch is not None:
+                merged["MCH"] = anemia.mch
+            if "MCHC" not in merged and anemia.mchc is not None:
+                merged["MCHC"] = anemia.mchc
+            if "PLT" not in merged and anemia.plt is not None:
+                merged["PLT"] = anemia.plt
+        
+        return merged
+    
+    def _merge_fetal_assessments(self, visits: List[Visit], session: Session) -> Dict:
+        """
+        Merge Fetal Health assessment data across all visits, taking latest non-null value per field.
+        
+        Args:
+            visits: List of visits (newest to oldest)
+            session: Database session
+            
+        Returns:
+            Dictionary with merged Fetal Health fields
+        """
+        merged = {}
+        
+        for visit in visits:
+            fhp = session.exec(
+                select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == visit.id)
+            ).first()
+            
+            if not fhp:
+                continue
+            
+            # For each field, use first non-null value encountered
+            if "fetal_heart_rate_baseline" not in merged and fhp.baseline_value is not None:
+                merged["fetal_heart_rate_baseline"] = fhp.baseline_value
+            if "fetal_accelerations" not in merged and fhp.accelerations is not None:
+                merged["fetal_accelerations"] = fhp.accelerations
+            if "fetal_movement" not in merged and fhp.fetal_movement is not None:
+                merged["fetal_movement"] = fhp.fetal_movement
+            if "fetal_status" not in merged and fhp.status is not None:
+                merged["fetal_status"] = fhp.status
+            if "fetal_confidence" not in merged and fhp.confidence is not None:
+                merged["fetal_confidence"] = fhp.confidence
+        
+        return merged
     
     def _build_visit_dict(self, visit: Visit, session: Session) -> Dict:
         """
