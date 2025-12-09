@@ -3,11 +3,12 @@ import { useState, useEffect } from "react";
 import {
   ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle,
   Activity, TrendingUp, Clock, Heart, Edit, Share2, Download, ChevronRight,
-  Stethoscope, Clipboard, BarChart3, Zap, CheckCircle2, XCircle, MinusCircle
+  Stethoscope, Clipboard, BarChart3, Zap, CheckCircle2, XCircle, MinusCircle, X, Save
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { VitalsChart } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
+import { BatEasterEgg } from "@/components/BatEasterEgg";
 import { cn } from "@/lib/utils";
 
 const API_URL = "http://localhost:8000";
@@ -52,10 +53,78 @@ const PatientProfilePage = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [visitStats, setVisitStats] = useState<{ total_visits: number; recent_visits: any[] }>({ total_visits: 0, recent_visits: [] });
   const [visits, setVisits] = useState<any[]>([]);
+  const [showBats, setShowBats] = useState(false);
+  const [keySequence, setKeySequence] = useState('');
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [editedNotes, setEditedNotes] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
 
   useEffect(() => {
     fetchPatientData();
   }, [patientId]);
+
+  // Easter egg keyboard listener
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Only track alphanumeric keys
+      if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
+        setKeySequence(prev => {
+          const newSequence = (prev + e.key.toLowerCase()).slice(-5);
+          console.log('Key sequence:', newSequence, 'Risk level:', patient?.risk_level);
+
+          // Check if the sequence matches "eza13" and patient is high risk
+          if (newSequence === 'eza13' && patient?.risk_level === 'high') {
+            console.log('Easter egg triggered! Showing bats...');
+            setShowBats(true);
+            return ''; // Reset sequence
+          }
+
+          return newSequence;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [patient?.risk_level]);
+
+  const handleEditNotes = () => {
+    setEditedNotes(patient?.clinical_notes || '');
+    setIsEditingNotes(true);
+  };
+
+  const handleSaveNotes = async () => {
+    if (!patient) return;
+
+    setIsSavingNotes(true);
+    try {
+      const response = await fetch(`${API_URL}/api/patients/${patientId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clinical_notes: editedNotes,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save clinical notes');
+      }
+
+      const updatedPatient = await response.json();
+      setPatient(updatedPatient);
+      setIsEditingNotes(false);
+
+      // Show success toast (you can add a toast library later)
+      console.log('Clinical notes saved successfully');
+    } catch (err) {
+      console.error('Error saving clinical notes:', err);
+      alert('Failed to save clinical notes. Please try again.');
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
 
   const fetchPatientData = async () => {
     try {
@@ -211,7 +280,7 @@ const PatientProfilePage = () => {
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
     { id: 'medical' as TabType, label: 'Medical History', icon: Stethoscope },
     { id: 'visits' as TabType, label: 'Visit History', icon: Clock },
-    { id: 'notes' as TabType, label: 'Clinical Notes', icon: Clipboard },
+    { id: 'notes' as TabType, label: 'Dr Notes', icon: Clipboard },
     { id: 'ai' as TabType, label: 'AI Analysis', icon: Brain },
     { id: 'vitals' as TabType, label: 'Vitals', icon: Activity },
   ];
@@ -692,11 +761,14 @@ const PatientProfilePage = () => {
                     <Clipboard className="w-7 h-7 text-white" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Clinical Notes</h2>
-                    <p className="text-sm text-gray-600">Doctor's observations and recommendations</p>
+                    <h2 className="text-2xl font-bold text-gray-900">Dr Notes</h2>
+                    <p className="text-sm text-gray-600">Doctor's observations and clinical notes</p>
                   </div>
                 </div>
-                <button className="px-5 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-xl hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2">
+                <button
+                  onClick={handleEditNotes}
+                  className="px-5 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-xl hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2"
+                >
                   <Edit className="w-4 h-4" />
                   Edit Notes
                 </button>
@@ -838,6 +910,81 @@ const PatientProfilePage = () => {
           </div>
         )}
       </main>
+
+      {/* Clinical Notes Edit Modal */}
+      {isEditingNotes && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-medical-blue to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
+                  <Clipboard className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Edit Dr Notes</h2>
+                  <p className="text-sm text-gray-600">Update doctor observations and clinical notes</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEditingNotes(false)}
+                disabled={isSavingNotes}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <textarea
+                value={editedNotes}
+                onChange={(e) => setEditedNotes(e.target.value)}
+                placeholder="Enter clinical notes, observations, and recommendations here..."
+                disabled={isSavingNotes}
+                className="w-full h-96 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-medical-blue focus:border-transparent resize-none text-gray-700 leading-relaxed disabled:bg-gray-50 disabled:cursor-not-allowed"
+              />
+              <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+                <span>Use clear, professional language for medical documentation</span>
+                <span>{editedNotes.length} characters</span>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 p-6 bg-gray-50 border-t border-gray-200">
+              <button
+                onClick={() => setIsEditingNotes(false)}
+                disabled={isSavingNotes}
+                className="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveNotes}
+                disabled={isSavingNotes}
+                className="px-6 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-lg hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                {isSavingNotes ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Notes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Easter Egg: Bat Animation */}
+      {showBats && (
+        <BatEasterEgg onComplete={() => setShowBats(false)} />
+      )}
     </div>
   );
 };

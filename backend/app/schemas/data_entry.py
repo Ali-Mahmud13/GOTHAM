@@ -70,23 +70,34 @@ class CreateVisitRequest(BaseModel):
     patient_id: str = Field(description="Patient identifier")
     visit_type: str = Field(default="clinical_notes", description="Type of visit")
     
-    # Vitals
-    age: Optional[int] = None
+    # GDM Assessment fields
+    glucose_level: Optional[float] = None  # Blood glucose (different from OGTT)
+    gestation_weeks: Optional[int] = None  # Current gestation weeks
     bmi: Optional[float] = None
     sys_bp: Optional[int] = None
     dia_bp: Optional[int] = None
-    
-    # Lab results
     hdl: Optional[float] = None
-    hemoglobin: Optional[float] = None
     ogtt: Optional[float] = None
+    sedentary_lifestyle: Optional[bool] = None
+    
+    # Anemia/CBC Assessment fields (Complete Blood Count)
+    wbc: Optional[float] = None  # White Blood Cell count (10⁹/L)
+    rbc: Optional[float] = None  # Red Blood Cell count (10¹²/L)
+    hgb: Optional[float] = None  # Hemoglobin (g/dL) - renamed from hemoglobin
+    hct: Optional[float] = None  # Hematocrit (%)
+    mcv: Optional[float] = None  # Mean Corpuscular Volume (fL)
+    mch: Optional[float] = None  # Mean Corpuscular Hemoglobin (pg)
+    mchc: Optional[float] = None  # Mean Corpuscular Hemoglobin Concentration (g/dL)
+    plt: Optional[float] = None  # Platelet count (10⁹/L)
+    
+    # Fetal Health/CTG Assessment fields (Basic)
+    baseline_value: Optional[float] = None  # Baseline Fetal Heart Rate (bpm)
+    accelerations: Optional[float] = None  # Accelerations per second
+    fetal_movement: Optional[float] = None  # Fetal movements per second
     
     # Pregnancy history
     no_of_pregnancy: Optional[int] = None
     gestation_in_previous_pregnancy: Optional[int] = None
-    
-    # Lifestyle & conditions
-    sedentary_lifestyle: Optional[bool] = None
     
     # Static patient features (will update patient record if provided)
     family_history: Optional[bool] = None

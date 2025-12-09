@@ -1,4 +1,4 @@
-import { Activity, Bell, Settings, User } from "lucide-react";
+import { Bell, Settings, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,9 +17,9 @@ export const Navbar = () => {
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
             <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-lg blur-md opacity-60 animate-glow-pulse" />
-              <div className="relative bg-gradient-to-br from-medical-pink to-medical-blue p-2 rounded-lg">
-                <Activity className="h-6 w-6 text-white" />
+              <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-lg blur-md opacity-20 animate-glow-pulse" />
+              <div className="relative p-1 rounded-lg">
+                <img src="/logo.png" alt="GOTHAM Logo" className="h-8 w-8 object-contain" />
               </div>
             </div>
             <div>
