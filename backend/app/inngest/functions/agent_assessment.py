@@ -33,25 +33,44 @@ async def process_agent_assessment(ctx: inngest.Context) -> Dict[str, Any]:
     
     logger.info(f"Starting assessment {assessment_id} for session {session_id}")
     
-    # Single step: Run the full agent workflow
-    result = await ctx.step.run(
-        "run-agent-workflow",
-        run_agent_workflow,
-        message,
-        session_id,
-    )
-    
-    logger.info(f"Completed assessment {assessment_id}")
-    
-    # Store the result for polling
-    assessment_result = {
-        "assessment_id": assessment_id,
-        "session_id": session_id,
-        "patient_id": patient_id,
-        "response": result.get("response"),
-        "success": result.get("success"),
-        "status": "completed"
-    }
+    try:
+        # Single step: Run the full agent workflow
+        result = await ctx.step.run(
+            "run-agent-workflow",
+            run_agent_workflow,
+            message,
+            session_id,
+        )
+        
+        logger.info(f"Completed assessment {assessment_id}")
+        
+        # Store the result for polling
+        assessment_result = {
+            "assessment_id": assessment_id,
+            "session_id": session_id,
+            "patient_id": patient_id,
+            "response": result.get("response"),
+            "success": result.get("success", True),
+            "status": "completed"
+        }
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Assessment {assessment_id} failed: {error_msg}")
+        
+        # Check if it's a rate limit error
+        if "rate_limit" in error_msg.lower() or "429" in error_msg:
+            user_msg = "⚠️ **Rate Limit Reached**\n\nThe AI service is temporarily unavailable due to rate limits. Please wait a few minutes and try again."
+        else:
+            user_msg = f"❌ **Assessment Error**\n\n{error_msg}"
+        
+        assessment_result = {
+            "assessment_id": assessment_id,
+            "session_id": session_id,
+            "patient_id": patient_id,
+            "response": user_msg,
+            "success": False,
+            "status": "failed"
+        }
     
     store_assessment_result(assessment_id, assessment_result)
     

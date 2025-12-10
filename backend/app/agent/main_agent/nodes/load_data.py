@@ -48,9 +48,9 @@ async def load_data_node(state: AgentState) -> AgentState:
         state["fetal_report"] = None
         logger.info(f"Updated current_patient_id to: {patient_idenifier}")
     
-    # Fetch patient data using patient service
+    # Fetch patient data using patient service (OPTIMIZED - uses materialized table)
     patient_service = get_patient_service()
-    patient_data = await patient_service.get_patient_data(patient_idenifier)
+    patient_data = await patient_service.get_patient_data_optimized(patient_idenifier)
     
     if patient_data:
         state["patient_data"] = patient_data

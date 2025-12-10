@@ -6,7 +6,7 @@ from app.core.config import DATABASE_URL
 # Create engine with connection pooling for Neon
 engine = create_engine(
     DATABASE_URL,
-    echo=True,  # Set to False in production
+    echo=False,  # Set to True for debugging SQL queries
     pool_pre_ping=True,  # Verify connections before using
     pool_size=5,  # Number of connections to maintain
     max_overflow=10,  # Max connections beyond pool_size

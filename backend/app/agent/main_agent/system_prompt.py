@@ -42,35 +42,40 @@ ONLY CHECK FOR THESE TECHNICAL CUT-OFF SIGNS:
 1. **Mid-sentence stop**: Ends with a conjunction (and, but, or, however)
 2. **Trailing fragment**: Ends with an article or preposition (the, a, of, for, to)
 3. **Ellipsis**: Ends with "..." suggesting more text was intended
-4. **Character limit**: Feels abruptly truncated (last word cut off)
+4. **Character limit**: Feels abruptly truncated (last word cut off mid-word)
 5. **Unfinished thought**: Clearly incomplete syntax (missing object, predicate)
 
-DO NOT CONSIDER:
+DO NOT CONSIDER (IGNORE COMPLETELY):
 - Whether the message makes sense
 - Whether it's a complete thought logically
 - Whether abbreviations are used
 - Whether grammar is perfect
-- Whether typos are present
+- **WHETHER TYPOS ARE PRESENT** (typos do NOT make a message incomplete)
 - Whether it's brief or concise
+- Whether more information would be helpful
 
 EXAMPLES OF INCOMPLETE (mark "no"):
 - "I want to assess the" (ends with article)
 - "Check patient P001 for" (ends with preposition)
 - "What about gestational diabetes and" (ends with conjunction)
 - "The results show that..." (ends with ellipsis)
-- "How to manage high blood pressu" (word cut off)
+- "How to manage high blood pressu" (word cut off mid-word)
 
 EXAMPLES OF COMPLETE (mark "yes"):
-- "how to lower bp" (makes no medical sense but not cut off)
-- "assess P001" (brief but complete)
-- "what is gd" (abbreviation but complete)
-- "her blood pressure" (fragment but not cut off)
-- "bp management" (makes little sense but not cut off)
+- "assess P001" → COMPLETE (brief but not cut off)
+- "asses fetal risk for P007" → COMPLETE (typo but not cut off)
+- "assess fetal risk for P007" → COMPLETE
+- "chek patient P003" → COMPLETE (typo but not cut off)
+- "what is gd" → COMPLETE (abbreviation but not cut off)
+- "her blood pressure" → COMPLETE (fragment but not cut off)
+- "bp management" → COMPLETE
+- "full assessment P007" → COMPLETE
+- Any message ending with a patient ID (P001, P007, etc.) → COMPLETE
 
-DECISION RULE:
-- ONLY check if the message appears TECHNICALLY INTERRUPTED
-- Ignore all semantic/logical/content concerns
-- If unsure whether it's cut off, default to "yes" (complete)
+CRITICAL RULE:
+- Typos and misspellings do NOT make a message incomplete
+- If the message has a subject (patient ID, topic) and an action word (assess, check), it's COMPLETE
+- If unsure, default to "yes" (complete)
 
 Respond with ONLY: yes or no"""
 
@@ -185,10 +190,19 @@ CLINICAL COMMUNICATION PATTERNS (Usually CLEAR):
 - Follow-up questions with context
 - Brief clinical language
 
+ASSESSMENT REQUESTS ARE ALWAYS CLEAR:
+- "assess fetal risk for P007" → CLEAR (system has patient data)
+- "assess P004" → CLEAR (system will fetch patient data)
+- "check maternal health P001" → CLEAR
+- "run full assessment for P007" → CLEAR
+- Any request with patient ID (P###) or patient name + assessment/check/evaluate → CLEAR
+- The system has access to patient clinical data in the database, so no additional info is needed
+
 AMBIGUITY THRESHOLDS:
 - Minor typos or missing words → STILL CLEAR
 - Medical abbreviations without explanation → STILL CLEAR
 - Pronouns with clear antecedents → STILL CLEAR
+- Assessment requests without clinical details → STILL CLEAR (system has the data)
 - Only mark UNCLEAR for genuine confusion
 
 DEFAULT RULE: When in doubt between CLEAR and UNCLEAR, choose CLEAR.

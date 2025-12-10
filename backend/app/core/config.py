@@ -18,8 +18,19 @@ if not DATABASE_URL:
     )
 
 # LLM Settings
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Kept for backward compatibility
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+
+# Gemini Settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+
+# OpenAI Settings (Primary LLM)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+
+# LLM Provider Selection (openai, groq, gemini)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 
 # Inngest Settings
 INNGEST_APP_ID = os.getenv("INNGEST_APP_ID", "GOTHAM")
