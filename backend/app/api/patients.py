@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/patients", tags=["patients"])
 # Pydantic models for API requests/responses
 class PatientCreate(BaseModel):
     """Schema for creating a patient."""
-    patient_identifier: str
+    patient_identifier: Optional[str] = None
     name: str
     age: int
     contact_number: str
@@ -90,9 +90,37 @@ def get_patient(patient_identifier: str, session: Session = Depends(get_session)
     return patient
 
 
+def get_next_patient_id(session: Session) -> str:
+    """Generate the next available patient ID in format P001, P002, etc."""
+    statement = select(Patient).order_by(Patient.patient_identifier.desc())
+    patients = session.exec(statement).all()
+    
+    if not patients:
+        return "P001"
+    
+    # Extract numeric parts from patient IDs and find the maximum
+    max_num = 0
+    for patient in patients:
+        # Extract number from format like P001, P002, etc.
+        if patient.patient_identifier.startswith('P') and len(patient.patient_identifier) > 1:
+            try:
+                num = int(patient.patient_identifier[1:])
+                max_num = max(max_num, num)
+            except ValueError:
+                continue
+    
+    # Generate next ID
+    next_num = max_num + 1
+    return f"P{next_num:03d}"
+
+
 @router.post("/", response_model=PatientResponse)
 def create_patient(patient_data: PatientCreate, session: Session = Depends(get_session)):
     """Create a new patient."""
+    # Auto-generate patient_identifier if not provided
+    if not patient_data.patient_identifier:
+        patient_data.patient_identifier = get_next_patient_id(session)
+    
     # Check if patient already exists
     statement = select(Patient).where(Patient.patient_identifier == patient_data.patient_identifier)
     existing = session.exec(statement).first()

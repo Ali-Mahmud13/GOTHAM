@@ -179,7 +179,7 @@ class DataEntryService:
         """
         try:
             logger.info(f"Creating visit for patient: {request.patient_id}")
-            logger.info(f"Request data: notes={bool(request.notes)}, age={request.age}, bmi={request.bmi}")
+            logger.info(f"Request data: notes={bool(request.notes)}, bmi={request.bmi}")
             
             # Verify patient exists
             patient = self.patient_repo.get_by_identifier(request.patient_id)
