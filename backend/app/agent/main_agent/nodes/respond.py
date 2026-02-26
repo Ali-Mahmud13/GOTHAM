@@ -44,7 +44,6 @@ async def respond_node(state: AgentState) -> AgentState:
         patient_data_str = "\n".join([f"{k}: {v}" for k, v in patient_data.items()]) if patient_data else "Not available"
         
         response_prompt = ASSESSMENT_RESPONSE_PROMPT.format(
-            user_message=user_message,
             maternal_report=maternal_report,
             fetal_report=fetal_report,
             rag_context=rag_context,
