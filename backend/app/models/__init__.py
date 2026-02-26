@@ -1,7 +1,16 @@
-"""Database models."""
+"""Models package."""
 
+from app.models.patient import Patient, Visit
+from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models.patient_latest_assessments import PatientLatestAssessments
 from app.models.example import User
-from app.models.patient import Patient, Visit, PatientProfile
 
-__all__ = ["User", "Patient", "Visit", "PatientProfile"]
-
+__all__ = [
+    "Patient",
+    "Visit", 
+    "GDMAssessment",
+    "AnemiaAssessment",
+    "FetalHealthAssessment",
+    "PatientLatestAssessments",
+    "User"
+]

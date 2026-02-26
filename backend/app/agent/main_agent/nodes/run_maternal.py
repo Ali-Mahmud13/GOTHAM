@@ -3,9 +3,8 @@ from ..state import AgentState
 from ..tools.helper.clean_data import clean_data_for_model
 from ..tools.maternal_health_pipeline.gdp.gdp_predictor_function import predict_gdp
 from ..tools.maternal_health_pipeline.anemia.anemia import generate_anemia_xai_report as predict_anemia
-# Add imports for your other two models
-# from ..tools.maternal_health_pipeline.model2.model2_predictor_function import predict_model2
-# from ..tools.maternal_health_pipeline.model3.model3_predictor_function import predict_model3
+import inspect
+
 import logging
 
 logging.basicConfig(
@@ -35,7 +34,7 @@ async def run_maternal_node(state: AgentState) -> AgentState:
         },
         {
              "name": "Maternal Anemia",
-             "contract_path": tools_path / "anemia" / "anemia_contract.yaml",
+             "contract_path": tools_path / "anemia" / "anemia_contract.yml",
              "predictor_function": predict_anemia
         },
         # {
@@ -72,9 +71,13 @@ async def run_maternal_node(state: AgentState) -> AgentState:
                 logger.warning(f"Skipping {model_name} - missing data: {missing_fields}")
                 continue
             
-            # Run the prediction
+            # Run the prediction - handle both async and sync functions
             logger.info(f"Calling predictor with args: {cleaned_data}")
-            report = await model_config["predictor_function"](**cleaned_data)
+            predictor_func = model_config["predictor_function"]
+            if inspect.iscoroutinefunction(predictor_func):
+                report = await predictor_func(**cleaned_data)
+            else:
+                report = predictor_func(**cleaned_data)
             
             # Format the report
             formatted_report = f"## {model_name}\n\n{report}\n"

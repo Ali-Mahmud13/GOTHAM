@@ -22,6 +22,7 @@ def load_gdp_model(model_path):
     model
         Loaded scikit-learn model
     """
+    import warnings
     
     # Convert to Path object for better handling
     model_path = Path(model_path)
@@ -32,23 +33,40 @@ def load_gdp_model(model_path):
     # Convert back to string for compatibility with older functions
     model_path_str = str(model_path)
     
-    # Method 1: Try standard pickle
+    # Method 1: Try joblib FIRST (most reliable for sklearn models)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # Suppress sklearn version warnings
+            model = joblib.load(model_path_str)
+        return model
+    except Exception as e:
+        print(f"Joblib failed: {e}")
+    
+    # Method 2: Try standard pickle
     try:
         with open(model_path_str, 'rb') as f:
             model = pickle.load(f)
         return model
-    except:
-        pass
+    except Exception as e:
+        print(f"Pickle failed: {e}")
     
-    # Method 2: Try with latin1 encoding
+    # Method 3: Try with latin1 encoding and fix_imports for Python 2/3 compatibility
     try:
         with open(model_path_str, 'rb') as f:
-            model = pickle.load(f, encoding='latin1')
+            model = pickle.load(f, fix_imports=True, encoding='latin1', errors='ignore')
         return model
     except:
         pass
     
-    # Method 3: Try with custom unpickler for sklearn compatibility
+    # Method 4: Try with bytes encoding
+    try:
+        with open(model_path_str, 'rb') as f:
+            model = pickle.load(f, encoding='bytes')
+        return model
+    except:
+        pass
+    
+    # Method 5: Try with custom unpickler for sklearn compatibility
     try:
         class CompatUnpickler(pickle.Unpickler):
             def find_class(self, module, name):
@@ -71,13 +89,6 @@ def load_gdp_model(model_path):
         
         with open(model_path_str, 'rb') as f:
             model = CompatUnpickler(f).load()
-        return model
-    except:
-        pass
-    
-    # Method 4: Try joblib
-    try:
-        model = joblib.load(model_path_str)
         return model
     except:
         pass

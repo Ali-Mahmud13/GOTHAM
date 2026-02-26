@@ -45,23 +45,26 @@ export const ChatPage = () => {
         attempts++;
         const status = await api.getAssessmentStatus(assessmentId);
 
-        if (status.status === "completed") {
+        if (status.status === "completed" || status.status === "failed") {
           // Replace processing message with result
+          // Response is now at root level (status.response) not nested (status.result.response)
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assessmentId
                 ? {
-                    ...msg,
-                    content: status.result?.response || "Assessment completed successfully!",
-                  }
+                  ...msg,
+                  content: status.response || "Assessment completed successfully!",
+                }
                 : msg
             )
           );
 
-          toast({
-            title: "Assessment Complete",
-            description: "Your risk assessment is ready!",
-          });
+          if (status.status === "completed") {
+            toast({
+              title: "Assessment Complete",
+              description: "Your risk assessment is ready!",
+            });
+          }
         } else if (attempts < maxAttempts) {
           // Still processing, poll again in 1 second
           setTimeout(poll, 1000);
@@ -71,10 +74,10 @@ export const ChatPage = () => {
             prev.map((msg) =>
               msg.id === assessmentId
                 ? {
-                    ...msg,
-                    content:
-                      "⚠️ Assessment is taking longer than expected. Please check the Inngest dashboard at http://localhost:8288 for status.",
-                  }
+                  ...msg,
+                  content:
+                    "⚠️ Assessment is taking longer than expected. Please check the Inngest dashboard at http://localhost:8288 for status.",
+                }
                 : msg
             )
           );
@@ -114,8 +117,8 @@ export const ChatPage = () => {
 
     try {
       // Check if this is a risk assessment request (triggers background job)
-      const isAssessmentRequest = /assess.*risk|risk.*assess|evaluate.*patient|patient.*assessment/i.test(currentInput);
-      
+      const isAssessmentRequest = /assess.*risk|risk.*assess|evaluate.*patient|patient.*assessment|full.*assessment|complete.*assessment|complete.*checkup|checkup.*for|assess.*p\d{3}/i.test(currentInput);
+
       if (isAssessmentRequest) {
         // Use background job for assessments
         const response = await api.assess({
@@ -130,9 +133,9 @@ export const ChatPage = () => {
           role: "assistant",
           content: `🔄 **Processing Risk Assessment...**\n\nPlease wait while I analyze:\n- Patient data validation\n- Maternal health predictions\n- Fetal health analysis\n- Medical guidelines integration\n\nThis may take a few moments...`,
         };
-        
+
         setMessages((prev) => [...prev, processingMessage]);
-        
+
         toast({
           title: "Assessment Started",
           description: "Processing your risk assessment...",
@@ -152,22 +155,22 @@ export const ChatPage = () => {
           role: "assistant",
           content: response.response,
         };
-        
+
         setMessages((prev) => [...prev, aiResponse]);
       }
     } catch (error) {
       console.error("Chat error:", error);
-      
-      const errorMessage = error instanceof ApiError 
-        ? error.message 
+
+      const errorMessage = error instanceof ApiError
+        ? error.message
         : "Failed to get response. Please check if the backend is running.";
-      
+
       toast({
         title: "Error",
         description: errorMessage,
         variant: "destructive",
       });
-      
+
       // Add error message to chat
       const errorResponse: Message = {
         id: (Date.now() + 1).toString(),
@@ -193,7 +196,7 @@ export const ChatPage = () => {
       <div className="absolute top-20 left-10 w-96 h-96 bg-medical-pink/20 rounded-full blur-3xl animate-pulse" />
       <div className="absolute bottom-20 right-10 w-96 h-96 bg-medical-blue/20 rounded-full blur-3xl animate-pulse delay-1000" />
       <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-purple-300/10 rounded-full blur-3xl" />
-      
+
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-white/20 backdrop-blur-2xl bg-white/10 shadow-lg">
         <div className="container mx-auto px-6 py-4">
@@ -237,7 +240,7 @@ export const ChatPage = () => {
                       <Sparkles className="h-5 w-5 text-white" />
                     </div>
                   )}
-                  
+
                   <div
                     className={cn(
                       "max-w-[75%] rounded-3xl px-5 py-4 backdrop-blur-xl border border-white/30 transition-all duration-300 shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]",
@@ -253,16 +256,16 @@ export const ChatPage = () => {
                       {message.role === "assistant" ? (
                         <ReactMarkdown
                           components={{
-                            h1: ({node, ...props}) => <h1 className="text-xl font-bold mb-3 mt-4 text-medical-pink" {...props} />,
-                            h2: ({node, ...props}) => <h2 className="text-lg font-semibold mb-2 mt-3 text-medical-pink" {...props} />,
-                            h3: ({node, ...props}) => <h3 className="text-base font-semibold mb-2 mt-2 text-medical-blue" {...props} />,
-                            p: ({node, ...props}) => <p className="mb-2 text-justify" {...props} />,
-                            ul: ({node, ...props}) => <ul className="list-disc list-inside mb-2 space-y-1" {...props} />,
-                            ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-2 space-y-1" {...props} />,
-                            li: ({node, ...props}) => <li className="ml-2" {...props} />,
-                            strong: ({node, ...props}) => <strong className="font-bold text-medical-pink" {...props} />,
-                            em: ({node, ...props}) => <em className="italic" {...props} />,
-                            code: ({node, ...props}) => <code className="bg-white/30 px-1 py-0.5 rounded text-xs" {...props} />,
+                            h1: ({ node, ...props }) => <h1 className="text-xl font-bold mb-3 mt-4 text-medical-pink" {...props} />,
+                            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mb-2 mt-3 text-medical-pink" {...props} />,
+                            h3: ({ node, ...props }) => <h3 className="text-base font-semibold mb-2 mt-2 text-medical-blue" {...props} />,
+                            p: ({ node, ...props }) => <p className="mb-2 text-justify" {...props} />,
+                            ul: ({ node, ...props }) => <ul className="list-disc list-inside mb-2 space-y-1" {...props} />,
+                            ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-2 space-y-1" {...props} />,
+                            li: ({ node, ...props }) => <li className="ml-2" {...props} />,
+                            strong: ({ node, ...props }) => <strong className="font-bold text-medical-pink" {...props} />,
+                            em: ({ node, ...props }) => <em className="italic" {...props} />,
+                            code: ({ node, ...props }) => <code className="bg-white/30 px-1 py-0.5 rounded text-xs" {...props} />,
                           }}
                         >
                           {message.content}

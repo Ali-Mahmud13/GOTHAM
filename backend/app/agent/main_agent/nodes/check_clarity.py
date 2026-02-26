@@ -21,6 +21,25 @@ async def check_clarity_node(state: AgentState) -> AgentState:
         for msg in state["messages"][:-1]
     ])
     
+    # BYPASS RULE: Common assessment patterns are always COMPLETE
+    import re
+    assessment_patterns = [
+        r'assess.*P\d{3,}',  # "assess P001", "assess risk for P007", etc.
+        r'check.*P\d{3,}',   # "check P002", "check patient P004"
+        r'evaluate.*P\d{3,}',  # "evaluate P005"
+        r'test.*P\d{3,}',      # "test P003"
+        r'run.*P\d{3,}',       # "run assessment P007"
+        r'^P\d{3,}$',          # Just "P001"
+    ]
+    
+    for pattern in assessment_patterns:
+        if re.search(pattern, user_message, re.IGNORECASE):
+            logger.info(f"BYPASS: Message matches assessment pattern '{pattern}' - marking as complete")
+            state["incomplete"] = "no"
+            state["inscope"] = "yes"
+            state["clear"] = "yes"
+            return state
+    
     # Check 1: Completeness
     logger.info("Step 1: Checking completeness...")
     completeness_prompt = COMPLETENESS_CHECK_PROMPT.format(

@@ -5,11 +5,10 @@ import { cn } from "@/lib/utils";
 interface AddPatientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (patient: { id: string; name: string; age: string; phone: string }) => void;
+  onAdd: (patient: { name: string; age: string; phone: string }) => void;
 }
 
 export const AddPatientModal = ({ isOpen, onClose, onAdd }: AddPatientModalProps) => {
-  const [patientId, setPatientId] = useState("");
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
   const [phone, setPhone] = useState("");
@@ -18,10 +17,9 @@ export const AddPatientModal = ({ isOpen, onClose, onAdd }: AddPatientModalProps
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (patientId && name && age && phone) {
-      onAdd({ id: patientId, name, age, phone });
+    if (name && age && phone) {
+      onAdd({ name, age, phone });
       // Reset form
-      setPatientId("");
       setName("");
       setAge("");
       setPhone("");
@@ -48,21 +46,17 @@ export const AddPatientModal = ({ isOpen, onClose, onAdd }: AddPatientModalProps
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Patient ID Field (Manual Entry) */}
-          <div>
-            <label htmlFor="patientId" className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+          {/* Auto-Generated ID Info */}
+          <div className="bg-gradient-to-r from-medical-blue/10 to-medical-pink/10 border border-medical-blue/20 rounded-lg p-4">
+            <div className="flex items-center gap-2">
               <Hash className="w-4 h-4 text-medical-blue" />
-              Patient ID
-            </label>
-            <input
-              id="patientId"
-              type="text"
-              value={patientId}
-              onChange={(e) => setPatientId(e. target.value)}
-              placeholder="e.g., P011, P012"
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-medical-blue focus:border-transparent transition-all outline-none"
-            />
+              <p className="text-sm font-medium text-gray-700">
+                Patient ID will be auto-assigned
+              </p>
+            </div>
+            <p className="text-xs text-gray-500 mt-1 ml-6">
+              The system will automatically generate a unique patient ID
+            </p>
           </div>
 
           {/* Name Field */}

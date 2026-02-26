@@ -9,7 +9,7 @@ class AgentState(MessagesState):
     
     # Prediction and routing fields
     prediction_decision: Optional[Literal["both", "maternal", "fetal", "rag", "respond"]] = None
-    should_retrieve_decision: Optional[Literal["retrieve", "not_retrieve"]] = None
+    should_retrieve_decision: Optional[Literal["load", "not_load"]] = None
     
     # Patient tracking
     current_patient_id: Optional[str] = None

@@ -98,9 +98,9 @@ export const LandingPage = () => {
                             transition={{ type: "spring", stiffness: 400, damping: 10 }}
                         >
                             <div className="relative">
-                                <div className="absolute inset-0 bg-gradient-to-r from-medical-pink to-medical-blue rounded-xl blur-md opacity-50" />
-                                <div className="relative bg-card p-2 rounded-xl border border-border/50">
-                                    <Activity className="h-6 w-6 text-medical-pink" />
+                                <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-lg blur-md opacity-20 animate-glow-pulse" />
+                                <div className="relative p-1 rounded-lg">
+                                    <img src="/logo.png" alt="GOTHAM Logo" className="h-8 w-8 object-contain" />
                                 </div>
                             </div>
                             <div>
@@ -592,9 +592,9 @@ export const LandingPage = () => {
                             whileHover={{ scale: 1.02 }}
                         >
                             <div className="relative">
-                                <div className="absolute inset-0 bg-gradient-to-r from-medical-pink to-medical-blue rounded-xl blur-md opacity-50" />
-                                <div className="relative bg-card p-2 rounded-xl border border-border/50">
-                                    <Activity className="h-5 w-5 text-medical-pink" />
+                                <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-lg blur-md opacity-20 animate-glow-pulse" />
+                                <div className="relative p-1 rounded-lg">
+                                    <img src="/logo.png" alt="GOTHAM Logo" className="h-6 w-6 object-contain" />
                                 </div>
                             </div>
                             <span className="font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">

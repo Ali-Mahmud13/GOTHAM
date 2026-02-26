@@ -13,8 +13,10 @@ _assessment_results: Dict[str, Dict[str, Any]] = {}
 
 def store_assessment_result(assessment_id: str, result: Dict[str, Any]) -> None:
     """Store assessment result."""
+    # Store result fields at root level for frontend compatibility
+    # Frontend expects: status.result.response (not status.result.result.response)
     _assessment_results[assessment_id] = {
-        "result": result,
+        **result,  # Spread all fields from result at root level
         "completed_at": datetime.now().isoformat(),
         "status": "completed"
     }

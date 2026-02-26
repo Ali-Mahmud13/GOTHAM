@@ -10,7 +10,7 @@ from app.inngest import inngest_client, ALL_FUNCTIONS
 from app.api.chat import router as chat_router
 from app.api.data_entry import router as data_entry_router
 from app.api.patients import router as patients_router
-from app.api.patient_profiles import router as patient_profiles_router
+from app.api.dashboard import router as dashboard_router
 from app.db.init_db import create_db_and_tables
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ inngest.fast_api.serve(app, inngest_client, ALL_FUNCTIONS)
 app.include_router(chat_router)
 app.include_router(data_entry_router)
 app.include_router(patients_router)
-app.include_router(patient_profiles_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/")

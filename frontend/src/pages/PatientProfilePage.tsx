@@ -3,10 +3,12 @@ import { useState, useEffect } from "react";
 import {
   ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle,
   Activity, TrendingUp, Clock, Heart, Edit, Share2, Download, ChevronRight,
-  Stethoscope, Clipboard, BarChart3, Zap, CheckCircle2, XCircle, MinusCircle
+  Stethoscope, Clipboard, BarChart3, Zap, CheckCircle2, XCircle, MinusCircle, X, Save
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { VitalsChart } from "@/components/charts/VitalsChart";
+import { VisitTimeline } from "@/components/patient/VisitTimeline";
+import { BatEasterEgg } from "@/components/BatEasterEgg";
 import { cn } from "@/lib/utils";
 
 const API_URL = "http://localhost:8000";
@@ -17,9 +19,14 @@ interface PatientProfile {
   name: string;
   age: number;
   contact_number: string;
-  doctor_notes: string | null;
-  ai_report: string | null;
+  clinical_notes: string | null;
   risk_level: 'high' | 'medium' | 'low';
+  number_of_pregnancies: number | null;
+  family_history: boolean | null;
+  pcos: boolean | null;
+  unexplained_prenatal_loss: boolean | null;
+  large_child_or_birth_default: boolean | null;
+  prediabetes: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,7 +41,7 @@ interface PatientMedical {
   prediabetes: boolean | null;
 }
 
-type TabType = 'overview' | 'medical' | 'notes' | 'ai' | 'vitals';
+type TabType = 'overview' | 'medical' | 'notes' | 'ai' | 'visits' | 'vitals';
 
 const PatientProfilePage = () => {
   const { patientId } = useParams();
@@ -44,16 +51,85 @@ const PatientProfilePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [visitStats, setVisitStats] = useState<{ total_visits: number; recent_visits: any[] }>({ total_visits: 0, recent_visits: [] });
+  const [visits, setVisits] = useState<any[]>([]);
+  const [showBats, setShowBats] = useState(false);
+  const [keySequence, setKeySequence] = useState('');
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [editedNotes, setEditedNotes] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
 
   useEffect(() => {
     fetchPatientData();
   }, [patientId]);
 
+  // Easter egg keyboard listener
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Only track alphanumeric keys
+      if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
+        setKeySequence(prev => {
+          const newSequence = (prev + e.key.toLowerCase()).slice(-5);
+          console.log('Key sequence:', newSequence, 'Risk level:', patient?.risk_level);
+
+          // Check if the sequence matches "eza13" and patient is high risk
+          if (newSequence === 'eza13' && patient?.risk_level === 'high') {
+            console.log('Easter egg triggered! Showing bats...');
+            setShowBats(true);
+            return ''; // Reset sequence
+          }
+
+          return newSequence;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [patient?.risk_level]);
+
+  const handleEditNotes = () => {
+    setEditedNotes(patient?.clinical_notes || '');
+    setIsEditingNotes(true);
+  };
+
+  const handleSaveNotes = async () => {
+    if (!patient) return;
+
+    setIsSavingNotes(true);
+    try {
+      const response = await fetch(`${API_URL}/api/patients/${patientId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clinical_notes: editedNotes,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save clinical notes');
+      }
+
+      const updatedPatient = await response.json();
+      setPatient(updatedPatient);
+      setIsEditingNotes(false);
+
+      // Show success toast (you can add a toast library later)
+      console.log('Clinical notes saved successfully');
+    } catch (err) {
+      console.error('Error saving clinical notes:', err);
+      alert('Failed to save clinical notes. Please try again.');
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
   const fetchPatientData = async () => {
     try {
-      setLoading(true);
-
-      const profileResponse = await fetch(`${API_URL}/api/patient-profiles/${patientId}`);
+      // Fetch patient data (merged schema - single endpoint)
+      const profileResponse = await fetch(`${API_URL}/api/patients/${patientId}`);
       if (profileResponse.status === 404) {
         setPatient(null);
         setError("not_found");
@@ -64,11 +140,14 @@ const PatientProfilePage = () => {
       }
       const profileData = await profileResponse.json();
       setPatient(profileData);
+      setMedicalData(profileData);  // Medical data is in the same object now
 
-      const medicalResponse = await fetch(`${API_URL}/api/patients/${patientId}`);
-      if (medicalResponse.ok) {
-        const medicalDataResponse = await medicalResponse.json();
-        setMedicalData(medicalDataResponse);
+      // Fetch visit statistics
+      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientId}/visits`);
+      if (visitsResponse.ok) {
+        const visitsData = await visitsResponse.json();
+        setVisitStats(visitsData);
+        setVisits(visitsData.recent_visits || []);
       }
 
       setError(null);
@@ -200,7 +279,8 @@ const PatientProfilePage = () => {
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
     { id: 'medical' as TabType, label: 'Medical History', icon: Stethoscope },
-    { id: 'notes' as TabType, label: 'Clinical Notes', icon: Clipboard },
+    { id: 'visits' as TabType, label: 'Visit History', icon: Clock },
+    { id: 'notes' as TabType, label: 'Dr Notes', icon: Clipboard },
     { id: 'ai' as TabType, label: 'AI Analysis', icon: Brain },
     { id: 'vitals' as TabType, label: 'Vitals', icon: Activity },
   ];
@@ -370,34 +450,38 @@ const PatientProfilePage = () => {
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* Health Score */}
-              <div className="group relative bg-gradient-to-br from-rose-50 to-pink-50 p-6 rounded-2xl border border-rose-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-rose-500/10 to-pink-500/10 rounded-full blur-2xl" />
+              <div className="group relative bg-gradient-to-br from-medical-pink/5 to-rose-50/50 p-6 rounded-2xl border border-medical-pink/20 hover:shadow-xl transition-all duration-300 overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-medical-pink/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-rose-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                    <div className="w-12 h-12 bg-gradient-to-br from-medical-pink to-rose-400 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                       <Heart className="w-6 h-6 text-white" />
                     </div>
-                    <TrendingUp className="w-5 h-5 text-green-600" />
+                    <TrendingUp className="w-5 h-5 text-medical-pink" />
                   </div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Health Score</p>
                   <p className="text-4xl font-bold text-gray-900 mb-2">{riskConfig.score}</p>
-                  <p className="text-xs text-green-600 font-semibold">+5% this week</p>
+                  <p className="text-xs text-medical-pink font-semibold">Risk: {patient?.risk_level || 'N/A'}</p>
                 </div>
               </div>
 
               {/* Total Visits */}
-              <div className="group relative bg-gradient-to-br from-blue-50 to-cyan-50 p-6 rounded-2xl border border-blue-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 rounded-full blur-2xl" />
+              <div className="group relative bg-gradient-to-br from-medical-blue/5 to-cyan-50/50 p-6 rounded-2xl border border-medical-blue/20 hover:shadow-xl transition-all duration-300 overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-medical-blue/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                    <div className="w-12 h-12 bg-gradient-to-br from-medical-blue to-cyan-400 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                       <Stethoscope className="w-6 h-6 text-white" />
                     </div>
                     <ChevronRight className="w-5 h-5 text-gray-400" />
                   </div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Total Visits</p>
-                  <p className="text-4xl font-bold text-gray-900 mb-2">12</p>
-                  <p className="text-xs text-gray-500 font-semibold">Last visit: 2 days ago</p>
+                  <p className="text-4xl font-bold text-gray-900 mb-2">{visitStats.total_visits}</p>
+                  <p className="text-xs text-gray-500 font-semibold">
+                    {visitStats.recent_visits[0]
+                      ? `Last visit: ${new Date(visitStats.recent_visits[0].visit_date).toLocaleDateString()}`
+                      : 'No visits yet'}
+                  </p>
                 </div>
               </div>
 
@@ -677,11 +761,14 @@ const PatientProfilePage = () => {
                     <Clipboard className="w-7 h-7 text-white" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Clinical Notes</h2>
-                    <p className="text-sm text-gray-600">Doctor's observations and recommendations</p>
+                    <h2 className="text-2xl font-bold text-gray-900">Dr Notes</h2>
+                    <p className="text-sm text-gray-600">Doctor's observations and clinical notes</p>
                   </div>
                 </div>
-                <button className="px-5 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-xl hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2">
+                <button
+                  onClick={handleEditNotes}
+                  className="px-5 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-xl hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2"
+                >
                   <Edit className="w-4 h-4" />
                   Edit Notes
                 </button>
@@ -689,7 +776,7 @@ const PatientProfilePage = () => {
 
               <div className="bg-gradient-to-br from-blue-50/70 to-cyan-50/70 rounded-2xl p-8 border-l-4 border-blue-500 min-h-[300px]">
                 <p className="text-gray-700 leading-relaxed text-lg whitespace-pre-wrap">
-                  {patient.doctor_notes || "No clinical notes have been added yet. Click 'Edit Notes' to add observations and recommendations."}
+                  {patient.clinical_notes || "No clinical notes have been added yet. Click 'Edit Notes' to add observations and recommendations."}
                 </p>
               </div>
 
@@ -760,7 +847,7 @@ const PatientProfilePage = () => {
                 <div className="col-span-2 bg-gradient-to-br from-pink-50/70 to-purple-50/70 rounded-2xl p-6 border-l-4 border-medical-pink">
                   <h3 className="text-sm font-semibold text-purple-600 mb-4 uppercase tracking-wide">AI Generated Insights</h3>
                   <p className="text-gray-700 leading-relaxed text-lg mb-4">
-                    {patient.ai_report || "AI analysis is being processed. This comprehensive report will include risk assessments, recommendations, and personalized care suggestions based on the patient's medical history and current health indicators."}
+                    {patient.clinical_notes || "AI analysis is being processed. This comprehensive report will include risk assessments, recommendations, and personalized care suggestions based on the patient's medical history and current health indicators."}
                   </p>
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <Brain className="w-4 h-4" />
@@ -777,37 +864,44 @@ const PatientProfilePage = () => {
           </div>
         )}
 
+        {/* Visit History Tab */}
+        {activeTab === 'visits' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <VisitTimeline visits={visits} />
+          </div>
+        )}
+
         {/* Vitals Tab */}
         {activeTab === 'vitals' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-gray-200/50">
+            <div className="bg-card/60 backdrop-blur-sm rounded-2xl shadow-xl p-8 border border-border/30">
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-2xl flex items-center justify-center shadow-lg">
-                  <Activity className="w-7 h-7 text-white" />
+                <div className="p-3 rounded-xl bg-gradient-to-br from-medical-pink to-medical-blue">
+                  <Activity className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Vitals Tracking</h2>
-                  <p className="text-sm text-gray-600">Monitor key health metrics over time</p>
+                  <h2 className="text-2xl font-bold text-foreground">Vitals Tracking</h2>
+                  <p className="text-sm text-muted-foreground">Monitor key health metrics over time</p>
                 </div>
               </div>
 
               {/* Summary Stats */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                <div className="bg-gradient-to-br from-red-50 to-pink-50 p-4 rounded-xl border border-red-200/50">
-                  <p className="text-xs font-semibold text-red-600 mb-1">AVG HEART RATE</p>
-                  <p className="text-2xl font-bold text-gray-900">72 <span className="text-sm font-normal">bpm</span></p>
+                <div className="bg-gradient-to-br from-medical-pink/10 to-rose-50/50 p-4 rounded-xl border border-medical-pink/20">
+                  <p className="text-xs font-semibold text-medical-pink mb-1">AVG HEART RATE</p>
+                  <p className="text-2xl font-bold text-foreground">72 <span className="text-sm font-normal text-muted-foreground">bpm</span></p>
                 </div>
-                <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-4 rounded-xl border border-blue-200/50">
-                  <p className="text-xs font-semibold text-blue-600 mb-1">AVG BLOOD PRESSURE</p>
-                  <p className="text-2xl font-bold text-gray-900">120/80 <span className="text-sm font-normal">mmHg</span></p>
+                <div className="bg-gradient-to-br from-medical-blue/10 to-cyan-50/50 p-4 rounded-xl border border-medical-blue/20">
+                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG BLOOD PRESSURE</p>
+                  <p className="text-2xl font-bold text-foreground">120/80 <span className="text-sm font-normal text-muted-foreground">mmHg</span></p>
                 </div>
-                <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-xl border border-green-200/50">
-                  <p className="text-xs font-semibold text-green-600 mb-1">AVG TEMPERATURE</p>
-                  <p className="text-2xl font-bold text-gray-900">98.6 <span className="text-sm font-normal">°F</span></p>
+                <div className="bg-gradient-to-br from-cyan-50 to-teal-50 p-4 rounded-xl border border-cyan-200">
+                  <p className="text-xs font-semibold text-cyan-600 mb-1">AVG TEMPERATURE</p>
+                  <p className="text-2xl font-bold text-foreground">98.6 <span className="text-sm font-normal text-muted-foreground">°F</span></p>
                 </div>
-                <div className="bg-gradient-to-br from-purple-50 to-violet-50 p-4 rounded-xl border border-purple-200/50">
-                  <p className="text-xs font-semibold text-purple-600 mb-1">AVG OXYGEN</p>
-                  <p className="text-2xl font-bold text-gray-900">98 <span className="text-sm font-normal">%</span></p>
+                <div className="bg-gradient-to-br from-medical-pink/10 to-medical-blue/10 p-4 rounded-xl border border-medical-blue/20">
+                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG OXYGEN</p>
+                  <p className="text-2xl font-bold text-foreground">98 <span className="text-sm font-normal text-muted-foreground">%</span></p>
                 </div>
               </div>
 
@@ -816,6 +910,81 @@ const PatientProfilePage = () => {
           </div>
         )}
       </main>
+
+      {/* Clinical Notes Edit Modal */}
+      {isEditingNotes && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-medical-blue to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
+                  <Clipboard className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Edit Dr Notes</h2>
+                  <p className="text-sm text-gray-600">Update doctor observations and clinical notes</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEditingNotes(false)}
+                disabled={isSavingNotes}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <textarea
+                value={editedNotes}
+                onChange={(e) => setEditedNotes(e.target.value)}
+                placeholder="Enter clinical notes, observations, and recommendations here..."
+                disabled={isSavingNotes}
+                className="w-full h-96 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-medical-blue focus:border-transparent resize-none text-gray-700 leading-relaxed disabled:bg-gray-50 disabled:cursor-not-allowed"
+              />
+              <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+                <span>Use clear, professional language for medical documentation</span>
+                <span>{editedNotes.length} characters</span>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 p-6 bg-gray-50 border-t border-gray-200">
+              <button
+                onClick={() => setIsEditingNotes(false)}
+                disabled={isSavingNotes}
+                className="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveNotes}
+                disabled={isSavingNotes}
+                className="px-6 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-lg hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                {isSavingNotes ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Notes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Easter Egg: Bat Animation */}
+      {showBats && (
+        <BatEasterEgg onComplete={() => setShowBats(false)} />
+      )}
     </div>
   );
 };

@@ -34,29 +34,29 @@ async def load_data_node(state: AgentState) -> AgentState:
     )
     
     response = await llm.ainvoke([HumanMessage(content=prompt)])
-    patient_id = response.content.strip()
+    patient_idenifier = response.content.strip()
     
-    logger.info(f"Extracted patient ID: {patient_id}")
+    logger.info(f"Extracted patient ID: {patient_idenifier}")
     
-    state["patient_identifier"] = patient_id
+    state["patient_identifier"] = patient_idenifier
     
     # Check if this is a new patient
-    if patient_id != "NONE" and patient_id != current_patient_id:
+    if patient_idenifier != "NONE" and patient_idenifier != current_patient_id:
         logger.info(f"New patient detected! Clearing old reports for previous patient: {current_patient_id}")
-        state["current_patient_id"] = patient_id
+        state["current_patient_id"] = patient_idenifier
         state["maternal_report"] = None
         state["fetal_report"] = None
-        logger.info(f"Updated current_patient_id to: {patient_id}")
+        logger.info(f"Updated current_patient_id to: {patient_idenifier}")
     
-    # Fetch patient data using patient service
+    # Fetch patient data using patient service (OPTIMIZED - uses materialized table)
     patient_service = get_patient_service()
-    patient_data = await patient_service.get_patient_data(patient_id)
+    patient_data = await patient_service.get_patient_data_optimized(patient_idenifier)
     
     if patient_data:
         state["patient_data"] = patient_data
-        logger.info(f"Patient data loaded successfully for: {patient_id}")
+        logger.info(f"Patient data loaded successfully for: {patient_idenifier}")
     else:
-        logger.warning(f"No patient data found for: {patient_id}")
+        logger.warning(f"No patient data found for: {patient_idenifier}")
         state["patient_data"] = {}
     
     logger.info("="*60 + "\n")
