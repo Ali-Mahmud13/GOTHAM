@@ -9,6 +9,14 @@ import PatientsPage from "./pages/PatientsPage";
 import PatientProfilePage from "./pages/PatientProfilePage";
 import DataEntry from "./pages/DataEntry";
 import { LandingPage } from "./pages/LandingPage";
+import { PatientLoginPage } from "./pages/PatientLoginPage";
+import { PatientSignupPage } from "./pages/PatientSignupPage";
+import { DoctorLoginPage } from "./pages/DoctorLoginPage";
+import { DoctorSignupPage } from "./pages/DoctorSignupPage";
+import { PatientDashboard } from "./pages/PatientDashboard";
+import { EditProfilePage } from "./pages/EditProfilePage";
+import { AuthProvider } from "./context/AuthContext";
+import { PatientAuthProvider } from "./context/PatientAuthContext";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,21 +29,38 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/dashboard" element={<Index />} />
-          <Route path="/login" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/signup" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/patients" element={<PatientsPage />} />
-          <Route path="/patients/:patientId" element={<PatientProfilePage />} />
-          <Route path="/data-entry" element={<DataEntry />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <PatientAuthProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              {/* Landing Page */}
+              <Route path="/" element={<LandingPage />} />
+              
+              {/* Doctor Login & Dashboard Routes */}
+              <Route path="/doctor/login" element={<DoctorLoginPage />} />
+              <Route path="/doctor/signup" element={<DoctorSignupPage />} />
+              <Route path="/login" element={<Navigate to="/doctor/login" replace />} />
+              <Route path="/signup" element={<Navigate to="/doctor/signup" replace />} />
+              <Route path="/dashboard" element={<Index />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/patients" element={<PatientsPage />} />
+              <Route path="/patients/:patientId" element={<PatientProfilePage />} />
+              <Route path="/data-entry" element={<DataEntry />} />
+              
+              {/* Patient Portal Routes */}
+              <Route path="/patient/login" element={<PatientLoginPage />} />
+              <Route path="/patient/signup" element={<PatientSignupPage />} />
+              <Route path="/patient/dashboard" element={<PatientDashboard />} />
+              <Route path="/patient/edit-profile" element={<EditProfilePage />} />
+              
+              {/* 404 */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </PatientAuthProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

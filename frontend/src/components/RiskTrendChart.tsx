@@ -1,17 +1,64 @@
+import { useState, useEffect } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from "recharts";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
-const data = [
-    { day: "Mon", highRisk: 4, mediumRisk: 8 },
-    { day: "Tue", highRisk: 3, mediumRisk: 10 },
-    { day: "Wed", highRisk: 5, mediumRisk: 9 },
-    { day: "Thu", highRisk: 4, mediumRisk: 12 },
-    { day: "Fri", highRisk: 6, mediumRisk: 11 },
-    { day: "Sat", highRisk: 5, mediumRisk: 10 },
-    { day: "Sun", highRisk: 4, mediumRisk: 9 },
+const API_URL = "http://localhost:8000";
+
+// Mock data for demonstration (until historical tracking is implemented)
+const mockData = [
+    { day: "Mon", highRisk: 0, mediumRisk: 0 },
+    { day: "Tue", highRisk: 0, mediumRisk: 0 },
+    { day: "Wed", highRisk: 0, mediumRisk: 0 },
+    { day: "Thu", highRisk: 0, mediumRisk: 0 },
+    { day: "Fri", highRisk: 0, mediumRisk: 0 },
+    { day: "Sat", highRisk: 0, mediumRisk: 0 },
+    { day: "Sun", highRisk: 0, mediumRisk: 0 },
 ];
 
 export const RiskTrendChart = () => {
+    const { user } = useAuth();
+    const [data, setData] = useState(mockData);
+    const [hasPatients, setHasPatients] = useState(false);
+
+    useEffect(() => {
+        if (user?.email) {
+            fetchTrendData();
+        }
+    }, [user?.email]);
+
+    const fetchTrendData = async () => {
+        try {
+            // Build headers with user email for doctor filtering
+            const headers: HeadersInit = {};
+            if (user?.email) {
+                headers['X-User-Email'] = user.email;
+            }
+            
+            const response = await fetch(`${API_URL}/api/dashboard/stats`, { headers });
+            if (response.ok) {
+                const stats = await response.json();
+                const totalPatients = stats.total_patients || 0;
+                setHasPatients(totalPatients > 0);
+                
+                // For now, use current stats to show on the last day
+                // TODO: Implement proper historical tracking
+                if (totalPatients > 0) {
+                    setData([
+                        { day: "Mon", highRisk: 0, mediumRisk: 0 },
+                        { day: "Tue", highRisk: 0, mediumRisk: 0 },
+                        { day: "Wed", highRisk: 0, mediumRisk: 0 },
+                        { day: "Thu", highRisk: 0, mediumRisk: 0 },
+                        { day: "Fri", highRisk: 0, mediumRisk: 0 },
+                        { day: "Sat", highRisk: 0, mediumRisk: 0 },
+                        { day: "Sun", highRisk: stats.high_risk_count || 0, mediumRisk: stats.medium_risk_count || 0 },
+                    ]);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch trend data:', error);
+        }
+    };
     return (
         <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-soft h-full">
             <div className="mb-6 flex items-center justify-between">

@@ -1,4 +1,4 @@
-import { Bell, User } from "lucide-react";
+import { User, LogOut, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,18 +11,17 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
-export const Navbar = () => {
+export const PatientNavbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const patientName = user?.patient_info?.name || user?.full_name || user?.email || 'Patient';
+
   const handleLogout = () => {
     logout();
-    navigate("/");
+    navigate('/patient/login');
   };
 
-  // Get display name
-  const displayName = user?.full_name || user?.email?.split("@")[0] || "Doctor";
-  const displayRole = user?.role === "doctor" ? "Physician" : "Patient";
   return (
     <nav className="border-b border-border/40 bg-card/30 backdrop-blur-xl sticky top-0 z-50">
       <div className="container mx-auto px-6 py-3">
@@ -37,46 +36,16 @@ export const Navbar = () => {
             </div>
             <div>
               <h1 className="text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
-                GOTHAM
+                GOTHAM Patient Portal
               </h1>
               <p className="text-xs text-muted-foreground -mt-1">
-                Antenatal Risk Platform
+                Your Health Dashboard
               </p>
             </div>
           </div>
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-2">
-            {/* Notifications */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="relative hover:bg-muted/50 transition-all duration-300"
-                >
-                  <Bell className="h-5 w-5" />
-                  <span className="absolute top-1 right-1 h-2 w-2 bg-destructive rounded-full animate-pulse" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80 bg-card/95 backdrop-blur-xl border-border/50">
-                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="py-3">
-                  <div>
-                    <p className="font-medium text-sm">High-Risk Patient Alert</p>
-                    <p className="text-xs text-muted-foreground">Jennifer Wilson requires immediate attention</p>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="py-3">
-                  <div>
-                    <p className="font-medium text-sm">Appointment Reminder</p>
-                    <p className="text-xs text-muted-foreground">Sarah Johnson - 10:00 AM today</p>
-                  </div>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             {/* User Profile */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -88,15 +57,21 @@ export const Navbar = () => {
                     <User className="h-5 w-5 text-white" />
                   </div>
                   <div className="text-left hidden md:block">
-                    <p className="text-sm font-semibold">{displayName}</p>
-                    <p className="text-xs text-muted-foreground">{displayRole}</p>
+                    <p className="text-sm font-semibold">{patientName || 'Patient'}</p>
+                    <p className="text-xs text-muted-foreground">Patient</p>
                   </div>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-card/95 backdrop-blur-xl border-border/50">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive" onClick={handleLogout}>
+                <DropdownMenuItem onClick={() => navigate('/patient/edit-profile')} className="cursor-pointer">
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit Profile
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
+                  <LogOut className="mr-2 h-4 w-4" />
                   Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>

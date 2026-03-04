@@ -13,10 +13,13 @@ import { MetricsCard } from "@/components/MetricsCard";
 import { RiskOverviewChart } from "@/components/RiskOverviewChart";
 import { RiskTrendChart } from "@/components/RiskTrendChart";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 const API_URL = "http://localhost:8000";
 
 interface DashboardStats {
+  user_role?: string;
+  doctor_name?: string;
   total_patients: number;
   high_risk_count: number;
   medium_risk_count: number;
@@ -42,18 +45,26 @@ interface DashboardStats {
 
 const Index = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [showChat, setShowChat] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDashboardStats();
-  }, []);
+    if (user?.email) {
+      fetchDashboardStats();
+    }
+  }, [user?.email]);
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/dashboard/stats`);
+      const headers: HeadersInit = {};
+      if (user?.email) {
+        headers['X-User-Email'] = user.email;
+      }
+      
+      const response = await fetch(`${API_URL}/api/dashboard/stats`, { headers });
       if (response.ok) {
         const data = await response.json();
         setStats(data);
@@ -82,7 +93,7 @@ const Index = () => {
             <div className="mb-8">
               <div className="inline-block">
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-medical-pink via-medical-blue to-medical-pink bg-clip-text text-transparent mb-3 animate-float">
-                  Welcome back, Dr. Mahmud
+                  Welcome back, {stats?.doctor_name || user?.full_name || 'Doctor'}
                 </h2>
                 <div className="h-1 w-32 bg-gradient-to-r from-medical-pink to-medical-blue rounded-full" />
               </div>
@@ -121,6 +132,27 @@ const Index = () => {
                 color="purple"
               />
             </div>
+
+            {/* Empty State for No Patients */}
+            {!loading && stats && stats.total_patients === 0 && (
+              <div className="bg-gradient-to-br from-medical-pink/10 via-medical-blue/10 to-purple-500/10 rounded-2xl p-12 text-center mb-12 border border-medical-pink/20">
+                <div className="max-w-md mx-auto">
+                  <Users className="w-16 h-16 mx-auto mb-4 text-medical-blue" />
+                  <h3 className="text-2xl font-bold mb-3 bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
+                    No Patients Yet
+                  </h3>
+                  <p className="text-muted-foreground mb-6">
+                    Get started by adding your first patient to begin tracking maternal health data and assessments.
+                  </p>
+                  <button
+                    onClick={() => navigate("/patients")}
+                    className="px-6 py-3 bg-gradient-to-r from-medical-pink to-medical-blue text-white rounded-lg font-semibold hover:shadow-lg transition-all duration-300 hover:scale-105"
+                  >
+                    Add First Patient
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Main Action Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">

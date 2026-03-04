@@ -13,6 +13,9 @@ class Patient(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     patient_identifier: str = Field(unique=True, index=True)
     
+    # Doctor Assignment
+    doctor_id: Optional[int] = Field(default=None, foreign_key="auth_users.id", index=True, description="Assigned doctor ID")
+    
     # Personal Information (merged from PatientProfile)
     name: str = Field(description="Patient full name")
     age: int = Field(description="Patient age")
