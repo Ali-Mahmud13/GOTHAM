@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, Bot, FileInput, Activity, AlertTriangle, BrainCircuit } from "lucide-react";
+import { Users, Bot, FileInput, AlertTriangle, BrainCircuit, Calendar, CalendarPlus, UserCheck, UserX, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { DashboardCard } from "@/components/DashboardCard";
@@ -43,6 +43,32 @@ interface DashboardStats {
   }>;
 }
 
+interface Appointment {
+  id: number;
+  patient_name: string;
+  appointment_date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  notes: string | null;
+}
+
+interface RegistrationRequest {
+  id: number;
+  patient_id: number;
+  patient_name: string;
+  patient_email: string;
+  doctor_id: number;
+  appointment_id: number | null;
+  appointment_date: string | null;
+  appointment_start_time: string | null;
+  status: string;
+  created_at: string;
+}
+
+const formatApptDate = (d: string) =>
+  new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
 const Index = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -50,10 +76,16 @@ const Index = () => {
   const [showReport, setShowReport] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [apptLoading, setApptLoading] = useState(true);
+  const [regRequests, setRegRequests] = useState<RegistrationRequest[]>([]);
+  const [regRequestsLoading, setRegRequestsLoading] = useState(true);
 
   useEffect(() => {
     if (user?.email) {
       fetchDashboardStats();
+      fetchUpcomingAppointments();
+      fetchRegistrationRequests();
     }
   }, [user?.email]);
 
@@ -74,6 +106,55 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchUpcomingAppointments = async () => {
+    try {
+      const res = await fetch(`${API_URL}/appointments/upcoming`, {
+        headers: { 'X-User-Email': user!.email },
+      });
+      if (res.ok) {
+        const data: Appointment[] = await res.json();
+        setAppointments(data);
+      }
+    } catch {
+      // silently fail, appointments section will show nothing
+    } finally {
+      setApptLoading(false);
+    }
+  };
+
+  const fetchRegistrationRequests = async () => {
+    try {
+      const res = await fetch(`${API_URL}/appointments/registration-requests`, {
+        headers: { 'X-User-Email': user!.email },
+      });
+      if (res.ok) {
+        const data: RegistrationRequest[] = await res.json();
+        setRegRequests(data);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setRegRequestsLoading(false);
+    }
+  };
+
+  const approveRequest = async (id: number) => {
+    await fetch(`${API_URL}/appointments/registration-requests/${id}/approve`, {
+      method: 'PUT',
+      headers: { 'X-User-Email': user!.email },
+    });
+    fetchRegistrationRequests();
+    fetchUpcomingAppointments();
+  };
+
+  const declineRequest = async (id: number) => {
+    await fetch(`${API_URL}/appointments/registration-requests/${id}/decline`, {
+      method: 'PUT',
+      headers: { 'X-User-Email': user!.email },
+    });
+    fetchRegistrationRequests();
   };
 
   return (
@@ -155,7 +236,7 @@ const Index = () => {
             )}
 
             {/* Main Action Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
               <DashboardCard
                 title="Patients"
                 icon={Users}
@@ -174,6 +255,12 @@ const Index = () => {
                 variant="dual-glow"
                 onClick={() => navigate("/data-entry")}
               />
+              <DashboardCard
+                title="My Schedule"
+                icon={CalendarPlus}
+                variant="dual-glow"
+                onClick={() => navigate("/schedule")}
+              />
             </div>
 
             {/* Charts Section */}
@@ -188,23 +275,44 @@ const Index = () => {
 
             {/* Summary Panels */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <SummaryPanel title="Upcoming Appointments" gradient="blue">
+              <SummaryPanel
+                title="Upcoming Appointments"
+                gradient="blue"
+                onViewAll={() => navigate("/appointments")}
+              >
                 <div className="space-y-2">
-                  <AppointmentItem
-                    patientName="Sarah Johnson"
-                    time="10:00 AM"
-                    type="Routine Checkup"
-                  />
-                  <AppointmentItem
-                    patientName="Emily Davis"
-                    time="11:30 AM"
-                    type="Ultrasound"
-                  />
-                  <AppointmentItem
-                    patientName="Maria Garcia"
-                    time="2:00 PM"
-                    type="Follow-up"
-                  />
+                  {apptLoading ? (
+                    <p className="text-sm text-gray-500">Loading...</p>
+                  ) : appointments.length === 0 ? (
+                    <div className="text-center py-4">
+                      <Calendar className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+                      <p className="text-sm text-gray-500">No upcoming appointments</p>
+                      <button
+                        onClick={() => navigate("/schedule")}
+                        className="text-xs text-medical-blue hover:underline mt-1"
+                      >
+                        Set your schedule →
+                      </button>
+                    </div>
+                  ) : (
+                    appointments.slice(0, 3).map((appt) => (
+                      <div key={appt.id} className="flex items-center gap-3 py-3 border-b border-border last:border-0">
+                        <div className="p-2 rounded-lg bg-muted">
+                          <Clock className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-foreground truncate">{appt.patient_name}</p>
+                            {appt.status === 'pending_approval' && (
+                              <span className="flex-shrink-0 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold">Pending</span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground">{appt.notes || "Appointment"}</p>
+                        </div>
+                        <p className="text-sm font-medium text-muted-foreground whitespace-nowrap">{appt.start_time} · {formatApptDate(appt.appointment_date)}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </SummaryPanel>
 
@@ -245,6 +353,60 @@ const Index = () => {
                 </div>
               </SummaryPanel>
             </div>
+
+            {/* Registration Requests */}
+            {(regRequestsLoading || regRequests.length > 0) && (
+              <div className="mt-8">
+                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-medical-blue" />
+                  Patient Registration Requests
+                  {regRequests.length > 0 && (
+                    <span className="ml-2 bg-medical-pink text-white text-xs px-2 py-0.5 rounded-full font-semibold">{regRequests.length}</span>
+                  )}
+                </h3>
+                {regRequestsLoading ? (
+                  <p className="text-sm text-gray-500">Loading...</p>
+                ) : (
+                  <div className="space-y-3">
+                    {regRequests.map(req => (
+                      <div key={req.id} className="bg-white rounded-xl border border-yellow-200 shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-medical-pink to-medical-blue flex items-center justify-center text-white font-bold text-xs">
+                              {req.patient_name[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-900 text-sm">{req.patient_name}</p>
+                              <p className="text-xs text-gray-500">{req.patient_email}</p>
+                            </div>
+                          </div>
+                          {req.appointment_date && (
+                            <div className="flex items-center gap-1 text-xs text-gray-600 mt-1.5 ml-10">
+                              <Clock className="h-3 w-3" />
+                              <span>Appointment: {formatApptDate(req.appointment_date)} at {req.appointment_start_time}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => approveRequest(req.id)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition-colors"
+                          >
+                            <UserCheck className="h-3 w-3" /> Approve
+                          </button>
+                          <button
+                            onClick={() => declineRequest(req.id)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-100 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-200 transition-colors"
+                          >
+                            <UserX className="h-3 w-3" /> Decline
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Report Panel - Slides in from right */}

@@ -13,7 +13,10 @@ from app.api.patients import router as patients_router
 from app.api.dashboard import router as dashboard_router
 from app.api.patient_portal import router as patient_portal_router
 from app.api.auth import router as auth_router
+from app.api.appointments import router as appointments_router
 from app.db.init_db import create_db_and_tables
+from app.db.session import engine
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,17 @@ async def startup_event():
         logger.info("✓ Database tables initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {str(e)}", exc_info=True)
+    # Add new columns to existing tables if they don't exist yet
+    with engine.connect() as conn:
+        for col_sql in [
+            "ALTER TABLE appointments ADD COLUMN rescheduled_by TEXT",
+            "ALTER TABLE appointments ADD COLUMN cancelled_by TEXT",
+        ]:
+            try:
+                conn.execute(text(col_sql))
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
 
 # CORS for React frontend
 app.add_middleware(
@@ -55,6 +69,7 @@ app.include_router(data_entry_router)
 app.include_router(patients_router)
 app.include_router(dashboard_router)
 app.include_router(patient_portal_router)
+app.include_router(appointments_router)
 
 
 @app.get("/")

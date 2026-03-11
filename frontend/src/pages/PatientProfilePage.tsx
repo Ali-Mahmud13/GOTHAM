@@ -1,9 +1,10 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle,
-  Activity, TrendingUp, Clock, Heart, Edit, Share2, Download, ChevronRight,
-  Stethoscope, Clipboard, BarChart3, Zap, CheckCircle2, XCircle, MinusCircle, X, Save
+  Activity, TrendingUp, Clock, Heart, ChevronRight,
+  Stethoscope, Clipboard, BarChart3, Zap, CheckCircle2, XCircle, MinusCircle, X, Save, UserX
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { VitalsChart } from "@/components/charts/VitalsChart";
@@ -46,6 +47,7 @@ type TabType = 'overview' | 'medical' | 'notes' | 'ai' | 'visits' | 'vitals';
 const PatientProfilePage = () => {
   const { patientId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [patient, setPatient] = useState<PatientProfile | null>(null);
   const [medicalData, setMedicalData] = useState<PatientMedical | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,10 +60,42 @@ const PatientProfilePage = () => {
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [editedNotes, setEditedNotes] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [registeredPatientAuthId, setRegisteredPatientAuthId] = useState<number | null>(null);
+  const [showUnregisterConfirm, setShowUnregisterConfirm] = useState(false);
+  const [isUnregistering, setIsUnregistering] = useState(false);
 
   useEffect(() => {
     fetchPatientData();
   }, [patientId]);
+
+  useEffect(() => {
+    if (user?.email && patientId) {
+      fetch(`${API_URL}/appointments/my-registered-patients`, {
+        headers: { 'X-User-Email': user.email },
+      })
+        .then(r => r.ok ? r.json() : [])
+        .then((list: { patient_auth_id: number; patient_identifier: string }[]) => {
+          const match = list.find(p => p.patient_identifier === patientId);
+          setRegisteredPatientAuthId(match ? match.patient_auth_id : null);
+        })
+        .catch(() => {});
+    }
+  }, [user?.email, patientId]);
+
+  const handleUnregister = async () => {
+    if (!registeredPatientAuthId || !user?.email) return;
+    setIsUnregistering(true);
+    try {
+      const res = await fetch(`${API_URL}/appointments/unregister/${registeredPatientAuthId}`, {
+        method: 'DELETE',
+        headers: { 'X-User-Email': user.email },
+      });
+      if (res.ok) {
+        setRegisteredPatientAuthId(null);
+        setShowUnregisterConfirm(false);
+      }
+    } catch { } finally { setIsUnregistering(false); }
+  };
 
   // Easter egg keyboard listener
   useEffect(() => {
@@ -385,18 +419,15 @@ const PatientProfilePage = () => {
 
             {/* Right: Quick Actions */}
             <div className="flex items-center gap-2">
-              <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all flex items-center gap-2">
-                <Edit className="w-4 h-4" />
-                Edit
-              </button>
-              <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all flex items-center gap-2">
-                <Download className="w-4 h-4" />
-                Export
-              </button>
-              <button className="px-4 py-2 bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold rounded-lg hover:shadow-lg transition-all flex items-center gap-2">
-                <Share2 className="w-4 h-4" />
-                Share
-              </button>
+              {registeredPatientAuthId !== null && (
+                <button
+                  onClick={() => setShowUnregisterConfirm(true)}
+                  className="px-4 py-2 bg-white border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 hover:border-red-500 transition-all flex items-center gap-2"
+                >
+                  <UserX className="w-4 h-4" />
+                  Unregister Patient
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -984,6 +1015,34 @@ const PatientProfilePage = () => {
       {/* Easter Egg: Bat Animation */}
       {showBats && (
         <BatEasterEgg onComplete={() => setShowBats(false)} />
+      )}
+
+      {/* Unregister Confirmation Modal */}
+      {showUnregisterConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Unregister {patient?.name}?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to unregister <strong>{patient?.name}</strong>? They will no longer share medical data with you and any pending registration requests will be cancelled.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleUnregister}
+                disabled={isUnregistering}
+                className="w-full py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                {isUnregistering ? 'Unregistering...' : 'Yes, Unregister'}
+              </button>
+              <button
+                onClick={() => setShowUnregisterConfirm(false)}
+                disabled={isUnregistering}
+                className="w-full py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

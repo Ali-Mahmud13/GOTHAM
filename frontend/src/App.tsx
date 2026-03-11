@@ -15,6 +15,9 @@ import { DoctorLoginPage } from "./pages/DoctorLoginPage";
 import { DoctorSignupPage } from "./pages/DoctorSignupPage";
 import { PatientDashboard } from "./pages/PatientDashboard";
 import { EditProfilePage } from "./pages/EditProfilePage";
+import { DoctorSchedulePage } from "./pages/DoctorSchedulePage";
+import { BookAppointmentPage } from "./pages/BookAppointmentPage";
+import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthProvider } from "./context/AuthContext";
 import { PatientAuthProvider } from "./context/PatientAuthContext";
 
@@ -48,12 +51,16 @@ function App() {
               <Route path="/patients" element={<PatientsPage />} />
               <Route path="/patients/:patientId" element={<PatientProfilePage />} />
               <Route path="/data-entry" element={<DataEntry />} />
+              <Route path="/schedule" element={<DoctorSchedulePage />} />
+              <Route path="/appointments" element={<AppointmentsPage />} />
               
               {/* Patient Portal Routes */}
               <Route path="/patient/login" element={<PatientLoginPage />} />
               <Route path="/patient/signup" element={<PatientSignupPage />} />
               <Route path="/patient/dashboard" element={<PatientDashboard />} />
               <Route path="/patient/edit-profile" element={<EditProfilePage />} />
+              <Route path="/patient/book-appointment" element={<BookAppointmentPage />} />
+              <Route path="/patient/appointments" element={<AppointmentsPage />} />
               
               {/* 404 */}
               <Route path="*" element={<NotFound />} />

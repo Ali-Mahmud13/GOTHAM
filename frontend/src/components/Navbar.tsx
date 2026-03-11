@@ -1,4 +1,5 @@
-import { Bell, User } from "lucide-react";
+import { Bell, User, CalendarDays, LayoutDashboard } from "lucide-react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,9 +12,114 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
+const API_URL = "http://localhost:8000";
+
+interface RegRequest {
+  id: number;
+  patient_name: string;
+  appointment_date: string | null;
+  appointment_start_time: string | null;
+}
+
+interface RescheduleNotif {
+  id: number;
+  patient_name: string;
+  appointment_date: string;
+  start_time: string;
+}
+
 export const Navbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [regRequests, setRegRequests] = useState<RegRequest[]>([]);
+  const [seenReqIds, setSeenReqIds] = useState<Set<number>>(new Set());
+  const [rescheduleNotifs, setRescheduleNotifs] = useState<RescheduleNotif[]>([]);
+  const [cancelNotifs, setCancelNotifs] = useState<RescheduleNotif[]>([]);
+
+  // Load persisted seen IDs from localStorage
+  useEffect(() => {
+    if (user?.email) {
+      const stored = localStorage.getItem(`dr_seen_reqs_${user.email}`);
+      if (stored) setSeenReqIds(new Set(JSON.parse(stored)));
+    }
+  }, [user?.email]);
+
+  useEffect(() => {
+    if (user?.email && user?.role === "doctor") {
+      fetchRegRequests();
+      fetchRescheduleNotifs();
+      fetchCancelNotifs();
+      const interval = setInterval(() => { fetchRegRequests(); fetchRescheduleNotifs(); fetchCancelNotifs(); }, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [user?.email]);
+
+  const fetchRegRequests = async () => {
+    try {
+      const res = await fetch(`${API_URL}/appointments/registration-requests`, {
+        headers: { "X-User-Email": user!.email },
+      });
+      if (res.ok) {
+        const data: RegRequest[] = await res.json();
+        setRegRequests(data);
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  const fetchRescheduleNotifs = async () => {
+    try {
+      const res = await fetch(`${API_URL}/appointments/reschedule-notifications`, {
+        headers: { "X-User-Email": user!.email },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRescheduleNotifs(data);
+      }
+    } catch { }
+  };
+
+  const fetchCancelNotifs = async () => {
+    try {
+      const res = await fetch(`${API_URL}/appointments/cancel-notifications`, {
+        headers: { "X-User-Email": user!.email },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCancelNotifs(data);
+      }
+    } catch { }
+  };
+
+  const handleNotifOpen = async (open: boolean) => {
+    if (open) {
+      // Persist seen reg request IDs to localStorage
+      const allIds = new Set([...seenReqIds, ...regRequests.map(r => r.id)]);
+      setSeenReqIds(allIds);
+      if (user?.email) localStorage.setItem(`dr_seen_reqs_${user.email}`, JSON.stringify([...allIds]));
+    } else {
+      // Dismiss reschedule and cancel notifications server-side when closing
+      if (rescheduleNotifs.length > 0) {
+        try {
+          await fetch(`${API_URL}/appointments/dismiss-reschedule-notifications`, {
+            method: 'PUT',
+            headers: { "X-User-Email": user!.email },
+          });
+          setRescheduleNotifs([]);
+        } catch { }
+      }
+      if (cancelNotifs.length > 0) {
+        try {
+          await fetch(`${API_URL}/appointments/dismiss-cancel-notifications`, {
+            method: 'PUT',
+            headers: { "X-User-Email": user!.email },
+          });
+          setCancelNotifs([]);
+        } catch { }
+      }
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -45,10 +151,35 @@ export const Navbar = () => {
             </div>
           </div>
 
+          {/* Nav Links */}
+          <div className="hidden md:flex items-center gap-1">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Dashboard
+            </button>
+            <button
+              onClick={() => navigate('/schedule')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            >
+              <CalendarDays className="w-4 h-4" />
+              My Schedule
+            </button>
+            <button
+              onClick={() => navigate('/appointments')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            >
+              <CalendarDays className="w-4 h-4" />
+              Appointments
+            </button>
+          </div>
+
           {/* Right Side Actions */}
           <div className="flex items-center gap-2">
-            {/* Notifications */}
-            <DropdownMenu>
+          {/* Notifications */}
+            <DropdownMenu onOpenChange={handleNotifOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
@@ -56,24 +187,61 @@ export const Navbar = () => {
                   className="relative hover:bg-muted/50 transition-all duration-300"
                 >
                   <Bell className="h-5 w-5" />
-                  <span className="absolute top-1 right-1 h-2 w-2 bg-destructive rounded-full animate-pulse" />
+                  {(regRequests.some(r => !seenReqIds.has(r.id)) || rescheduleNotifs.length > 0 || cancelNotifs.length > 0) && (
+                    <span className="absolute top-1 right-1 h-4 w-4 bg-destructive rounded-full text-[10px] text-white font-bold flex items-center justify-center leading-none">
+                      {(regRequests.filter(r => !seenReqIds.has(r.id)).length + rescheduleNotifs.length + cancelNotifs.length) > 9
+                        ? "9+"
+                        : regRequests.filter(r => !seenReqIds.has(r.id)).length + rescheduleNotifs.length + cancelNotifs.length}
+                    </span>
+                  )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80 bg-card/95 backdrop-blur-xl border-border/50">
                 <DropdownMenuLabel>Notifications</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="py-3">
-                  <div>
-                    <p className="font-medium text-sm">High-Risk Patient Alert</p>
-                    <p className="text-xs text-muted-foreground">Jennifer Wilson requires immediate attention</p>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="py-3">
-                  <div>
-                    <p className="font-medium text-sm">Appointment Reminder</p>
-                    <p className="text-xs text-muted-foreground">Sarah Johnson - 10:00 AM today</p>
-                  </div>
-                </DropdownMenuItem>
+                {regRequests.length === 0 && rescheduleNotifs.length === 0 && cancelNotifs.length === 0 ? (
+                  <DropdownMenuItem className="py-3 text-muted-foreground text-sm justify-center" onSelect={(e) => e.preventDefault()}>
+                    No new notifications
+                  </DropdownMenuItem>
+                ) : (
+                  <>
+                    {cancelNotifs.slice(0, 3).map((n) => (
+                      <DropdownMenuItem key={`cn-${n.id}`} className="py-3" onSelect={(e) => e.preventDefault()}>
+                        <div>
+                          <p className="font-medium text-sm">Appointment Cancelled</p>
+                          <p className="text-xs text-muted-foreground">
+                            {n.patient_name} cancelled their appointment on {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                          </p>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                    {rescheduleNotifs.slice(0, 3).map((n) => (
+                      <DropdownMenuItem key={`rs-${n.id}`} className="py-3" onSelect={(e) => e.preventDefault()}>
+                        <div>
+                          <p className="font-medium text-sm">Appointment Rescheduled</p>
+                          <p className="text-xs text-muted-foreground">
+                            {n.patient_name} rescheduled to {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                          </p>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                    {regRequests.slice(0, 5 - Math.min(cancelNotifs.length + rescheduleNotifs.length, 5)).map((req) => (
+                      <DropdownMenuItem
+                        key={req.id}
+                        className="py-3"
+                        onSelect={(e) => e.preventDefault()}
+                      >
+                        <div>
+                          <p className="font-medium text-sm">New Registration Request</p>
+                          <p className="text-xs text-muted-foreground">
+                            {req.patient_name} wants to register under you
+                            {req.appointment_date ? ` · ${new Date(req.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${req.appointment_start_time}` : ""}
+                          </p>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 

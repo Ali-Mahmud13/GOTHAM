@@ -50,13 +50,10 @@ export const PatientLoginPage = () => {
       }
 
       if (data.success && data.user) {
-        // Check if user is a patient
         if (data.user.role !== 'patient') {
           setError('This login is for patients only. Please use the doctor login.');
           return;
         }
-        
-        // Login successful
         login(data.user);
         navigate('/patient/dashboard');
       } else {
@@ -150,7 +147,7 @@ export const PatientLoginPage = () => {
                 />
               </div>
               <p className="text-xs text-gray-500">
-                Please enter your email and password as provided by your healthcare provider
+                Enter your email and password to access your health dashboard
               </p>
             </div>
 
@@ -180,6 +177,7 @@ export const PatientLoginPage = () => {
                 </>
               )}
             </Button>
+
           </form>
 
           {/* Footer */}

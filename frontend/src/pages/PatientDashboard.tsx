@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import {
   User, Phone, Calendar, Heart, Activity, Clock, Stethoscope, BarChart3,
-  AlertCircle, TrendingUp, ChevronRight, Zap, FileText, Clipboard, Brain
+  AlertCircle, TrendingUp, ChevronRight, Zap, FileText, Clipboard, Brain,
+  CalendarCheck, PlusCircle
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PatientNavbar } from "@/components/PatientNavbar";
@@ -31,6 +32,16 @@ interface PatientProfile {
   updated_at: string;
 }
 
+interface Appointment {
+  id: number;
+  doctor_name: string;
+  appointment_date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  notes?: string;
+}
+
 type TabType = 'overview' | 'medical' | 'visits' | 'vitals';
 
 export const PatientDashboard = () => {
@@ -42,6 +53,7 @@ export const PatientDashboard = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [visitStats, setVisitStats] = useState<{ total_visits: number; recent_visits: any[] }>({ total_visits: 0, recent_visits: [] });
   const [visits, setVisits] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
 
   // Get patient identifier from auth user
   const patientIdentifier = user?.patient_info?.patient_identifier;
@@ -53,6 +65,21 @@ export const PatientDashboard = () => {
     }
     fetchPatientData();
   }, [isAuthenticated, user, patientIdentifier, navigate]);
+
+  const fetchUpcomingAppointments = async () => {
+    if (!user?.email) return;
+    try {
+      const res = await fetch(`${API_URL}/appointments/upcoming`, {
+        headers: { 'X-User-Email': user.email },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAppointments(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch appointments:', err);
+    }
+  };
 
   const fetchPatientData = async () => {
     if (!patientIdentifier) return;
@@ -84,6 +111,7 @@ export const PatientDashboard = () => {
     } finally {
       setLoading(false);
     }
+    fetchUpcomingAppointments();
   };
 
   const getRiskConfig = (riskLevel: string) => {
@@ -435,6 +463,71 @@ export const PatientDashboard = () => {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Upcoming Appointments */}
+            <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-gray-200/50">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <CalendarCheck className="w-5 h-5 text-medical-blue" />
+                  Upcoming Appointments
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => navigate('/patient/appointments')}
+                    className="text-sm text-medical-blue font-semibold hover:underline"
+                  >
+                    View all
+                  </button>
+                  <button
+                    onClick={() => navigate('/patient/book-appointment')}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-medical-blue text-white rounded-lg text-sm font-semibold hover:bg-medical-blue/90 transition-colors"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    Book
+                  </button>
+                </div>
+              </div>
+              {appointments.length === 0 ? (
+                <div className="text-center py-8">
+                  <CalendarCheck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">No upcoming appointments.</p>
+                  <button
+                    onClick={() => navigate('/patient/book-appointment')}
+                    className="mt-3 text-medical-blue font-semibold hover:underline text-sm"
+                  >
+                    Book one now &rarr;
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {appointments.slice(0, 3).map((appt) => (
+                    <div key={appt.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-medical-blue/10 rounded-lg flex items-center justify-center">
+                          <Stethoscope className="w-5 h-5 text-medical-blue" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">{appt.doctor_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            {' · '}{appt.start_time} – {appt.end_time}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${
+                        appt.status === 'booked' ? 'bg-emerald-100 text-emerald-700' :
+                        appt.status === 'pending_approval' ? 'bg-amber-100 text-amber-700' :
+                        appt.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                        appt.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {appt.status === 'pending_approval' ? 'Pending' : appt.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Doctor's Notes (Read-only for patient) */}
