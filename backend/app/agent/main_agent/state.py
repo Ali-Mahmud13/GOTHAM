@@ -21,3 +21,8 @@ class AgentState(MessagesState):
     fetal_report: Optional[str] = None
     rag_context: Optional[str] = None
     rag_keywords: Optional[str] = None
+
+    # Latest assessment payload for persistence (per run)
+    assessment_type_to_save: Optional[str] = None
+    assessment_report_to_save: Optional[str] = None
+    assessment_risk_levels: Optional[dict] = None

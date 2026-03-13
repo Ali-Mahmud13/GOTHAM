@@ -150,7 +150,7 @@ const PatientsPage = () => {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
-        <main className="container mx-auto px-6 py-10">
+        <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
           <div className="mb-10">
             <div className="inline-block">
               <div className="h-10 w-64 bg-gray-200 rounded mb-3 animate-pulse" />
@@ -174,7 +174,7 @@ const PatientsPage = () => {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
-        <main className="container mx-auto px-6 py-10">
+        <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
           <div className="max-w-md mx-auto text-center mt-20">
             <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <AlertCircle className="w-10 h-10 text-red-500" />
@@ -196,12 +196,12 @@ const PatientsPage = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
-      <main className="container mx-auto px-6 py-10">
+      <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
         {/* Header Section */}
-        <div className="mb-10 flex items-start justify-between">
+        <div className="mb-10 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <div className="inline-block">
-              <h2 className="text-4xl font-bold bg-gradient-to-r from-medical-pink via-medical-blue to-medical-pink bg-clip-text text-transparent mb-3 animate-float">
+              <h2 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-medical-pink via-medical-blue to-medical-pink bg-clip-text text-transparent mb-3 animate-float">
                 All Patients
               </h2>
               <div className="h-1 w-32 bg-gradient-to-r from-medical-pink to-medical-blue rounded-full" />

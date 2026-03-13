@@ -146,7 +146,7 @@ export const EditProfilePage = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
         <PatientNavbar />
-        <main className="container mx-auto px-6 py-10">
+        <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
           <div className="text-center text-lg">
             <div className="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent rounded-full text-medical-blue mb-4" />
             <p>Loading profile...</p>
@@ -160,7 +160,7 @@ export const EditProfilePage = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
       <PatientNavbar />
       
-      <main className="container mx-auto px-6 py-10">
+      <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
         <div className="max-w-3xl mx-auto">
           {/* Back Button */}
           <Button

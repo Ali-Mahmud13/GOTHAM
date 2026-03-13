@@ -172,10 +172,10 @@ export const AppointmentsPage = () => {
   return (
     <div className="min-h-screen bg-background">
       <NavbarComponent />
-      <main className="container mx-auto px-4 py-8 max-w-3xl">
-        <div className="flex items-center justify-between mb-6">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-3xl">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-1">
+            <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-1">
               Appointments
             </h1>
             <p className="text-muted-foreground text-sm">
@@ -185,7 +185,7 @@ export const AppointmentsPage = () => {
           {!isDoctor && (
             <Button
               onClick={() => navigate('/patient/book-appointment')}
-              className="bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white"
+              className="w-full sm:w-auto bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white"
             >
               + Book New
             </Button>
@@ -194,7 +194,7 @@ export const AppointmentsPage = () => {
 
         {/* Patient: Registered Doctor Banner */}
         {!isDoctor && registeredDoctor !== undefined && (
-          <div className={`flex items-center gap-3 p-4 rounded-xl mb-6 border ${
+          <div className={`flex items-start sm:items-center gap-3 p-4 rounded-xl mb-6 border ${
             registeredDoctor ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-gray-50 border-gray-200 text-gray-500'
           }`}>
             {registeredDoctor
@@ -237,7 +237,7 @@ export const AppointmentsPage = () => {
         )}
 
         {/* Filter Tabs */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           {(['upcoming', 'all'] as const).map(f => (
             <button
               key={f}
@@ -247,7 +247,7 @@ export const AppointmentsPage = () => {
               {f === 'upcoming' ? 'Upcoming' : 'All'}
             </button>
           ))}
-          <button onClick={fetchAppointments} className="ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+          <button onClick={fetchAppointments} className="sm:ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
@@ -313,13 +313,13 @@ export const AppointmentsPage = () => {
                 </div>
 
                 {appt.status === 'booked' && (
-                  <div className="flex items-center gap-2 px-5 pb-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-5 pb-4">
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={actionLoading === appt.id}
                       onClick={() => openReschedule(appt)}
-                      className="text-xs h-8 gap-1"
+                      className="w-full sm:w-auto text-xs h-8 gap-1"
                     >
                       <RefreshCw className="h-3 w-3" /> Reschedule
                     </Button>
@@ -328,7 +328,7 @@ export const AppointmentsPage = () => {
                       variant="outline"
                       disabled={actionLoading === appt.id}
                       onClick={() => cancelAppointment(appt)}
-                      className="text-xs h-8 gap-1 text-red-600 border-red-200 hover:bg-red-50"
+                      className="w-full sm:w-auto text-xs h-8 gap-1 text-red-600 border-red-200 hover:bg-red-50"
                     >
                       {actionLoading === appt.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
                       Cancel

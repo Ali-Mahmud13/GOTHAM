@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 
 interface Patient {
     id: string;
@@ -32,7 +33,12 @@ const API_BASE = "http://localhost:8000/api";
 
 const DataEntry = () => {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const { user } = useAuth();
     const { toast } = useToast();
+    const returnTo = searchParams.get("returnTo") || "/dashboard";
+    const requestedPatientId = searchParams.get("patientId") || "";
+    const isPatientUser = user?.role === "patient";
     const [patients, setPatients] = useState<Patient[]>([]);
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
@@ -44,16 +50,30 @@ const DataEntry = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingPatients, setIsLoadingPatients] = useState(true);
+    const [registeredDoctor, setRegisteredDoctor] = useState<{ id: number; full_name: string } | null | undefined>(undefined);
 
     // Fetch patients on mount
     useEffect(() => {
         const fetchPatients = async () => {
             try {
-                const response = await fetch(`${API_BASE}/patients`);
+                const headers: HeadersInit = user?.email ? { "X-User-Email": user.email } : {};
+                const response = await fetch(`${API_BASE}/patients`, { headers });
                 if (response.ok) {
                     const data = await response.json();
                     setPatients(data);
                     setFilteredPatients(data);
+                    if (isPatientUser && data.length === 1) {
+                        setSelectedPatient(data[0]);
+                        setShowPatientSearch(false);
+                    }
+                    if (requestedPatientId) {
+                        const requestedId = requestedPatientId.toLowerCase();
+                        const match = data.find((p: Patient) => p.id.toLowerCase() === requestedId);
+                        if (match) {
+                            setSelectedPatient(match);
+                            setShowPatientSearch(false);
+                        }
+                    }
                 } else {
                     toast({
                         title: "Error",
@@ -74,13 +94,37 @@ const DataEntry = () => {
         };
 
         fetchPatients();
-    }, []);
+    }, [requestedPatientId, user?.email, isPatientUser]);
+
+    useEffect(() => {
+        const loadRegisteredDoctor = async () => {
+            if (!isPatientUser || !user?.email) {
+                return;
+            }
+            try {
+                const res = await fetch("http://localhost:8000/appointments/my-doctor", {
+                    headers: { "X-User-Email": user.email },
+                });
+                if (res.ok) {
+                    setRegisteredDoctor(await res.json());
+                } else {
+                    setRegisteredDoctor(null);
+                }
+            } catch {
+                setRegisteredDoctor(null);
+            }
+        };
+
+        loadRegisteredDoctor();
+    }, [isPatientUser, user?.email]);
 
     // Filter patients based on search
     useEffect(() => {
         if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
             const filtered = patients.filter(patient =>
-                patient.id.toLowerCase().includes(searchQuery.toLowerCase())
+                patient.id.toLowerCase().includes(q) ||
+                patient.name.toLowerCase().includes(q)
             );
             setFilteredPatients(filtered);
         } else {
@@ -106,19 +150,33 @@ const DataEntry = () => {
             if (notes.length > 5) {
                 setIsProcessing(true);
                 try {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 25000);
                     const response = await fetch(`${API_BASE}/notes/parse`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
+                        signal: controller.signal,
                         body: JSON.stringify({
                             notes: notes,
                             patient_id: selectedPatient?.id
                         }),
                     });
+                    clearTimeout(timeout);
 
                     if (response.ok) {
                         const data = await response.json();
-                        setExtractedFields(data.extracted_fields || []);
-                        setMissingFields(data.missing_fields || []);
+                        if (data.success) {
+                            setExtractedFields(data.extracted_fields || []);
+                            setMissingFields(data.missing_fields || []);
+                        } else {
+                            setExtractedFields([]);
+                            setMissingFields([]);
+                            toast({
+                                title: "Parsing Failed",
+                                description: data.message || "Could not parse clinical notes.",
+                                variant: "destructive",
+                            });
+                        }
                     } else {
                         const errorData = await response.json();
                         console.error("Failed to parse notes:", errorData);
@@ -132,7 +190,7 @@ const DataEntry = () => {
                     console.error("Error parsing notes:", error);
                     toast({
                         title: "Connection Error",
-                        description: "Failed to connect to AI service.",
+                        description: "Failed to parse notes. Request timed out or AI service unavailable.",
                         variant: "destructive",
                     });
                 } finally {
@@ -180,7 +238,10 @@ const DataEntry = () => {
 
             const response = await fetch(`${API_BASE}/visits`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(user?.email ? { "X-User-Email": user.email } : {}),
+                },
                 body: JSON.stringify(visitData),
             });
 
@@ -218,22 +279,9 @@ const DataEntry = () => {
     const getRiskColor = (level: string) => {
         switch (level) {
             case "high": return "text-red-600 bg-red-50/80";
-            case "medium": return "text-orange-600 bg-orange-50/80";
+            case "medium": return "text-violet-600 bg-violet-50/80";
             case "low": return "text-green-600 bg-green-50/80";
             default: return "text-gray-600 bg-gray-50/80";
-        }
-    };
-
-    const getConfidenceColor = (confidence: string) => {
-        switch (confidence) {
-            case "high":
-                return "text-green-600 bg-green-50/80";
-            case "medium":
-                return "text-yellow-600 bg-yellow-50/80";
-            case "low":
-                return "text-red-600 bg-red-50/80";
-            default:
-                return "text-gray-600 bg-gray-50/80";
         }
     };
 
@@ -241,12 +289,12 @@ const DataEntry = () => {
         <div className="min-h-screen bg-background">
             {/* Header */}
             <header className="border-b border-border/40 bg-card/30 backdrop-blur-xl sticky top-0 z-10">
-                <div className="container mx-auto px-6 py-4">
+                <div className="container mx-auto px-4 sm:px-6 py-4">
                     <div className="flex items-center gap-4">
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate("/")}
+                            onClick={() => navigate(returnTo)}
                             className="hover:bg-muted/50"
                         >
                             <ArrowLeft className="h-5 w-5" />
@@ -271,7 +319,31 @@ const DataEntry = () => {
                 </div>
             </header>
 
-            <main className="container mx-auto px-6 py-8">
+            <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+                {isPatientUser && (
+                    <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                        <p className="text-sm font-bold text-amber-800">Self-reported clinical data</p>
+                        <p className="text-sm text-amber-700 mt-1">
+                            You are responsible for the integrity and accuracy of the data you submit, and any decisions made based on that data.
+                        </p>
+                        {registeredDoctor ? (
+                            <p className="text-xs text-amber-800 mt-2">
+                                You are currently registered with Dr. {registeredDoctor.full_name}. Your doctor can review submitted data.
+                            </p>
+                        ) : (
+                            <div className="mt-3 flex items-center gap-2">
+                                <p className="text-xs text-amber-800">You are not registered with a doctor yet.</p>
+                                <button
+                                    onClick={() => navigate('/patient/book-appointment')}
+                                    className="px-3 py-1.5 rounded-md bg-medical-blue text-white text-xs font-semibold hover:bg-medical-blue/90"
+                                >
+                                    Register With Doctor
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Patient Selector */}
                 <div className="mb-6 relative bg-card/30 backdrop-blur-xl rounded-2xl p-6 border border-border/50 shadow-soft z-10">
                     <div className="flex items-center gap-2 mb-4">
@@ -290,8 +362,9 @@ const DataEntry = () => {
                                         setShowPatientSearch(true);
                                     }}
                                     onFocus={() => setShowPatientSearch(true)}
-                                    placeholder="Search patient by name or ID..."
+                                    placeholder={isPatientUser ? "Confirm your profile" : "Search patient by name or ID..."}
                                     className="pl-10 h-12 border-border/50 bg-background/50 backdrop-blur-sm focus-visible:ring-medical-blue/50"
+                                    disabled={isPatientUser}
                                 />
                             </div>
 
@@ -407,7 +480,7 @@ const DataEntry = () => {
                                     ) : (
                                         <>
                                             <Save className="h-4 w-4 mr-2" />
-                                            Save Patient Data
+                                            Save Patient Data as New Visit
                                         </>
                                     )}
                                 </Button>
@@ -474,14 +547,6 @@ const DataEntry = () => {
                                                         <label className="text-xs font-medium text-muted-foreground">
                                                             {field.name}
                                                         </label>
-                                                        <span
-                                                            className={cn(
-                                                                "text-xs font-medium px-2 py-0.5 rounded-full",
-                                                                getConfidenceColor(field.confidence)
-                                                            )}
-                                                        >
-                                                            {field.confidence}
-                                                        </span>
                                                     </div>
                                                     <Input
                                                         value={field.value}

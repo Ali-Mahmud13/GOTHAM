@@ -218,9 +218,9 @@ export const BookAppointmentPage = () => {
   return (
     <div className="min-h-screen bg-background">
       <PatientNavbar />
-      <main className="container mx-auto px-4 py-8 max-w-2xl">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-2xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-2">
+          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-2">
             Book Appointment
           </h1>
           <p className="text-muted-foreground">Schedule a consultation with your doctor.</p>
@@ -255,13 +255,13 @@ export const BookAppointmentPage = () => {
         )}
 
         {/* Progress Steps */}
-        <div className="flex items-center gap-2 mb-8">
+        <div className="flex items-center gap-1.5 sm:gap-2 mb-8 overflow-x-auto pb-1">
           {(['select-doctor', 'select-date', 'select-time'] as const).map((s, i) => (
             <div key={s} className="flex items-center gap-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${step === s || (step === 'confirm' && i < 3) ? 'bg-gradient-to-r from-medical-pink to-medical-blue text-white' : 'bg-gray-100 text-gray-400'}`}>
+              <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold flex-shrink-0 ${step === s || (step === 'confirm' && i < 3) ? 'bg-gradient-to-r from-medical-pink to-medical-blue text-white' : 'bg-gray-100 text-gray-400'}`}>
                 {i + 1}
               </div>
-              <span className={`text-sm font-medium hidden sm:block ${step === s ? 'text-gray-900' : 'text-gray-400'}`}>
+              <span className={`text-xs sm:text-sm font-medium hidden sm:block ${step === s ? 'text-gray-900' : 'text-gray-400'}`}>
                 {['Doctor', 'Date', 'Time'][i]}
               </span>
               {i < 2 && <ChevronRight className="h-4 w-4 text-gray-300" />}
@@ -328,7 +328,7 @@ export const BookAppointmentPage = () => {
         {/* Step: Select Date */}
         {step === 'select-date' && selectedDoctor && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
               <h2 className="font-semibold text-lg text-gray-900 flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-medical-blue" />
                 Select a Date
@@ -347,7 +347,7 @@ export const BookAppointmentPage = () => {
                 <p className="text-xs text-gray-400 mt-1">This doctor has not set working hours yet.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {dateOptions.map(d => {
                   const avail = isDateAvailable(d);
                   const dow = (new Date(d + 'T12:00:00').getDay() + 6) % 7;
@@ -375,7 +375,7 @@ export const BookAppointmentPage = () => {
         {/* Step: Select Time */}
         {step === 'select-time' && selectedDoctor && selectedDate && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
               <h2 className="font-semibold text-lg text-gray-900 flex items-center gap-2">
                 <Clock className="h-5 w-5 text-medical-blue" />
                 Select a Time
@@ -399,7 +399,7 @@ export const BookAppointmentPage = () => {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-6">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
                   {timeSlots.map((slot, i) => (
                     <button
                       key={i}

@@ -1,0 +1,110 @@
+"""Persistence helpers for storing generated assessment reports in DB."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+from sqlmodel import Session, select
+
+from app.db.session import engine
+from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+
+
+def _to_gdm_risk_value(level: Optional[str]) -> Optional[int]:
+    if not level:
+        return None
+    normalized = level.lower().strip()
+    if normalized == "high":
+        return 2
+    if normalized in {"medium", "elevated"}:
+        return 1
+    if normalized == "low":
+        return 0
+    return None
+
+
+def _to_fetal_status_value(level: Optional[str]) -> Optional[int]:
+    if not level:
+        return None
+    normalized = level.lower().strip()
+    if normalized == "high":
+        return 3
+    if normalized in {"medium", "elevated"}:
+        return 2
+    if normalized == "low":
+        return 1
+    return None
+
+
+def save_assessment_report(
+    patient_identifier: str,
+    assessment_type: str,
+    assessment_report: str,
+    risk_levels: Optional[dict] = None,
+) -> bool:
+    """Save only structured assessment report output to latest assessment records."""
+    if not patient_identifier or not assessment_report:
+        return False
+
+    risk_levels = risk_levels or {}
+
+    with Session(engine) as session:
+        patient = session.exec(
+            select(Patient).where(Patient.patient_identifier == patient_identifier)
+        ).first()
+
+        if not patient:
+            return False
+
+        latest_visit = session.exec(
+            select(Visit)
+            .where(Visit.patient_id == patient.id)
+            .order_by(Visit.visit_date.desc())
+        ).first()
+
+        if not latest_visit:
+            return False
+
+        if assessment_type in {"maternal", "both"}:
+            gdm = session.exec(select(GDMAssessment).where(GDMAssessment.visit_id == latest_visit.id)).first()
+            if gdm:
+                gdm.ai_report = assessment_report
+                gdm_risk = _to_gdm_risk_value(risk_levels.get("gdm"))
+                if gdm_risk is not None:
+                    gdm.risk_level = gdm_risk
+                session.add(gdm)
+
+            anemia = session.exec(select(AnemiaAssessment).where(AnemiaAssessment.visit_id == latest_visit.id)).first()
+            if anemia:
+                anemia.ai_report = assessment_report
+                session.add(anemia)
+
+        if assessment_type in {"fetal", "both"}:
+            fetal = session.exec(select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == latest_visit.id)).first()
+            if fetal:
+                fetal.ai_report = assessment_report
+                fetal_status = _to_fetal_status_value(risk_levels.get("fetal"))
+                if fetal_status is not None:
+                    fetal.status = fetal_status
+                session.add(fetal)
+
+        overall_risk = None
+        if assessment_type in {"maternal", "both"}:
+            overall_risk = risk_levels.get("gdm") or risk_levels.get("anemia")
+        if assessment_type in {"fetal", "both"}:
+            fetal_risk = risk_levels.get("fetal")
+            if fetal_risk == "high":
+                overall_risk = "high"
+            elif fetal_risk == "medium" and overall_risk != "high":
+                overall_risk = "medium"
+            elif not overall_risk:
+                overall_risk = fetal_risk
+
+        if overall_risk in {"low", "medium", "high"}:
+            patient.risk_level = overall_risk
+
+        patient.updated_at = datetime.utcnow()
+        session.add(patient)
+        session.commit()
+
+        return True

@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from app.db.session import get_session
 from app.models.auth import AuthUser
 from app.models.appointments import Appointment, DoctorAvailability, RegistrationRequest
-from app.models.patient import Patient
+from app.models.patient import Patient, Visit
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -842,7 +842,17 @@ def patient_unregister(
         raise HTTPException(status_code=400, detail="You are not registered with any doctor")
 
     patient.doctor_id = None
+    patient.clinical_notes = None
     session.add(patient)
+
+    # Remove doctor-authored visit notes for unregistered patients.
+    visits = session.exec(
+        select(Visit).where(Visit.patient_id == patient.id)
+    ).all()
+    for v in visits:
+        if v.visit_type != "clinical_notes":
+            v.notes = None
+            session.add(v)
 
     # Supersede any pending registration requests
     pending = session.exec(
@@ -919,7 +929,16 @@ def doctor_unregister_patient(
         raise HTTPException(status_code=400, detail="This patient is not registered under you")
 
     patient.doctor_id = None
+    patient.clinical_notes = None
     session.add(patient)
+
+    visits = session.exec(
+        select(Visit).where(Visit.patient_id == patient.id)
+    ).all()
+    for v in visits:
+        if v.visit_type != "clinical_notes":
+            v.notes = None
+            session.add(v)
 
     # Supersede any pending registration requests for this doctor-patient pair
     pending = session.exec(

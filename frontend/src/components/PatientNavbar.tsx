@@ -1,4 +1,4 @@
-import { User, LogOut, Edit, CalendarDays, LayoutDashboard, Bell, CheckCircle, XCircle, Clock } from "lucide-react";
+import { User, LogOut, Edit, CalendarDays, LayoutDashboard, Bell, CheckCircle, XCircle, Clock, UserPlus } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -144,7 +144,7 @@ export const PatientNavbar = () => {
 
   return (
     <nav className="border-b border-border/40 bg-card/30 backdrop-blur-xl sticky top-0 z-50">
-      <div className="container mx-auto px-6 py-3">
+      <div className="container mx-auto px-3 sm:px-6 py-3">
         <div className="flex items-center justify-between">
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
@@ -155,10 +155,10 @@ export const PatientNavbar = () => {
               </div>
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
+              <h1 className="text-base sm:text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
                 GOTHAM Patient Portal
               </h1>
-              <p className="text-xs text-muted-foreground -mt-1">
+              <p className="hidden sm:block text-xs text-muted-foreground -mt-1">
                 Your Health Dashboard
               </p>
             </div>
@@ -302,6 +302,31 @@ export const PatientNavbar = () => {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
+        {/* Mobile Quick Nav */}
+        <div className="md:hidden mt-2 grid grid-cols-3 gap-2">
+          <button
+            onClick={() => navigate('/patient/dashboard')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <LayoutDashboard className="w-3.5 h-3.5" />
+            Dashboard
+          </button>
+          <button
+            onClick={() => navigate('/patient/book-appointment')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            Book
+          </button>
+          <button
+            onClick={() => navigate('/patient/appointments')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            Appointments
+          </button>
         </div>
       </div>
     </nav>

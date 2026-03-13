@@ -1,9 +1,10 @@
 """Main application."""
 
 import inngest.fast_api
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+from sqlalchemy import inspect
 
 from app.core.config import setup_logging
 from app.inngest import inngest_client, ALL_FUNCTIONS
@@ -34,17 +35,71 @@ async def startup_event():
         logger.info("✓ Database tables initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {str(e)}", exc_info=True)
-    # Add new columns to existing tables if they don't exist yet
-    with engine.connect() as conn:
-        for col_sql in [
-            "ALTER TABLE appointments ADD COLUMN rescheduled_by TEXT",
-            "ALTER TABLE appointments ADD COLUMN cancelled_by TEXT",
-        ]:
-            try:
-                conn.execute(text(col_sql))
-                conn.commit()
-            except Exception:
-                pass  # Column already exists
+    # Ensure schema drift is healed on startup for existing deployments.
+    try:
+        inspector = inspect(engine)
+        existing_columns = {
+            c["name"] for c in inspector.get_columns("appointments")
+        }
+        required_columns = {
+            "rescheduled_by": "TEXT",
+            "cancelled_by": "TEXT",
+        }
+
+        with engine.connect() as conn:
+            for col_name, col_type in required_columns.items():
+                if col_name not in existing_columns:
+                    logger.warning(
+                        "Missing appointments.%s column detected. Applying startup migration...",
+                        col_name,
+                    )
+                    conn.execute(text(f"ALTER TABLE appointments ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                    logger.info("✓ Added appointments.%s", col_name)
+    except Exception as e:
+        logger.error(
+            "Failed while ensuring appointments migration columns: %s",
+            str(e),
+            exc_info=True,
+        )
+
+    # Data hygiene: unregistered patients should not retain doctor-authored notes.
+    try:
+        with engine.connect() as conn:
+            patient_update = conn.execute(
+                text(
+                    """
+                    UPDATE patients
+                    SET clinical_notes = NULL
+                    WHERE doctor_id IS NULL AND clinical_notes IS NOT NULL
+                    """
+                )
+            )
+            visit_update = conn.execute(
+                text(
+                    """
+                    UPDATE visits
+                    SET notes = NULL
+                    WHERE patient_id IN (SELECT id FROM patients WHERE doctor_id IS NULL)
+                      AND COALESCE(visit_type, '') <> 'clinical_notes'
+                      AND notes IS NOT NULL
+                    """
+                )
+            )
+            conn.commit()
+
+            if patient_update.rowcount or visit_update.rowcount:
+                logger.info(
+                    "Applied unregistered-notes cleanup: patients=%s, visits=%s",
+                    patient_update.rowcount,
+                    visit_update.rowcount,
+                )
+    except Exception as e:
+        logger.error(
+            "Failed while cleaning unregistered patient notes: %s",
+            str(e),
+            exc_info=True,
+        )
 
 # CORS for React frontend
 app.add_middleware(
@@ -53,11 +108,29 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8080",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8080",
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def ensure_local_cors_headers(request: Request, call_next):
+    """Force CORS headers for localhost origins, even on error paths."""
+    response = await call_next(request)
+    origin = request.headers.get("origin", "")
+    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+    return response
 
 # Register Inngest
 inngest.fast_api.serve(app, inngest_client, ALL_FUNCTIONS)

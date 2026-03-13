@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import {
   User, Phone, Calendar, Heart, Activity, Clock, Stethoscope, BarChart3,
-  AlertCircle, TrendingUp, ChevronRight, Zap, FileText, Clipboard, Brain,
-  CalendarCheck, PlusCircle
+  AlertCircle, TrendingUp, ChevronRight, FileText, Clipboard,
+  CalendarCheck, PlusCircle, ShieldAlert
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PatientNavbar } from "@/components/PatientNavbar";
 import { VitalsChart } from "@/components/charts/VitalsChart";
+import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,8 @@ interface PatientProfile {
   age: number;
   contact_number: string;
   clinical_notes: string | null;
+  doctor_id: number | null;
+  is_registered_with_doctor: boolean;
   risk_level: 'high' | 'medium' | 'low';
   number_of_pregnancies: number | null;
   bmi_category: number | null;
@@ -42,6 +45,28 @@ interface Appointment {
   notes?: string;
 }
 
+interface VisitRecord extends VisitVitalsPoint {
+  visit_type?: string | null;
+  notes?: string | null;
+  wbc?: number | null;
+  rbc?: number | null;
+  hgb?: number | null;
+  hct?: number | null;
+  mcv?: number | null;
+  mch?: number | null;
+  mchc?: number | null;
+  plt?: number | null;
+  accelerations?: number | null;
+  fetal_health_status?: number | null;
+  gdm_risk_level?: number | null;
+  anemia_diagnosis?: string | null;
+}
+
+interface VisitStatsResponse {
+  total_visits: number;
+  recent_visits: VisitRecord[];
+}
+
 type TabType = 'overview' | 'medical' | 'visits' | 'vitals';
 
 export const PatientDashboard = () => {
@@ -51,8 +76,8 @@ export const PatientDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [visitStats, setVisitStats] = useState<{ total_visits: number; recent_visits: any[] }>({ total_visits: 0, recent_visits: [] });
-  const [visits, setVisits] = useState<any[]>([]);
+  const [visitStats, setVisitStats] = useState<VisitStatsResponse>({ total_visits: 0, recent_visits: [] });
+  const [visits, setVisits] = useState<VisitRecord[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
 
   // Get patient identifier from auth user
@@ -93,15 +118,12 @@ export const PatientDashboard = () => {
       const profileData = await profileResponse.json();
       setPatient(profileData);
 
-      // Fetch visit history
-      const visitsResponse = await fetch(`${API_URL}/api/patient-portal/visits/${patientIdentifier}`);
+      // Fetch visit history with assessment metrics for trend charts and summaries
+      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientIdentifier}/visits`);
       if (visitsResponse.ok) {
-        const visitsData = await visitsResponse.json();
-        setVisits(visitsData);
-        setVisitStats({
-          total_visits: visitsData.length,
-          recent_visits: visitsData.slice(0, 5)
-        });
+        const visitsData: VisitStatsResponse = await visitsResponse.json();
+        setVisits(visitsData.recent_visits || []);
+        setVisitStats(visitsData);
       }
 
       setError(null);
@@ -122,15 +144,13 @@ export const PatientDashboard = () => {
           textColor: 'text-rose-600',
           ringColor: 'stroke-rose-500',
           label: 'High Risk',
-          score: 85,
         };
       case 'medium':
         return {
-          bgColor: 'from-purple-500 via-violet-500 to-purple-600',
-          textColor: 'text-purple-600',
-          ringColor: 'stroke-purple-500',
+          bgColor: 'from-violet-500 via-indigo-500 to-blue-500',
+          textColor: 'text-violet-600',
+          ringColor: 'stroke-violet-500',
           label: 'Medium Risk',
-          score: 55,
         };
       case 'low':
         return {
@@ -138,7 +158,6 @@ export const PatientDashboard = () => {
           textColor: 'text-cyan-600',
           ringColor: 'stroke-cyan-500',
           label: 'Low Risk',
-          score: 25,
         };
       default:
         return {
@@ -146,7 +165,6 @@ export const PatientDashboard = () => {
           textColor: 'text-gray-600',
           ringColor: 'stroke-gray-400',
           label: 'Unknown',
-          score: 0,
         };
     }
   };
@@ -160,11 +178,50 @@ export const PatientDashboard = () => {
     });
   };
 
+  const averageMetric = (selector: (visit: VisitVitalsPoint) => number | null | undefined) => {
+    const values = visits
+      .map(selector)
+      .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
+    if (values.length === 0) return null;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  };
+
+  const avgGlucose = averageMetric((visit) => visit.glucose_level ?? visit.ogtt);
+  const avgSystolic = averageMetric((visit) => visit.blood_pressure_systolic);
+  const avgDiastolic = averageMetric((visit) => visit.blood_pressure_diastolic);
+  const avgBmi = averageMetric((visit) => visit.bmi);
+  const avgHemoglobin = averageMetric((visit) => visit.hgb);
+
+  const timelineVisits = visits.map((visit) => ({
+    id: visit.id,
+    visit_date: visit.visit_date,
+    visit_type: visit.visit_type || 'routine',
+    notes: visit.notes || '',
+    wbc: visit.wbc ?? null,
+    rbc: visit.rbc ?? null,
+    hgb: visit.hgb ?? null,
+    hct: visit.hct ?? null,
+    mcv: visit.mcv ?? null,
+    mch: visit.mch ?? null,
+    mchc: visit.mchc ?? null,
+    plt: visit.plt ?? null,
+    baseline_value: visit.baseline_value ?? null,
+    accelerations: visit.accelerations ?? null,
+    fetal_health_status: visit.fetal_health_status ?? null,
+    glucose_level: visit.glucose_level ?? null,
+    blood_pressure_systolic: visit.blood_pressure_systolic ?? null,
+    blood_pressure_diastolic: visit.blood_pressure_diastolic ?? null,
+    bmi: visit.bmi ?? null,
+    ogtt: visit.ogtt ?? null,
+    gdm_risk_level: visit.gdm_risk_level ?? null,
+    anemia_diagnosis: visit.anemia_diagnosis ?? null,
+  }));
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
         <PatientNavbar />
-        <main className="container mx-auto px-6 py-10">
+        <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
           <div className="text-center text-lg">
             <div className="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent rounded-full text-medical-blue mb-4" />
             <p>Loading your profile...</p>
@@ -178,7 +235,7 @@ export const PatientDashboard = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
         <PatientNavbar />
-        <main className="container mx-auto px-6 py-10">
+        <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-10">
           <div className="text-center text-red-500">
             <p>{error || 'Failed to load your profile.'}</p>
             <button
@@ -194,6 +251,7 @@ export const PatientDashboard = () => {
   }
 
   const riskConfig = getRiskConfig(patient.risk_level);
+  const isRegisteredWithDoctor = Boolean(patient.is_registered_with_doctor || patient.doctor_id);
 
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
@@ -208,56 +266,22 @@ export const PatientDashboard = () => {
 
       {/* Hero Header Section */}
       <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50/30 to-pink-50/30 border-b border-gray-200">
-        <div className="container mx-auto px-6 py-8 relative z-10">
-          {/* Hero Content */}
-          <div className="flex items-center justify-between">
+        <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             {/* Left: Patient Info */}
-            <div className="flex items-center gap-6">
-              {/* Large Avatar with Health Ring */}
-              <div className="relative">
-                {/* Health Score Ring */}
-                <svg className="w-32 h-32" viewBox="0 0 128 128">
-                  {/* Background circle */}
-                  <circle
-                    cx="64"
-                    cy="64"
-                    r="56"
-                    fill="none"
-                    stroke="#e5e7eb"
-                    strokeWidth="6"
-                  />
-                  {/* Progress circle */}
-                  <circle
-                    cx="64"
-                    cy="64"
-                    r="56"
-                    fill="none"
-                    className={riskConfig.ringColor}
-                    strokeWidth="6"
-                    strokeLinecap="round"
-                    strokeDasharray={`${2 * Math.PI * 56}`}
-                    strokeDashoffset={`${2 * Math.PI * 56 * (1 - riskConfig.score / 100)}`}
-                    transform="rotate(-90 64 64)"
-                    style={{ transition: 'stroke-dashoffset 1s ease-in-out' }}
-                  />
-                </svg>
-
-                {/* Avatar in center */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-medical-pink to-medical-blue p-0.5 shadow-xl">
-                    <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
-                      <User className="w-10 h-10 text-gray-700" />
-                    </div>
-                  </div>
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-3 border-white shadow-md flex items-center justify-center">
-                    <Heart className="w-3 h-3 text-white" />
+            <div className="flex items-center gap-4">
+              {/* Avatar */}
+              <div className="relative flex-shrink-0">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-medical-pink to-medical-blue p-0.5 shadow-xl">
+                  <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
+                    <User className="w-8 h-8 sm:w-10 sm:h-10 text-gray-700" />
                   </div>
                 </div>
               </div>
 
               {/* Patient Details */}
               <div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="text-xs font-semibold text-gray-500 tracking-wide">{patient.patient_identifier}</span>
                   <div className={cn(
                     "px-3 py-1 rounded-full text-xs font-bold text-white",
@@ -268,28 +292,20 @@ export const PatientDashboard = () => {
                   </div>
                 </div>
 
-                <h1 className="text-4xl font-bold text-gray-900 mb-3">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
                   {patient.name}
                 </h1>
 
-                <div className="flex items-center gap-4 text-gray-600 text-sm">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-gray-600 text-sm">
                   {patient.age > 0 && (
-                    <>
-                      <div className="flex items-center gap-1.5">
-                        <User className="w-4 h-4" />
-                        <span>{patient.age} years</span>
-                      </div>
-                      <span className="text-gray-300">•</span>
-                    </>
+                    <div className="flex items-center gap-1.5">
+                      <User className="w-4 h-4" />
+                      <span>{patient.age} years</span>
+                    </div>
                   )}
                   <div className="flex items-center gap-1.5">
                     <Phone className="w-4 h-4" />
                     <span>{patient.contact_number}</span>
-                  </div>
-                  <span className="text-gray-300">•</span>
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="w-4 h-4" />
-                    <span className="text-xs">Updated {formatDate(patient.updated_at)}</span>
                   </div>
                 </div>
               </div>
@@ -300,8 +316,8 @@ export const PatientDashboard = () => {
 
       {/* Tabs Navigation */}
       <div className="bg-white/90 backdrop-blur-md border-b border-gray-200 sticky top-0 z-40 shadow-sm">
-        <div className="container mx-auto px-6">
-          <div className="flex items-center gap-2">
+        <div className="container mx-auto px-4 sm:px-6">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -310,17 +326,17 @@ export const PatientDashboard = () => {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    "relative px-6 py-4 font-semibold transition-all duration-300 flex items-center gap-2 group",
+                    "relative px-3 sm:px-6 py-4 font-semibold transition-all duration-300 flex items-center gap-1.5 group whitespace-nowrap flex-shrink-0",
                     isActive
                       ? "text-medical-blue"
                       : "text-gray-600 hover:text-gray-900"
                   )}
                 >
                   <Icon className={cn(
-                    "w-5 h-5 transition-transform",
+                    "w-4 h-4 sm:w-5 sm:h-5 transition-transform",
                     isActive && "scale-110"
                   )} />
-                  <span>{tab.label}</span>
+                  <span className="text-sm sm:text-base">{tab.label}</span>
 
                   {/* Active indicator */}
                   {isActive && (
@@ -339,37 +355,67 @@ export const PatientDashboard = () => {
       </div>
 
       {/* Tab Content */}
-      <main className="container mx-auto px-6 py-10">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {!isRegisteredWithDoctor && (
+          <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-amber-800">You are currently not registered with a doctor</p>
+                <p className="text-sm text-amber-700 mt-1">
+                  You can still add your own clinical notes and visit data, but registration is recommended for clinician oversight.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate('/patient/book-appointment')}
+                  className="px-3 py-2 rounded-lg bg-medical-blue text-white text-sm font-semibold hover:bg-medical-blue/90"
+                >
+                  Register With Doctor
+                </button>
+                <button
+                  onClick={() => navigate(`/data-entry?patientId=${patient.patient_identifier}&returnTo=${encodeURIComponent('/patient/dashboard')}`)}
+                  className="px-3 py-2 rounded-lg border border-amber-400 text-amber-800 bg-white text-sm font-semibold hover:bg-amber-100"
+                >
+                  Open Clinical Notes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Overview Tab */}
         {activeTab === 'overview' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Health Score */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+              {/* Risk Level */}
               <div className="group relative bg-gradient-to-br from-medical-pink/5 to-rose-50/50 p-6 rounded-2xl border border-medical-pink/20 hover:shadow-xl transition-all duration-300 overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-medical-pink/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-medical-pink to-rose-400 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                      <Heart className="w-6 h-6 text-white" />
+                      <ShieldAlert className="w-6 h-6 text-white" />
                     </div>
                     <TrendingUp className="w-5 h-5 text-medical-pink" />
                   </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Health Score</p>
-                  <p className="text-4xl font-bold text-gray-900 mb-2">{riskConfig.score}</p>
-                  <p className="text-xs text-medical-pink font-semibold">Risk: {patient.risk_level}</p>
+                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Level</p>
+                  <p className={cn("text-3xl font-bold mb-2", riskConfig.textColor)}>{riskConfig.label}</p>
+                  <p className="text-xs text-gray-500 font-semibold">Based on latest assessment</p>
                 </div>
               </div>
 
               {/* Total Visits */}
-              <div className="group relative bg-gradient-to-br from-medical-blue/5 to-cyan-50/50 p-6 rounded-2xl border border-medical-blue/20 hover:shadow-xl transition-all duration-300 overflow-hidden">
+              <button
+                onClick={() => setActiveTab('visits')}
+                className="group relative bg-gradient-to-br from-medical-blue/5 to-cyan-50/50 p-6 rounded-2xl border border-medical-blue/20 hover:shadow-xl transition-all duration-300 overflow-hidden text-left w-full"
+              >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-medical-blue/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-medical-blue to-cyan-400 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                       <Stethoscope className="w-6 h-6 text-white" />
                     </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                    <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform" />
                   </div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Total Visits</p>
                   <p className="text-4xl font-bold text-gray-900 mb-2">{visitStats.total_visits}</p>
@@ -379,10 +425,13 @@ export const PatientDashboard = () => {
                       : 'No visits yet'}
                   </p>
                 </div>
-              </div>
+              </button>
 
               {/* Risk Factors */}
-              <div className="group relative bg-gradient-to-br from-purple-50 to-violet-50 p-6 rounded-2xl border border-purple-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden">
+              <button
+                onClick={() => setActiveTab('medical')}
+                className="group relative bg-gradient-to-br from-purple-50 to-violet-50 p-6 rounded-2xl border border-purple-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden text-left w-full"
+              >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/10 to-violet-500/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
@@ -397,49 +446,48 @@ export const PatientDashboard = () => {
                   </p>
                   <p className="text-xs text-gray-500 font-semibold">Active conditions</p>
                 </div>
-              </div>
-
-              {/* AI Confidence */}
-              <div className="group relative bg-gradient-to-br from-emerald-50 to-teal-50 p-6 rounded-2xl border border-emerald-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 rounded-full blur-2xl" />
-                <div className="relative">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                      <Zap className="w-6 h-6 text-white" />
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">AI Confidence</p>
-                  <p className="text-4xl font-bold text-gray-900 mb-2">94%</p>
-                  <p className="text-xs text-gray-500 font-semibold">High accuracy</p>
-                </div>
-              </div>
+              </button>
             </div>
 
             {/* Quick Summary Cards */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Recent Activity */}
+              {/* Recent Visits */}
               <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-gray-200/50">
-                <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-medical-blue" />
-                  Recent Activity
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-xl">
-                    <div className="w-2 h-2 bg-medical-blue rounded-full mt-2" />
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900">Profile Updated</p>
-                      <p className="text-xs text-gray-600">{formatDate(patient.updated_at)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3 p-3 bg-pink-50 rounded-xl">
-                    <div className="w-2 h-2 bg-medical-pink rounded-full mt-2" />
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900">Account Created</p>
-                      <p className="text-xs text-gray-600">{formatDate(patient.created_at)}</p>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <Stethoscope className="w-5 h-5 text-medical-blue" />
+                    Recent Visits
+                  </h3>
+                  {visitStats.total_visits > 0 && (
+                    <button
+                      onClick={() => setActiveTab('visits')}
+                      className="text-sm text-medical-blue font-semibold hover:underline"
+                    >
+                      View all
+                    </button>
+                  )}
                 </div>
+                {visitStats.recent_visits.length === 0 ? (
+                  <div className="text-center py-6">
+                    <Stethoscope className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">No visits recorded yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {visitStats.recent_visits.slice(0, 3).map((v: any, i: number) => (
+                      <div key={v.id ?? i} className="flex items-start gap-3 p-3 bg-blue-50 rounded-xl">
+                        <div className="w-2 h-2 bg-medical-blue rounded-full mt-2 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900">
+                            {v.visit_type ? v.visit_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Clinical Visit'}
+                          </p>
+                          <p className="text-xs text-gray-500">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          {v.notes && <p className="text-xs text-gray-400 mt-1 truncate">{v.notes}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Quick Info */}
@@ -530,8 +578,37 @@ export const PatientDashboard = () => {
               )}
             </div>
 
+            {!isRegisteredWithDoctor && (
+              <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-amber-200">
+                <div className="flex items-center gap-3 mb-3">
+                  <Clipboard className="w-5 h-5 text-amber-700" />
+                  <h3 className="text-lg font-bold text-gray-900">Self-Reported Clinical Notes</h3>
+                </div>
+                <p className="text-sm text-gray-700">
+                  Since you are not registered with a doctor, data entered in Clinical Notes is self-reported.
+                </p>
+                <p className="text-xs text-gray-600 mt-2">
+                  Disclaimer: You are responsible for the integrity and accuracy of submitted data and any decisions made based on that data.
+                </p>
+                <div className="mt-4 flex items-center gap-2">
+                  <button
+                    onClick={() => navigate(`/data-entry?patientId=${patient.patient_identifier}&returnTo=${encodeURIComponent('/patient/dashboard')}`)}
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold"
+                  >
+                    Add My Clinical Data
+                  </button>
+                  <button
+                    onClick={() => navigate('/patient/book-appointment')}
+                    className="px-4 py-2 rounded-lg border border-medical-blue text-medical-blue text-sm font-semibold hover:bg-blue-50"
+                  >
+                    Find a Doctor
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Doctor's Notes (Read-only for patient) */}
-            {patient.clinical_notes && (
+            {isRegisteredWithDoctor && patient.clinical_notes && (
               <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl p-8 border border-gray-200/50">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
@@ -732,7 +809,7 @@ export const PatientDashboard = () => {
         {/* Visit History Tab */}
         {activeTab === 'visits' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <VisitTimeline visits={visits} />
+            <VisitTimeline visits={timelineVisits} />
           </div>
         )}
 
@@ -753,24 +830,37 @@ export const PatientDashboard = () => {
               {/* Summary Stats */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
                 <div className="bg-gradient-to-br from-medical-pink/10 to-rose-50/50 p-4 rounded-xl border border-medical-pink/20">
-                  <p className="text-xs font-semibold text-medical-pink mb-1">AVG HEART RATE</p>
-                  <p className="text-2xl font-bold text-foreground">72 <span className="text-sm font-normal text-muted-foreground">bpm</span></p>
+                  <p className="text-xs font-semibold text-medical-pink mb-1">AVG GLUCOSE</p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {avgGlucose !== null ? avgGlucose.toFixed(1) : 'N/A'}
+                    {avgGlucose !== null && <span className="text-sm font-normal text-muted-foreground"> mg/dL</span>}
+                  </p>
                 </div>
                 <div className="bg-gradient-to-br from-medical-blue/10 to-cyan-50/50 p-4 rounded-xl border border-medical-blue/20">
                   <p className="text-xs font-semibold text-medical-blue mb-1">AVG BLOOD PRESSURE</p>
-                  <p className="text-2xl font-bold text-foreground">120/80 <span className="text-sm font-normal text-muted-foreground">mmHg</span></p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {avgSystolic !== null && avgDiastolic !== null
+                      ? `${Math.round(avgSystolic)}/${Math.round(avgDiastolic)}`
+                      : 'N/A'}
+                    {avgSystolic !== null && avgDiastolic !== null && <span className="text-sm font-normal text-muted-foreground"> mmHg</span>}
+                  </p>
                 </div>
                 <div className="bg-gradient-to-br from-cyan-50 to-teal-50 p-4 rounded-xl border border-cyan-200">
-                  <p className="text-xs font-semibold text-cyan-600 mb-1">AVG TEMPERATURE</p>
-                  <p className="text-2xl font-bold text-foreground">98.6 <span className="text-sm font-normal text-muted-foreground">°F</span></p>
+                  <p className="text-xs font-semibold text-cyan-600 mb-1">AVG BMI</p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {avgBmi !== null ? avgBmi.toFixed(1) : 'N/A'}
+                  </p>
                 </div>
                 <div className="bg-gradient-to-br from-medical-pink/10 to-medical-blue/10 p-4 rounded-xl border border-medical-blue/20">
-                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG OXYGEN</p>
-                  <p className="text-2xl font-bold text-foreground">98 <span className="text-sm font-normal text-muted-foreground">%</span></p>
+                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG HEMOGLOBIN</p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {avgHemoglobin !== null ? avgHemoglobin.toFixed(1) : 'N/A'}
+                    {avgHemoglobin !== null && <span className="text-sm font-normal text-muted-foreground"> g/dL</span>}
+                  </p>
                 </div>
               </div>
 
-              <VitalsChart />
+              <VitalsChart visits={visits} />
             </div>
           </div>
         )}

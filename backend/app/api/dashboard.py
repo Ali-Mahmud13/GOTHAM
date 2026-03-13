@@ -3,13 +3,69 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlmodel import Session, select, func
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from app.db.session import get_session
 from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
 from app.models.auth import AuthUser
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+
+@router.get("/risk-trends")
+def get_risk_trends(
+    days: int = 7,
+    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    session: Session = Depends(get_session),
+) -> Dict:
+    """Get daily high/medium risk counts based on visit activity over the last N days."""
+    window_days = max(1, min(days, 30))
+    today = datetime.utcnow().date()
+    start_date = today - timedelta(days=window_days - 1)
+    start_dt = datetime.combine(start_date, datetime.min.time())
+
+    user = None
+    if user_email:
+        user = session.exec(
+            select(AuthUser).where(AuthUser.email == user_email)
+        ).first()
+
+    query = (
+        select(Visit.visit_date, Patient.id, Patient.risk_level)
+        .join(Patient, Visit.patient_id == Patient.id)
+        .where(Visit.visit_date >= start_dt)
+    )
+
+    if user and user.role == "doctor":
+        query = query.where(Patient.doctor_id == user.id)
+
+    rows = session.exec(query).all()
+
+    high_by_day: Dict[date, set[int]] = {}
+    medium_by_day: Dict[date, set[int]] = {}
+
+    for visit_date, patient_id, risk_level in rows:
+        visit_day = visit_date.date()
+        if visit_day < start_date or visit_day > today:
+            continue
+        if risk_level == "high":
+            high_by_day.setdefault(visit_day, set()).add(patient_id)
+        elif risk_level == "medium":
+            medium_by_day.setdefault(visit_day, set()).add(patient_id)
+
+    trend = []
+    for i in range(window_days):
+        current_day = start_date + timedelta(days=i)
+        trend.append(
+            {
+                "day": current_day.strftime("%a"),
+                "date": current_day.isoformat(),
+                "highRisk": len(high_by_day.get(current_day, set())),
+                "mediumRisk": len(medium_by_day.get(current_day, set())),
+            }
+        )
+
+    return {"data": trend}
 
 
 @router.get("/stats")
@@ -295,13 +351,11 @@ def get_patient_visits(patient_identifier: str, session: Session = Depends(get_s
             
             # Anemia predictions
             "anemia_diagnosis": anemia.diagnosis if anemia else None,
-            "anemia_confidence": anemia.confidence if anemia else None,
             
             # FHP Data from fetal health assessment
             "baseline_value": fetal.baseline_value if fetal else None,
             "accelerations": fetal.accelerations if fetal else None,
             "fetal_health_status": fetal.status if fetal else None,
-            "fetal_health_confidence": fetal.confidence if fetal else None,
             
             # GDM Data from GDM assessment
             "glucose_level": gdm.glucose_level if gdm else None,
@@ -310,7 +364,6 @@ def get_patient_visits(patient_identifier: str, session: Session = Depends(get_s
             "bmi": gdm.bmi if gdm else None,
             "ogtt": gdm.ogtt if gdm else None,
             "gdm_risk_level": gdm.risk_level if gdm else None,
-            "gdm_confidence": gdm.confidence if gdm else None,
         }
         
         visit_data.append(visit_dict)

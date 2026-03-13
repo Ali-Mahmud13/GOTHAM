@@ -34,6 +34,9 @@ class PatientProfileResponse(BaseModel):
     name: str
     age: int
     contact_number: str
+    clinical_notes: Optional[str] = None
+    doctor_id: Optional[int] = None
+    is_registered_with_doctor: bool = False
     risk_level: str
     number_of_pregnancies: Optional[int]
     bmi_category: Optional[int]
@@ -126,8 +129,30 @@ def get_patient_profile(
     
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
-    
-    return patient
+
+    # Unregistered patients should not receive doctor-authored notes.
+    clinical_notes = patient.clinical_notes if patient.doctor_id else None
+
+    return PatientProfileResponse(
+        id=patient.id,
+        patient_identifier=patient.patient_identifier,
+        name=patient.name,
+        age=patient.age,
+        contact_number=patient.contact_number,
+        clinical_notes=clinical_notes,
+        doctor_id=patient.doctor_id,
+        is_registered_with_doctor=bool(patient.doctor_id),
+        risk_level=patient.risk_level,
+        number_of_pregnancies=patient.number_of_pregnancies,
+        bmi_category=patient.bmi_category,
+        family_history=patient.family_history,
+        pcos=patient.pcos,
+        unexplained_prenatal_loss=patient.unexplained_prenatal_loss,
+        large_child_or_birth_default=patient.large_child_or_birth_default,
+        prediabetes=patient.prediabetes,
+        created_at=patient.created_at,
+        updated_at=patient.updated_at,
+    )
 
 
 @router.put("/profile/{patient_identifier}", response_model=PatientProfileResponse)
@@ -220,7 +245,6 @@ def get_patient_assessments(
                 "id": a.id,
                 "timestamp": a.timestamp,
                 "risk_prediction": a.risk_prediction,
-                "confidence": a.confidence,
                 "input_features": a.input_features
             }
             for a in gdm_assessments
@@ -230,7 +254,6 @@ def get_patient_assessments(
                 "id": a.id,
                 "timestamp": a.timestamp,
                 "risk_prediction": a.risk_prediction,
-                "confidence": a.confidence,
                 "input_features": a.input_features
             }
             for a in anemia_assessments
@@ -240,7 +263,6 @@ def get_patient_assessments(
                 "id": a.id,
                 "timestamp": a.timestamp,
                 "risk_prediction": a.risk_prediction,
-                "confidence": a.confidence,
                 "input_features": a.input_features
             }
             for a in fetal_assessments

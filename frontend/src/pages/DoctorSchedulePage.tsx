@@ -125,7 +125,7 @@ export const DoctorSchedulePage = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
-      <main className="container mx-auto px-6 py-10 max-w-3xl">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-10 max-w-3xl">
         <div className="mb-8">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-2">
             Manage Schedule

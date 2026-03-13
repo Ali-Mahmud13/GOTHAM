@@ -22,7 +22,6 @@ interface Visit {
     baseline_value: number | null;
     accelerations: number | null;
     fetal_health_status: number | null;
-    fetal_health_confidence: number | null;
 
     // GDM Data
     glucose_level: number | null;
@@ -31,11 +30,9 @@ interface Visit {
     bmi: number | null;
     ogtt: number | null;
     gdm_risk_level: number | null;
-    gdm_confidence: number | null;
 
     // Predictions
     anemia_diagnosis: string | null;
-    anemia_confidence: number | null;
 }
 
 interface VisitTimelineProps {
@@ -273,19 +270,9 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                             {/* AI Diagnosis */}
                                             {visit.anemia_diagnosis && (
                                                 <div className="bg-gradient-to-r from-medical-pink/10 to-rose-50/50 rounded-lg p-4 border border-medical-pink/20">
-                                                    <div className="flex items-center justify-between">
-                                                        <div>
-                                                            <p className="text-xs font-semibold text-medical-pink mb-1">AI Diagnosis</p>
-                                                            <p className="text-base font-bold text-foreground">{visit.anemia_diagnosis}</p>
-                                                        </div>
-                                                        {visit.anemia_confidence && (
-                                                            <div className="text-right">
-                                                                <p className="text-xs font-semibold text-muted-foreground mb-1">Confidence</p>
-                                                                <p className="text-2xl font-bold text-medical-pink">
-                                                                    {(visit.anemia_confidence * 100).toFixed(0)}%
-                                                                </p>
-                                                            </div>
-                                                        )}
+                                                    <div>
+                                                        <p className="text-xs font-semibold text-medical-pink mb-1">AI Diagnosis</p>
+                                                        <p className="text-base font-bold text-foreground">{visit.anemia_diagnosis}</p>
                                                     </div>
                                                 </div>
                                             )}
@@ -330,11 +317,6 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                                         <p className={cn("text-xl font-bold", fetalStatus.text)}>
                                                             {fetalStatus.label}
                                                         </p>
-                                                        {visit.fetal_health_confidence && (
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                {(visit.fetal_health_confidence * 100).toFixed(0)}% confidence
-                                                            </p>
-                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -403,11 +385,6 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                                                 visit.gdm_risk_level === 1 ? 'Elevated' :
                                                                     'High Risk'}
                                                         </p>
-                                                        {visit.gdm_confidence && (
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                {(visit.gdm_confidence * 100).toFixed(0)}% confidence
-                                                            </p>
-                                                        )}
                                                     </div>
                                                 )}
                                             </div>

@@ -1,6 +1,6 @@
 """Data entry service - Handles clinical notes parsing and visit creation."""
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 from sqlmodel import Session
 from datetime import datetime, timedelta
 from app.repositories import PatientRepository, VisitRepository
@@ -16,6 +16,9 @@ from app.core.llm import get_llm
 from langchain_core.messages import HumanMessage
 import logging
 import json
+import asyncio
+from app.models import Patient
+from app.models.auth import AuthUser
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +37,7 @@ class DataEntryService:
         self.patient_repo = PatientRepository(session)
         self.visit_repo = VisitRepository(session)
     
-    def get_all_patients(self) -> List[PatientResponse]:
+    def get_all_patients(self, user: Optional[AuthUser] = None) -> List[PatientResponse]:
         """
         Get all patients with their latest visit info.
         
@@ -42,9 +45,13 @@ class DataEntryService:
             List of PatientResponse objects
         """
         try:
-            from app.models import Patient
-            
-            patients = self.session.query(Patient).all()
+            if user and user.role == "patient" and user.patient_id:
+                own_patient = self.session.get(Patient, user.patient_id)
+                patients = [own_patient] if own_patient else []
+            elif user and user.role == "doctor":
+                patients = self.session.query(Patient).filter(Patient.doctor_id == user.id).all()
+            else:
+                patients = self.session.query(Patient).all()
             patient_responses = []
             
             for patient in patients:
@@ -100,7 +107,10 @@ class DataEntryService:
             llm = get_llm(temperature=0, max_tokens=2048)  # Increased from 512 to handle full response
             
             prompt = self._build_extraction_prompt(notes, patient_id)
-            response = await llm.ainvoke([HumanMessage(content=prompt)])
+            response = await asyncio.wait_for(
+                llm.ainvoke([HumanMessage(content=prompt)]),
+                timeout=25,
+            )
             
             # Log the raw response for debugging
             logger.info(f"LLM raw response: {response.content[:500]}...")  # First 500 chars
@@ -158,6 +168,14 @@ class DataEntryService:
                 success=False,
                 message="Failed to parse AI response"
             )
+        except asyncio.TimeoutError:
+            logger.error("Clinical notes parsing timed out")
+            return NotesParseResponse(
+                extracted_fields=[],
+                missing_fields=[],
+                success=False,
+                message="Parsing timed out. Please try shorter notes or retry."
+            )
         except Exception as e:
             logger.error(f"Error parsing notes: {str(e)}", exc_info=True)
             return NotesParseResponse(
@@ -167,7 +185,7 @@ class DataEntryService:
                 message=f"Error: {str(e)}"
             )
     
-    def create_visit(self, request: CreateVisitRequest) -> VisitResponse:
+    def create_visit(self, request: CreateVisitRequest, user: Optional[AuthUser] = None) -> VisitResponse:
         """
         Create a new visit record for a patient.
         
@@ -193,6 +211,17 @@ class DataEntryService:
                     success=False,
                     message=error_msg
                 )
+
+            # Patients can only submit visits to their own patient profile.
+            if user and user.role == "patient":
+                if not user.patient_id or patient.id != user.patient_id:
+                    return VisitResponse(
+                        visit_id=0,
+                        patient_id=request.patient_id,
+                        visit_date=datetime.utcnow(),
+                        success=False,
+                        message="Patients can only submit their own clinical notes."
+                    )
             
             # Update patient static fields if provided
             if any([request.family_history, request.pcos, request.unexplained_prenatal_loss,

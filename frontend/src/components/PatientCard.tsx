@@ -26,10 +26,10 @@ export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: Patient
         };
       case 'medium':
         return {
-          color: 'from-purple-400 to-pink-400',
-          bgColor: 'bg-purple-400',
-          textColor: 'text-purple-600',
-          glowColor: 'shadow-purple-400/50',
+          color: 'from-violet-500 to-indigo-500',
+          bgColor: 'bg-violet-500',
+          textColor: 'text-violet-600',
+          glowColor: 'shadow-violet-500/50',
           label: 'Medium Risk',
           pulseAnimation: false,
         };

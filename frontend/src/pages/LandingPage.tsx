@@ -61,7 +61,7 @@ const steps = [
     {
         number: "03",
         title: "Risk Prediction",
-        description: "ML models predict preeclampsia, anemia, and mortality risks with confidence scores.",
+        description: "ML models predict preeclampsia, anemia, and mortality risk levels.",
     },
     {
         number: "04",
@@ -236,7 +236,7 @@ export const LandingPage = () => {
                                     className="group bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-xl shadow-medical-pink/30 px-8"
                                 >
                                     <span className="flex items-center">
-                                        Try Demo
+                                        Get Started
                                         <motion.span
                                             className="ml-2"
                                             animate={{ x: [0, 4, 0] }}
@@ -571,7 +571,7 @@ export const LandingPage = () => {
                                         className="group bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-xl shadow-medical-pink/30 px-8"
                                     >
                                         <span className="flex items-center">
-                                            Try Demo
+                                            Get Started
                                             <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
                                         </span>
                                     </Button>

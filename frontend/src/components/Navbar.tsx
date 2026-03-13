@@ -131,7 +131,7 @@ export const Navbar = () => {
   const displayRole = user?.role === "doctor" ? "Physician" : "Patient";
   return (
     <nav className="border-b border-border/40 bg-card/30 backdrop-blur-xl sticky top-0 z-50">
-      <div className="container mx-auto px-6 py-3">
+      <div className="container mx-auto px-3 sm:px-6 py-3">
         <div className="flex items-center justify-between">
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
@@ -142,10 +142,10 @@ export const Navbar = () => {
               </div>
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
+              <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
                 GOTHAM
               </h1>
-              <p className="text-xs text-muted-foreground -mt-1">
+              <p className="hidden sm:block text-xs text-muted-foreground -mt-1">
                 Antenatal Risk Platform
               </p>
             </div>
@@ -270,6 +270,31 @@ export const Navbar = () => {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
+        {/* Mobile Quick Nav */}
+        <div className="md:hidden mt-2 grid grid-cols-3 gap-2">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <LayoutDashboard className="w-3.5 h-3.5" />
+            Dashboard
+          </button>
+          <button
+            onClick={() => navigate('/schedule')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            Schedule
+          </button>
+          <button
+            onClick={() => navigate('/appointments')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            Appts
+          </button>
         </div>
       </div>
     </nav>

@@ -163,17 +163,17 @@ const Index = () => {
       <Navbar />
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-10">
-        <div className="flex gap-6">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        <div className="flex flex-col xl:flex-row gap-6">
           {/* Dashboard Section */}
           <div className={cn(
             "transition-all duration-500 ease-smooth",
-            showReport ? "w-[60%]" : "w-full"
+            showReport ? "w-full xl:w-[60%]" : "w-full"
           )}>
             {/* Welcome Section */}
             <div className="mb-8">
               <div className="inline-block">
-                <h2 className="text-4xl font-bold bg-gradient-to-r from-medical-pink via-medical-blue to-medical-pink bg-clip-text text-transparent mb-3 animate-float">
+                <h2 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-medical-pink via-medical-blue to-medical-pink bg-clip-text text-transparent mb-3 animate-float">
                   Welcome back, {stats?.doctor_name || user?.full_name || 'Doctor'}
                 </h2>
                 <div className="h-1 w-32 bg-gradient-to-r from-medical-pink to-medical-blue rounded-full" />
@@ -236,7 +236,7 @@ const Index = () => {
             )}
 
             {/* Main Action Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mb-12">
               <DashboardCard
                 title="Patients"
                 icon={Users}
@@ -411,7 +411,7 @@ const Index = () => {
 
           {/* Report Panel - Slides in from right */}
           {showReport && (
-            <div className="w-[40%] transition-all duration-500 ease-smooth animate-in slide-in-from-right">
+            <div className="w-full xl:w-[40%] transition-all duration-500 ease-smooth animate-in slide-in-from-right">
               <RiskReportPanel onClose={() => setShowReport(false)} />
             </div>
           )}

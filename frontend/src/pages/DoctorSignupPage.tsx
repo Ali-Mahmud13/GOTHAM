@@ -94,7 +94,7 @@ export const DoctorSignupPage = () => {
       {/* Signup Card */}
       <div className="relative w-full max-w-md">
         {/* Logo & Branding */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6 sm:mb-8">
           <div className="inline-flex items-center justify-center mb-4">
             <div className="relative">
               <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-2xl blur-xl opacity-50 animate-glow-pulse" />
@@ -103,7 +103,7 @@ export const DoctorSignupPage = () => {
               </div>
             </div>
           </div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-2">
+          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-2">
             GOTHAM Medical System
           </h1>
           <p className="text-gray-600 text-sm">
@@ -112,9 +112,9 @@ export const DoctorSignupPage = () => {
         </div>
 
         {/* Signup Form */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/50 p-8">
+        <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/50 p-5 sm:p-8">
           <div className="mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Create Doctor Account</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Create Doctor Account</h2>
             <p className="text-gray-600 text-sm">
               Register as a healthcare provider to access the medical dashboard
             </p>
@@ -253,7 +253,7 @@ export const DoctorSignupPage = () => {
           <p className="text-xs text-gray-500">
             By creating an account, you agree to comply with medical ethics and data protection regulations.
           </p>
-          <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+          <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-gray-400">
             <span>Are you a patient?</span>
             <a href="/patient/signup" className="text-medical-pink font-semibold hover:underline">
               Register as Patient

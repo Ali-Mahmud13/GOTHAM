@@ -1,17 +1,31 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { ElementType } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Activity, Heart, Droplets, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Placeholder data - will be replaced with real DB data later
-const placeholderData = [
-  { visit: 'Visit 1', date: 'Jan 15', bmi: 24.5, sysBP: 115, diaBP: 75, ogtt: 95, heartRate: 72, temp: 98.4 },
-  { visit: 'Visit 2', date: 'Feb 12', bmi: 25.1, sysBP: 118, diaBP: 78, ogtt: 102, heartRate: 75, temp: 98.6 },
-  { visit: 'Visit 3', date: 'Mar 10', bmi: 25.8, sysBP: 120, diaBP: 80, ogtt: 110, heartRate: 74, temp: 98.5 },
-  { visit: 'Visit 4', date: 'Apr 08', bmi: 26.2, sysBP: 122, diaBP: 82, ogtt: 118, heartRate: 78, temp: 98.7 },
-  { visit: 'Visit 5', date: 'May 15', bmi: 26.9, sysBP: 125, diaBP: 85, ogtt: 125, heartRate: 80, temp: 98.8 },
-  { visit: 'Visit 6', date: 'Jun 12', bmi: 27.2, sysBP: 128, diaBP: 86, ogtt: 132, heartRate: 82, temp: 98.6 },
-];
+export interface VisitVitalsPoint {
+  id: number;
+  visit_date: string;
+  bmi?: number | null;
+  blood_pressure_systolic?: number | null;
+  blood_pressure_diastolic?: number | null;
+  glucose_level?: number | null;
+  ogtt?: number | null;
+  hgb?: number | null;
+  baseline_value?: number | null;
+}
+
+interface ChartPoint {
+  visit: string;
+  date: string;
+  bmi: number | null;
+  sysBP: number | null;
+  diaBP: number | null;
+  glucose: number | null;
+  hgb: number | null;
+  fetalBaseline: number | null;
+}
 
 interface MetricConfig {
   key: string;
@@ -20,7 +34,7 @@ interface MetricConfig {
   color: string;
   gradientFrom: string;
   gradientTo: string;
-  icon: React.ElementType;
+  icon: ElementType;
   description: string;
 }
 
@@ -56,34 +70,34 @@ const metricsConfig: MetricConfig[] = [
     description: 'Blood Pressure (Diastolic)',
   },
   {
-    key: 'ogtt',
-    name: 'Blood Sugar',
+    key: 'glucose',
+    name: 'Glucose',
     unit: 'mg/dL',
     color: '#06b6d4', // medical-blue (cyan)
     gradientFrom: 'from-cyan-500',
     gradientTo: 'to-blue-500',
     icon: Droplets,
-    description: 'Glucose Tolerance Test',
+    description: 'Blood glucose / OGTT',
   },
   {
-    key: 'heartRate',
-    name: 'Heart Rate',
-    unit: 'bpm',
-    color: '#f43f5e', // rose
+    key: 'hgb',
+    name: 'Hemoglobin',
+    unit: 'g/dL',
+    color: '#f43f5e',
     gradientFrom: 'from-rose-500',
     gradientTo: 'to-red-500',
     icon: Activity,
-    description: 'Beats Per Minute',
+    description: 'Hemoglobin level',
   },
   {
-    key: 'temp',
-    name: 'Temperature',
-    unit: '°F',
+    key: 'fetalBaseline',
+    name: 'Fetal Baseline HR',
+    unit: 'bpm',
     color: '#10b981', // emerald
     gradientFrom: 'from-emerald-500',
     gradientTo: 'to-teal-500',
-    icon: Activity,
-    description: 'Body Temperature',
+    icon: Heart,
+    description: 'CTG baseline fetal heart rate',
   },
 ];
 
@@ -107,7 +121,7 @@ const CustomTooltip = ({ active, payload }: any) => {
                   <span className="text-xs font-semibold text-gray-700">{metric?.name}</span>
                 </div>
                 <span className="text-sm font-bold text-gray-900">
-                  {entry.value} {metric?.unit}
+                  {entry.value ?? 'N/A'} {entry.value !== null && entry.value !== undefined ? metric?.unit : ''}
                 </span>
               </div>
             );
@@ -119,8 +133,35 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-export const VitalsChart = () => {
-  const [visibleMetrics, setVisibleMetrics] = useState<string[]>(['bmi', 'sysBP', 'ogtt']);
+interface VitalsChartProps {
+  visits: VisitVitalsPoint[];
+}
+
+export const VitalsChart = ({ visits }: VitalsChartProps) => {
+  const [visibleMetrics, setVisibleMetrics] = useState<string[]>(['bmi', 'sysBP', 'glucose']);
+
+  const chartData = useMemo<ChartPoint[]>(() => {
+    if (!visits || visits.length === 0) {
+      return [];
+    }
+
+    return [...visits]
+      .slice()
+      .sort((a, b) => new Date(a.visit_date).getTime() - new Date(b.visit_date).getTime())
+      .map((visit, index) => {
+        const visitDate = new Date(visit.visit_date);
+        return {
+          visit: `Visit ${index + 1}`,
+          date: visitDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          bmi: visit.bmi ?? null,
+          sysBP: visit.blood_pressure_systolic ?? null,
+          diaBP: visit.blood_pressure_diastolic ?? null,
+          glucose: visit.glucose_level ?? visit.ogtt ?? null,
+          hgb: visit.hgb ?? null,
+          fetalBaseline: visit.baseline_value ?? null,
+        };
+      });
+  }, [visits]);
 
   const toggleMetric = (metricKey: string) => {
     setVisibleMetrics(prev =>
@@ -131,15 +172,18 @@ export const VitalsChart = () => {
   };
 
   const getLatestValue = (key: string) => {
-    const latestData = placeholderData[placeholderData.length - 1];
-    return latestData[key as keyof typeof latestData];
+    if (chartData.length === 0) return 'N/A';
+    const latestData = chartData[chartData.length - 1] as Record<string, string | number | null>;
+    const value = latestData[key];
+    return value ?? 'N/A';
   };
 
   const getTrend = (key: string) => {
-    if (placeholderData.length < 2) return 0;
-    const latest = placeholderData[placeholderData.length - 1][key as keyof typeof placeholderData[0]];
-    const previous = placeholderData[placeholderData.length - 2][key as keyof typeof placeholderData[0]];
+    if (chartData.length < 2) return 0;
+    const latest = chartData[chartData.length - 1][key as keyof ChartPoint];
+    const previous = chartData[chartData.length - 2][key as keyof ChartPoint];
     if (typeof latest === 'number' && typeof previous === 'number') {
+      if (previous === 0) return 0;
       return ((latest - previous) / previous * 100).toFixed(1);
     }
     return 0;
@@ -196,7 +240,9 @@ export const VitalsChart = () => {
               {/* Latest Value */}
               <p className="text-2xl font-bold text-gray-900 mb-1">
                 {getLatestValue(metric.key)}
-                {metric.unit && <span className="text-sm ml-1 text-gray-500">{metric.unit}</span>}
+                {metric.unit && getLatestValue(metric.key) !== 'N/A' && (
+                  <span className="text-sm ml-1 text-gray-500">{metric.unit}</span>
+                )}
               </p>
 
               {/* Trend */}
@@ -231,11 +277,19 @@ export const VitalsChart = () => {
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <Activity className="w-4 h-4" />
-            <span>{placeholderData.length} visits recorded</span>
+            <span>{chartData.length} visits recorded</span>
           </div>
         </div>
 
-        {visibleMetrics.length === 0 ? (
+        {chartData.length === 0 ? (
+          <div className="h-[400px] flex items-center justify-center text-gray-400">
+            <div className="text-center">
+              <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p className="font-semibold">No vitals data available</p>
+              <p className="text-sm">Add new visits to view metric trends</p>
+            </div>
+          </div>
+        ) : visibleMetrics.length === 0 ? (
           <div className="h-[400px] flex items-center justify-center text-gray-400">
             <div className="text-center">
               <EyeOff className="w-12 h-12 mx-auto mb-3 opacity-50" />
@@ -247,7 +301,7 @@ export const VitalsChart = () => {
           <div className="w-full h-[400px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
-                data={placeholderData}
+                data={chartData}
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
                 <defs>

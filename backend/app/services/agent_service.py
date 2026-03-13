@@ -61,11 +61,20 @@ class AgentService:
                 response_text = str(assistant_message.content)
             
             logger.info(f"Agent response generated (length: {len(response_text)})")
+
+            assessment_type = result.get("assessment_type_to_save")
+            assessment_report = result.get("assessment_report_to_save")
+            assessment_risk_levels = result.get("assessment_risk_levels")
+            current_patient_id = result.get("current_patient_id")
             
             return {
                 "response": response_text,
                 "session_id": session_id,
-                "success": True
+                "success": True,
+                "assessment_type": assessment_type,
+                "assessment_report": assessment_report,
+                "assessment_risk_levels": assessment_risk_levels,
+                "patient_id": current_patient_id,
             }
             
         except Exception as e:
