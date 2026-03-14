@@ -1,6 +1,6 @@
 """Data entry API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File
 from sqlmodel import Session, select
 from typing import List
 
@@ -11,6 +11,9 @@ from app.schemas import (
     NotesParseResponse,
     CreateVisitRequest,
     VisitResponse,
+    UltrasoundUploadResponse,
+    UltrasoundDeleteResponse,
+    UltrasoundImageResponse,
 )
 from app.services.data_entry_service import DataEntryService
 from app.models.auth import AuthUser
@@ -109,3 +112,44 @@ async def create_visit(
     except Exception as e:
         logger.error(f"Error creating visit: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create visit")
+
+
+@router.post("/visits/{visit_id}/ultrasound", response_model=UltrasoundUploadResponse)
+async def upload_ultrasound_images(
+    visit_id: int,
+    files: List[UploadFile] = File(...),
+    user_email: str | None = Header(None, alias="X-User-Email"),
+    service: DataEntryService = Depends(get_data_entry_service),
+):
+    """Upload one or more ultrasound images for an existing visit."""
+    try:
+        user = get_request_user(user_email, service.session)
+        uploaded = service.upload_ultrasound_images(visit_id=visit_id, files=files, user=user)
+        return UltrasoundUploadResponse(
+            success=True,
+            message=f"Uploaded {len(uploaded)} ultrasound image(s)",
+            uploaded=[UltrasoundImageResponse.model_validate(item) for item in uploaded],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error uploading ultrasound images: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload ultrasound images")
+
+
+@router.delete("/ultrasound/{image_id}", response_model=UltrasoundDeleteResponse)
+async def delete_ultrasound(
+    image_id: int,
+    user_email: str | None = Header(None, alias="X-User-Email"),
+    service: DataEntryService = Depends(get_data_entry_service),
+):
+    """Delete an uploaded ultrasound image."""
+    try:
+        user = get_request_user(user_email, service.session)
+        service.delete_ultrasound_image(image_id=image_id, user=user)
+        return UltrasoundDeleteResponse(success=True, message="Ultrasound image deleted")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error deleting ultrasound image: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete ultrasound image")

@@ -46,6 +46,16 @@ interface PatientMedical {
 interface VisitRecord extends VisitVitalsPoint {
   visit_type?: string | null;
   notes?: string | null;
+  note_source?: 'patient' | 'doctor' | 'current_doctor' | 'previous_doctor' | 'unknown';
+  is_past_history?: boolean;
+  ultrasound_images?: Array<{
+    id: number;
+    secure_url: string;
+    thumbnail_url?: string | null;
+    file_name?: string | null;
+    uploaded_by_role?: string | null;
+    created_at?: string | null;
+  }>;
   wbc?: number | null;
   rbc?: number | null;
   hgb?: number | null;
@@ -189,19 +199,6 @@ const PatientProfilePage = () => {
       const updatedPatient = await response.json();
       setPatient(updatedPatient);
 
-      // Also record a visit entry so this note appears in Visit History.
-      await fetch(`${API_URL}/api/visits`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          patient_id: patient.patient_identifier,
-          visit_type: 'clinical_notes',
-          notes: editedNotes,
-        }),
-      });
-
       setIsEditingNotes(false);
       fetchPatientData();
 
@@ -232,7 +229,8 @@ const PatientProfilePage = () => {
       setMedicalData(profileData);  // Medical data is in the same object now
 
       // Fetch visit statistics
-      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientId}/visits`);
+      const visitHeaders: HeadersInit = user?.email ? { 'X-User-Email': user.email } : {};
+      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientId}/visits`, { headers: visitHeaders });
       if (visitsResponse.ok) {
         const visitsData: VisitStatsResponse = await visitsResponse.json();
         setVisitStats(visitsData);
@@ -257,6 +255,29 @@ const PatientProfilePage = () => {
       nextParams.set('tab', tab);
     }
     setSearchParams(nextParams);
+  };
+
+  const handleDeleteUltrasound = async (imageId: number) => {
+    if (!user?.email) return;
+    try {
+      const res = await fetch(`${API_URL}/api/ultrasound/${imageId}`, {
+        method: 'DELETE',
+        headers: { 'X-User-Email': user.email },
+      });
+      if (!res.ok) {
+        const errorPayload = await res.json();
+        throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
+      }
+
+      setVisits((prev) =>
+        prev.map((visit) => ({
+          ...visit,
+          ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
+        }))
+      );
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const getRiskConfig = (riskLevel: string) => {
@@ -393,6 +414,9 @@ const PatientProfilePage = () => {
     visit_date: visit.visit_date,
     visit_type: visit.visit_type || 'routine',
     notes: visit.notes || '',
+    note_source: visit.note_source || 'unknown',
+    is_past_history: Boolean(visit.is_past_history),
+    ultrasound_images: visit.ultrasound_images || [],
     wbc: visit.wbc ?? null,
     rbc: visit.rbc ?? null,
     hgb: visit.hgb ?? null,
@@ -412,6 +436,23 @@ const PatientProfilePage = () => {
     gdm_risk_level: visit.gdm_risk_level ?? null,
     anemia_diagnosis: visit.anemia_diagnosis ?? null,
   }));
+
+  const visitHistoryVisits = timelineVisits.filter((visit) => {
+    // Keep visit history focused on true visits; exclude notepad-only entries.
+    if (visit.visit_type === 'patient_notes' || visit.visit_type === 'doctor_notes') return false;
+    return true;
+  });
+
+  const labeledNotes = timelineVisits
+    .filter((visit) => Boolean(visit.notes))
+    .map((visit) => {
+      let label = 'Clinical Note';
+      if (visit.note_source === 'patient' && visit.visit_type === 'clinical_notes') label = 'Self-Entered Clinical Note';
+      else if (visit.note_source === 'patient') label = 'Patient Note';
+      else if (visit.note_source === 'previous_doctor') label = 'Past Doctor Note';
+      else if (visit.note_source === 'current_doctor' || visit.note_source === 'doctor') label = 'Current Doctor Visit Note';
+      return { ...visit, noteLabel: label };
+    });
 
   const medicalConditions = [
     {
@@ -831,14 +872,81 @@ const PatientProfilePage = () => {
                   className="px-5 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-xl hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2"
                 >
                   <Edit className="w-4 h-4" />
-                  Edit Notes
+                  {patient.clinical_notes ? 'Edit Notes' : 'Add Notes'}
                 </button>
               </div>
 
               <div className="bg-gradient-to-br from-blue-50/70 to-cyan-50/70 rounded-2xl p-8 border-l-4 border-blue-500 min-h-[300px]">
-                <p className="text-gray-700 leading-relaxed text-lg whitespace-pre-wrap">
-                  {patient.clinical_notes || "No clinical notes have been added yet. Click 'Edit Notes' to add observations and recommendations."}
-                </p>
+                {!isEditingNotes && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-bold text-blue-700 mb-2">Doctor Notepad (Global)</h3>
+                    <p className="text-gray-700 leading-relaxed text-base whitespace-pre-wrap">
+                      {patient.clinical_notes || "No global doctor notepad content yet. Click 'Add Notes' to create one."}
+                    </p>
+                  </div>
+                )}
+
+                {isEditingNotes ? (
+                  <div>
+                    <textarea
+                      value={editedNotes}
+                      onChange={(e) => setEditedNotes(e.target.value)}
+                      placeholder="Enter clinical notes, observations, and recommendations here..."
+                      disabled={isSavingNotes}
+                      className="w-full min-h-[240px] p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-medical-blue focus:border-transparent resize-y text-gray-700 leading-relaxed disabled:bg-gray-50 disabled:cursor-not-allowed"
+                    />
+                    <div className="mt-4 flex items-center justify-between">
+                      <p className="text-xs text-gray-500">{editedNotes.length} characters</p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsEditingNotes(false)}
+                          disabled={isSavingNotes}
+                          className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSaveNotes}
+                          disabled={isSavingNotes}
+                          className="px-4 py-2 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-lg hover:shadow-lg transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {isSavingNotes ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              Save Notes
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {!isEditingNotes && (
+                  <div className="mt-4">
+                    <h3 className="text-sm font-bold text-amber-700 mb-2">Notes by Source</h3>
+                    {labeledNotes.length === 0 ? (
+                      <p className="text-sm text-gray-500">No source notes found.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {labeledNotes.slice(0, 8).map((v) => (
+                          <div key={v.id} className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs text-amber-700">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-100 text-amber-700">{v.noteLabel}</span>
+                            </div>
+                            <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{v.notes}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="mt-6 bg-white rounded-2xl border border-gray-200 p-6">
@@ -964,7 +1072,7 @@ const PatientProfilePage = () => {
         {/* Visit History Tab */}
         {activeTab === 'visits' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <VisitTimeline visits={timelineVisits} />
+            <VisitTimeline visits={visitHistoryVisits} onDeleteUltrasound={handleDeleteUltrasound} />
           </div>
         )}
 
@@ -1015,81 +1123,15 @@ const PatientProfilePage = () => {
                 </div>
               </div>
 
-              <VitalsChart visits={visits} />
+              <VitalsChart visits={visits.filter(v =>
+                v.bmi != null || v.blood_pressure_systolic != null ||
+                v.blood_pressure_diastolic != null || v.glucose_level != null ||
+                v.ogtt != null || v.hgb != null || v.baseline_value != null
+              )} />
             </div>
           </div>
         )}
       </main>
-
-      {/* Clinical Notes Edit Modal */}
-      {isEditingNotes && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-medical-blue to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
-                  <Clipboard className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Edit Dr Notes</h2>
-                  <p className="text-sm text-gray-600">Update doctor observations and clinical notes</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsEditingNotes(false)}
-                disabled={isSavingNotes}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6">
-              <textarea
-                value={editedNotes}
-                onChange={(e) => setEditedNotes(e.target.value)}
-                placeholder="Enter clinical notes, observations, and recommendations here..."
-                disabled={isSavingNotes}
-                className="w-full h-96 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-medical-blue focus:border-transparent resize-none text-gray-700 leading-relaxed disabled:bg-gray-50 disabled:cursor-not-allowed"
-              />
-              <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
-                <span>Use clear, professional language for medical documentation</span>
-                <span>{editedNotes.length} characters</span>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex items-center justify-end gap-3 p-6 bg-gray-50 border-t border-gray-200">
-              <button
-                onClick={() => setIsEditingNotes(false)}
-                disabled={isSavingNotes}
-                className="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveNotes}
-                disabled={isSavingNotes}
-                className="px-6 py-2.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white font-semibold rounded-lg hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              >
-                {isSavingNotes ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    Save Notes
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Easter Egg: Bat Animation */}
       {showBats && (

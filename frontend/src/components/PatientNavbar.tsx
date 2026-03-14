@@ -1,4 +1,4 @@
-import { User, LogOut, Edit, CalendarDays, LayoutDashboard, Bell, CheckCircle, XCircle, Clock, UserPlus } from "lucide-react";
+import { User, LogOut, Edit, CalendarDays, LayoutDashboard, Bell, CheckCircle, XCircle, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {

@@ -12,6 +12,8 @@ interface PatientCardProps {
 
 export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: PatientCardProps) => {
   const navigate = useNavigate();
+  const parsedAge = Number(age);
+  const ageDisplay = Number.isFinite(parsedAge) && parsedAge > 0 ? `${parsedAge} years old` : "Not provided";
 
   const getRiskConfig = () => {
     switch (riskLevel) {
@@ -127,7 +129,7 @@ export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: Patient
             </div>
             <div>
               <p className="text-xs text-gray-500 font-medium">Age</p>
-              <p className="font-semibold">{age} years old</p>
+              <p className="font-semibold">{ageDisplay}</p>
             </div>
           </div>
 

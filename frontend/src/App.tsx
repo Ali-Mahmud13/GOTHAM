@@ -14,6 +14,7 @@ import { PatientSignupPage } from "./pages/PatientSignupPage";
 import { DoctorLoginPage } from "./pages/DoctorLoginPage";
 import { DoctorSignupPage } from "./pages/DoctorSignupPage";
 import { PatientDashboard } from "./pages/PatientDashboard";
+import { PatientNotesPage } from "./pages/PatientNotesPage";
 import { EditProfilePage } from "./pages/EditProfilePage";
 import { DoctorSchedulePage } from "./pages/DoctorSchedulePage";
 import { BookAppointmentPage } from "./pages/BookAppointmentPage";
@@ -58,6 +59,7 @@ function App() {
               <Route path="/patient/login" element={<PatientLoginPage />} />
               <Route path="/patient/signup" element={<PatientSignupPage />} />
               <Route path="/patient/dashboard" element={<PatientDashboard />} />
+              <Route path="/patient/notes" element={<PatientNotesPage />} />
               <Route path="/patient/edit-profile" element={<EditProfilePage />} />
               <Route path="/patient/book-appointment" element={<BookAppointmentPage />} />
               <Route path="/patient/appointments" element={<AppointmentsPage />} />

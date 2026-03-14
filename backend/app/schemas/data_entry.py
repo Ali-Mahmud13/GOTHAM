@@ -117,3 +117,40 @@ class VisitResponse(BaseModel):
     visit_date: datetime = Field(description="Visit timestamp")
     success: bool = Field(description="Whether creation was successful")
     message: str = Field(description="Success or error message")
+
+
+class UltrasoundImageResponse(BaseModel):
+    """Ultrasound image payload for frontend and ML references."""
+
+    id: int
+    visit_id: int
+    patient_id: int
+    public_id: str
+    secure_url: str
+    thumbnail_url: Optional[str] = None
+    file_name: Optional[str] = None
+    format: Optional[str] = None
+    bytes: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    uploaded_by_role: Optional[str] = None
+    uploaded_by_user_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UltrasoundUploadResponse(BaseModel):
+    """Response payload after uploading one or more ultrasound images."""
+
+    success: bool
+    message: str
+    uploaded: List[UltrasoundImageResponse] = Field(default_factory=list)
+
+
+class UltrasoundDeleteResponse(BaseModel):
+    """Response payload after deleting an ultrasound image."""
+
+    success: bool
+    message: str

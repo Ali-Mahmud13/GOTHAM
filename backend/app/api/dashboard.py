@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta, date
 
 from app.db.session import get_session
-from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
 from app.models.auth import AuthUser
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -291,9 +291,17 @@ def get_dashboard_stats(
 
 
 @router.get("/patient/{patient_identifier}/visits")
-def get_patient_visits(patient_identifier: str, session: Session = Depends(get_session)) -> Dict:
+def get_patient_visits(
+    patient_identifier: str,
+    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    session: Session = Depends(get_session),
+) -> Dict:
     """Get visit count and recent visits for a patient with full assessment data."""
-    
+
+    requester = None
+    if user_email:
+        requester = session.exec(select(AuthUser).where(AuthUser.email == user_email)).first()
+
     # Get patient
     patient = session.exec(
         select(Patient).where(Patient.patient_identifier == patient_identifier)
@@ -312,10 +320,11 @@ def get_patient_visits(patient_identifier: str, session: Session = Depends(get_s
         select(Visit)
         .where(Visit.patient_id == patient.id)
         .order_by(Visit.visit_date.desc())
-        .limit(10)
+        .limit(50)
     ).all()
     
     visit_data = []
+
     for visit in visits:
         # Get anemia assessment data
         anemia = session.exec(
@@ -331,13 +340,42 @@ def get_patient_visits(patient_identifier: str, session: Session = Depends(get_s
         gdm = session.exec(
             select(GDMAssessment).where(GDMAssessment.visit_id == visit.id)
         ).first()
+
+        ultrasound_images = session.exec(
+            select(UltrasoundImage)
+            .where(UltrasoundImage.visit_id == visit.id)
+            .order_by(UltrasoundImage.created_at.desc())
+        ).all()
         
+        source = "unknown"
+        if visit.recorded_by_role == "patient" or visit.visit_type == "patient_notes":
+            source = "patient"
+        elif visit.recorded_by_role == "doctor" or visit.visit_type == "doctor_notes":
+            current_doctor_id = None
+            if requester and requester.role == "doctor":
+                current_doctor_id = requester.id
+            elif requester and requester.role == "patient":
+                current_doctor_id = patient.doctor_id
+            else:
+                current_doctor_id = patient.doctor_id
+
+            if visit.recorded_by_user_id and current_doctor_id and visit.recorded_by_user_id == current_doctor_id:
+                source = "current_doctor"
+            elif visit.recorded_by_user_id and current_doctor_id and visit.recorded_by_user_id != current_doctor_id:
+                source = "previous_doctor"
+            else:
+                source = "doctor"
+
+        is_past_history = source in {"patient", "previous_doctor"}
+
         # Build visit data with all assessment parameters
         visit_dict = {
             "id": visit.id,
             "visit_date": visit.visit_date.isoformat(),
             "visit_type": visit.visit_type,
             "notes": visit.notes,
+            "note_source": source,
+            "is_past_history": is_past_history,
             
             # CBC Data from anemia assessment
             "wbc": anemia.wbc if anemia else None,
@@ -364,6 +402,25 @@ def get_patient_visits(patient_identifier: str, session: Session = Depends(get_s
             "bmi": gdm.bmi if gdm else None,
             "ogtt": gdm.ogtt if gdm else None,
             "gdm_risk_level": gdm.risk_level if gdm else None,
+            "ultrasound_images": [
+                {
+                    "id": image.id,
+                    "visit_id": image.visit_id,
+                    "patient_id": image.patient_id,
+                    "public_id": image.public_id,
+                    "secure_url": image.secure_url,
+                    "thumbnail_url": image.thumbnail_url,
+                    "file_name": image.file_name,
+                    "format": image.format,
+                    "bytes": image.bytes,
+                    "width": image.width,
+                    "height": image.height,
+                    "uploaded_by_role": image.uploaded_by_role,
+                    "uploaded_by_user_id": image.uploaded_by_user_id,
+                    "created_at": image.created_at.isoformat() if image.created_at else None,
+                }
+                for image in ultrasound_images
+            ],
         }
         
         visit_data.append(visit_dict)

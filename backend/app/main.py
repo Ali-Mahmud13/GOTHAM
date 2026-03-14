@@ -56,6 +56,22 @@ async def startup_event():
                     conn.execute(text(f"ALTER TABLE appointments ADD COLUMN {col_name} {col_type}"))
                     conn.commit()
                     logger.info("✓ Added appointments.%s", col_name)
+
+        visit_columns = {c["name"] for c in inspector.get_columns("visits")}
+        required_visit_columns = {
+            "recorded_by_role": "TEXT",
+            "recorded_by_user_id": "INTEGER",
+        }
+        with engine.connect() as conn:
+            for col_name, col_type in required_visit_columns.items():
+                if col_name not in visit_columns:
+                    logger.warning(
+                        "Missing visits.%s column detected. Applying startup migration...",
+                        col_name,
+                    )
+                    conn.execute(text(f"ALTER TABLE visits ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                    logger.info("✓ Added visits.%s", col_name)
     except Exception as e:
         logger.error(
             "Failed while ensuring appointments migration columns: %s",

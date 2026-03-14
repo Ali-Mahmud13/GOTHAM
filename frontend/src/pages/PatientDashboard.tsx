@@ -45,9 +45,25 @@ interface Appointment {
   notes?: string;
 }
 
+interface RegistrationRequestResult {
+  id: number;
+  patient_name: string;
+  status: string;
+}
+
 interface VisitRecord extends VisitVitalsPoint {
   visit_type?: string | null;
   notes?: string | null;
+  note_source?: 'patient' | 'doctor' | 'current_doctor' | 'previous_doctor' | 'unknown';
+  is_past_history?: boolean;
+  ultrasound_images?: Array<{
+    id: number;
+    secure_url: string;
+    thumbnail_url?: string | null;
+    file_name?: string | null;
+    uploaded_by_role?: string | null;
+    created_at?: string | null;
+  }>;
   wbc?: number | null;
   rbc?: number | null;
   hgb?: number | null;
@@ -67,7 +83,7 @@ interface VisitStatsResponse {
   recent_visits: VisitRecord[];
 }
 
-type TabType = 'overview' | 'medical' | 'visits' | 'vitals';
+type TabType = 'overview' | 'medical' | 'notes' | 'visits' | 'vitals';
 
 export const PatientDashboard = () => {
   const { isAuthenticated, user, logout } = useAuth();
@@ -79,6 +95,7 @@ export const PatientDashboard = () => {
   const [visitStats, setVisitStats] = useState<VisitStatsResponse>({ total_visits: 0, recent_visits: [] });
   const [visits, setVisits] = useState<VisitRecord[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [pendingRegistrationDoctor, setPendingRegistrationDoctor] = useState<string | null>(null);
 
   // Get patient identifier from auth user
   const patientIdentifier = user?.patient_info?.patient_identifier;
@@ -118,8 +135,28 @@ export const PatientDashboard = () => {
       const profileData = await profileResponse.json();
       setPatient(profileData);
 
+      if (user?.email && !profileData.doctor_id) {
+        try {
+          const regRes = await fetch(`${API_URL}/appointments/my-registration-requests`, {
+            headers: { 'X-User-Email': user.email },
+          });
+          if (regRes.ok) {
+            const regData: RegistrationRequestResult[] = await regRes.json();
+            const pendingReq = regData.find((r) => r.status === 'pending');
+            setPendingRegistrationDoctor(pendingReq?.patient_name || null);
+          } else {
+            setPendingRegistrationDoctor(null);
+          }
+        } catch {
+          setPendingRegistrationDoctor(null);
+        }
+      } else {
+        setPendingRegistrationDoctor(null);
+      }
+
       // Fetch visit history with assessment metrics for trend charts and summaries
-      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientIdentifier}/visits`);
+      const visitHeaders: HeadersInit = user?.email ? { 'X-User-Email': user.email } : {};
+      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientIdentifier}/visits`, { headers: visitHeaders });
       if (visitsResponse.ok) {
         const visitsData: VisitStatsResponse = await visitsResponse.json();
         setVisits(visitsData.recent_visits || []);
@@ -134,6 +171,29 @@ export const PatientDashboard = () => {
       setLoading(false);
     }
     fetchUpcomingAppointments();
+  };
+
+  const handleDeleteUltrasound = async (imageId: number) => {
+    if (!user?.email) return;
+    try {
+      const res = await fetch(`${API_URL}/api/ultrasound/${imageId}`, {
+        method: 'DELETE',
+        headers: { 'X-User-Email': user.email },
+      });
+      if (!res.ok) {
+        const errorPayload = await res.json();
+        throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
+      }
+
+      setVisits((prev) =>
+        prev.map((visit) => ({
+          ...visit,
+          ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
+        }))
+      );
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const getRiskConfig = (riskLevel: string) => {
@@ -197,6 +257,9 @@ export const PatientDashboard = () => {
     visit_date: visit.visit_date,
     visit_type: visit.visit_type || 'routine',
     notes: visit.notes || '',
+    note_source: visit.note_source || 'unknown',
+    is_past_history: Boolean(visit.is_past_history),
+    ultrasound_images: visit.ultrasound_images || [],
     wbc: visit.wbc ?? null,
     rbc: visit.rbc ?? null,
     hgb: visit.hgb ?? null,
@@ -216,6 +279,23 @@ export const PatientDashboard = () => {
     gdm_risk_level: visit.gdm_risk_level ?? null,
     anemia_diagnosis: visit.anemia_diagnosis ?? null,
   }));
+
+  const visitHistoryVisits = timelineVisits.filter((visit) => {
+    // Keep visit history focused on true visits; exclude notepad-only entries.
+    if (visit.visit_type === 'patient_notes' || visit.visit_type === 'doctor_notes') return false;
+    return true;
+  });
+
+  const labeledNotes = timelineVisits
+    .filter((visit) => Boolean(visit.notes))
+    .map((visit) => {
+      let label = 'Clinical Note';
+      if (visit.note_source === 'patient' && visit.visit_type === 'clinical_notes') label = 'Self-Entered Clinical Note';
+      else if (visit.note_source === 'patient') label = 'Patient Note';
+      else if (visit.note_source === 'previous_doctor') label = 'Past Doctor Note';
+      else if (visit.note_source === 'current_doctor' || visit.note_source === 'doctor') label = 'Doctor Visit Note';
+      return { ...visit, noteLabel: label };
+    });
 
   if (loading) {
     return (
@@ -256,6 +336,7 @@ export const PatientDashboard = () => {
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
     { id: 'medical' as TabType, label: 'Medical History', icon: Stethoscope },
+    { id: 'notes' as TabType, label: 'Notes', icon: Clipboard },
     { id: 'visits' as TabType, label: 'Visit History', icon: Clock },
     { id: 'vitals' as TabType, label: 'Vitals', icon: Activity },
   ];
@@ -360,9 +441,15 @@ export const PatientDashboard = () => {
           <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <p className="text-sm font-bold text-amber-800">You are currently not registered with a doctor</p>
+                <p className="text-sm font-bold text-amber-800">
+                  {pendingRegistrationDoctor
+                    ? `Waiting to be registered with Dr. ${pendingRegistrationDoctor}`
+                    : 'You are currently not registered with a doctor'}
+                </p>
                 <p className="text-sm text-amber-700 mt-1">
-                  You can still add your own clinical notes and visit data, but registration is recommended for clinician oversight.
+                  {pendingRegistrationDoctor
+                    ? 'Your registration request is pending. You can continue using Patient Notes while waiting.'
+                    : 'You can add self-entered AI Clinical Visits (for vitals by date) and Patient Notes while unregistered.'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -374,9 +461,15 @@ export const PatientDashboard = () => {
                 </button>
                 <button
                   onClick={() => navigate(`/data-entry?patientId=${patient.patient_identifier}&returnTo=${encodeURIComponent('/patient/dashboard')}`)}
+                  className="px-3 py-2 rounded-lg border border-medical-blue text-medical-blue bg-white text-sm font-semibold hover:bg-blue-50"
+                >
+                  Open AI Clinical Notes
+                </button>
+                <button
+                  onClick={() => navigate('/patient/notes')}
                   className="px-3 py-2 rounded-lg border border-amber-400 text-amber-800 bg-white text-sm font-semibold hover:bg-amber-100"
                 >
-                  Open Clinical Notes
+                  Open Patient Notes
                 </button>
               </div>
             </div>
@@ -582,10 +675,10 @@ export const PatientDashboard = () => {
               <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-lg p-6 border border-amber-200">
                 <div className="flex items-center gap-3 mb-3">
                   <Clipboard className="w-5 h-5 text-amber-700" />
-                  <h3 className="text-lg font-bold text-gray-900">Self-Reported Clinical Notes</h3>
+                  <h3 className="text-lg font-bold text-gray-900">Patient Notes</h3>
                 </div>
                 <p className="text-sm text-gray-700">
-                  Since you are not registered with a doctor, data entered in Clinical Notes is self-reported.
+                  Since you are not registered with a doctor, your notes are self-reported.
                 </p>
                 <p className="text-xs text-gray-600 mt-2">
                   Disclaimer: You are responsible for the integrity and accuracy of submitted data and any decisions made based on that data.
@@ -593,9 +686,15 @@ export const PatientDashboard = () => {
                 <div className="mt-4 flex items-center gap-2">
                   <button
                     onClick={() => navigate(`/data-entry?patientId=${patient.patient_identifier}&returnTo=${encodeURIComponent('/patient/dashboard')}`)}
+                    className="px-4 py-2 rounded-lg border border-medical-blue text-medical-blue text-sm font-semibold hover:bg-blue-50"
+                  >
+                    Add AI Clinical Visit
+                  </button>
+                  <button
+                    onClick={() => navigate('/patient/notes')}
                     className="px-4 py-2 rounded-lg bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold"
                   >
-                    Add My Clinical Data
+                    Add Patient Notes
                   </button>
                   <button
                     onClick={() => navigate('/patient/book-appointment')}
@@ -806,10 +905,70 @@ export const PatientDashboard = () => {
           </div>
         )}
 
+        {/* Notes Tab */}
+        {activeTab === 'notes' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-xl p-6 border border-gray-200/50">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-gray-900">Patient Notes</h2>
+                {!isRegisteredWithDoctor && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => navigate('/patient/notes')}
+                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold"
+                    >
+                      Add Patient Note
+                    </button>
+                    <button
+                      onClick={() => navigate(`/data-entry?patientId=${patient.patient_identifier}&returnTo=${encodeURIComponent('/patient/dashboard')}`)}
+                      className="px-4 py-2 rounded-lg border border-medical-blue text-medical-blue text-sm font-semibold hover:bg-blue-50"
+                    >
+                      Open AI Clinical Notes
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-sm text-gray-600 mb-4">
+                {isRegisteredWithDoctor
+                  ? 'Showing doctor notes and historical notes by source label.'
+                  : 'Showing your patient notes and historical notes by source label.'}
+              </p>
+
+              {labeledNotes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No notes available.</p>
+              ) : (
+                <div className="space-y-3">
+                  {labeledNotes.map((v) => (
+                      <div key={v.id} className="rounded-xl border border-gray-200 p-4 bg-white">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs text-gray-500">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          <span className={cn(
+                            'text-xs font-semibold px-2 py-1 rounded-full',
+                            v.note_source === 'current_doctor' || v.note_source === 'doctor'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-amber-100 text-amber-700'
+                          )}>
+                            {v.noteLabel}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap">{v.notes}</p>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Visit History Tab */}
         {activeTab === 'visits' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <VisitTimeline visits={timelineVisits} />
+            <VisitTimeline
+              visits={visitHistoryVisits}
+              hideCareStatusBadge={true}
+              onDeleteUltrasound={handleDeleteUltrasound}
+            />
           </div>
         )}
 
@@ -860,7 +1019,11 @@ export const PatientDashboard = () => {
                 </div>
               </div>
 
-              <VitalsChart visits={visits} />
+              <VitalsChart visits={visits.filter(v =>
+                v.bmi != null || v.blood_pressure_systolic != null ||
+                v.blood_pressure_diastolic != null || v.glucose_level != null ||
+                v.ogtt != null || v.hgb != null || v.baseline_value != null
+              )} />
             </div>
           </div>
         )}

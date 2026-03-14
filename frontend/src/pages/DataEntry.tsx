@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
 import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -45,12 +45,15 @@ const DataEntry = () => {
     const [showPatientSearch, setShowPatientSearch] = useState(false);
     const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]);
     const [notes, setNotes] = useState("");
+    const [doctorVisitNotes, setDoctorVisitNotes] = useState("");
     const [extractedFields, setExtractedFields] = useState<ExtractedField[]>([]);
     const [missingFields, setMissingFields] = useState<MissingField[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingPatients, setIsLoadingPatients] = useState(true);
     const [registeredDoctor, setRegisteredDoctor] = useState<{ id: number; full_name: string } | null | undefined>(undefined);
+    const [ultrasoundFiles, setUltrasoundFiles] = useState<File[]>([]);
+    const isRegisteredPatient = Boolean(isPatientUser && registeredDoctor);
 
     // Fetch patients on mount
     useEffect(() => {
@@ -146,12 +149,17 @@ const DataEntry = () => {
 
     // Debounced parsing effect
     useEffect(() => {
+        const controller = new AbortController();
+
         const parseNotes = async () => {
             if (notes.length > 5) {
+                if (isRegisteredPatient) {
+                    setExtractedFields([]);
+                    setMissingFields([]);
+                    return;
+                }
                 setIsProcessing(true);
                 try {
-                    const controller = new AbortController();
-                    const timeout = setTimeout(() => controller.abort(), 25000);
                     const response = await fetch(`${API_BASE}/notes/parse`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -161,7 +169,6 @@ const DataEntry = () => {
                             patient_id: selectedPatient?.id
                         }),
                     });
-                    clearTimeout(timeout);
 
                     if (response.ok) {
                         const data = await response.json();
@@ -187,6 +194,9 @@ const DataEntry = () => {
                         });
                     }
                 } catch (error) {
+                    if (error instanceof DOMException && error.name === "AbortError") {
+                        return; // Request cancelled by cleanup — not an error
+                    }
                     console.error("Error parsing notes:", error);
                     toast({
                         title: "Connection Error",
@@ -203,8 +213,11 @@ const DataEntry = () => {
         };
 
         const timeoutId = setTimeout(parseNotes, 1000); // 1 second debounce
-        return () => clearTimeout(timeoutId);
-    }, [notes, selectedPatient]);
+        return () => {
+            clearTimeout(timeoutId);
+            controller.abort();
+        };
+    }, [notes, selectedPatient, isRegisteredPatient]);
 
     const handleFieldChange = (index: number, newValue: string) => {
         const updatedFields = [...extractedFields];
@@ -215,18 +228,35 @@ const DataEntry = () => {
         setExtractedFields(updatedFields);
     };
 
+    const handleUltrasoundSelection = (event: ChangeEvent<HTMLInputElement>) => {
+        const picked = Array.from(event.target.files || []);
+        setUltrasoundFiles(picked);
+    };
+
     // Save patient data as new visit
     const handleSave = async () => {
         if (!selectedPatient) return;
 
+        if (isRegisteredPatient) {
+            toast({
+                title: "Entry Restricted",
+                description: "You are registered with a doctor. Your doctor should enter notes and vitals.",
+                variant: "destructive",
+            });
+            return;
+        }
+
         setIsSaving(true);
 
         try {
+            const visitNoteText = isPatientUser ? notes : (doctorVisitNotes.trim() || notes);
+
             // Build visit data from extracted fields
             const visitData: any = {
                 patient_id: selectedPatient.id,
+                // Patient AI entry is a clinical visit (separate from Patient Notes notepad entries).
                 visit_type: "clinical_notes",
-                notes: notes,
+                notes: visitNoteText,
             };
 
             // Map extracted fields to visit data
@@ -248,15 +278,49 @@ const DataEntry = () => {
             const result = await response.json();
 
             if (response.ok && result.success) {
+                let uploadedCount = 0;
+                if (result.visit_id && ultrasoundFiles.length > 0) {
+                    const formData = new FormData();
+                    ultrasoundFiles.forEach((file) => formData.append("files", file));
+
+                    const uploadResponse = await fetch(`${API_BASE}/visits/${result.visit_id}/ultrasound`, {
+                        method: "POST",
+                        headers: {
+                            ...(user?.email ? { "X-User-Email": user.email } : {}),
+                        },
+                        body: formData,
+                    });
+
+                    if (uploadResponse.ok) {
+                        const uploadResult = await uploadResponse.json();
+                        uploadedCount = uploadResult.uploaded?.length || 0;
+                    } else {
+                        const uploadError = await uploadResponse.json();
+                        toast({
+                            title: "Visit saved, image upload failed",
+                            description: uploadError.detail || "Failed to upload ultrasound image(s)",
+                            variant: "destructive",
+                        });
+                    }
+                }
+
+                const uploadSuffix = uploadedCount
+                    ? ` (${uploadedCount} ultrasound image${uploadedCount > 1 ? "s" : ""} uploaded)`
+                    : "";
+
                 toast({
-                    title: "Success",
-                    description: "Patient data saved successfully",
+                    title: "Visit Saved",
+                    description: isPatientUser
+                        ? `Your clinical visit was saved successfully.${uploadSuffix}`
+                        : `Patient data saved successfully.${uploadSuffix}`,
+                    duration: 5000,
                 });
 
-                // Reset form
-                setNotes("");
-                setExtractedFields([]);
-                setMissingFields([]);
+                // Brief pause so the toast is visible before navigation
+                await new Promise((resolve) => setTimeout(resolve, 600));
+
+                // Navigate back — the returnTo param carries the right destination
+                navigate(returnTo);
             } else {
                 toast({
                     title: "Error",
@@ -284,6 +348,16 @@ const DataEntry = () => {
             default: return "text-gray-600 bg-gray-50/80";
         }
     };
+
+    const canSave = Boolean(
+        selectedPatient &&
+        !isSaving &&
+        (
+            isPatientUser
+                ? notes.trim() && (extractedFields.length > 0 || ultrasoundFiles.length > 0)
+                : doctorVisitNotes.trim() || extractedFields.length > 0 || ultrasoundFiles.length > 0
+        )
+    );
 
     return (
         <div className="min-h-screen bg-background">
@@ -323,22 +397,24 @@ const DataEntry = () => {
                 {isPatientUser && (
                     <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
                         <p className="text-sm font-bold text-amber-800">Self-reported clinical data</p>
-                        <p className="text-sm text-amber-700 mt-1">
-                            You are responsible for the integrity and accuracy of the data you submit, and any decisions made based on that data.
-                        </p>
                         {registeredDoctor ? (
-                            <p className="text-xs text-amber-800 mt-2">
-                                You are currently registered with Dr. {registeredDoctor.full_name}. Your doctor can review submitted data.
+                            <p className="text-sm text-amber-800 mt-2">
+                                You are currently registered with Dr. {registeredDoctor.full_name}. You cannot add notes or vitals yourself; your doctor should do that.
                             </p>
                         ) : (
-                            <div className="mt-3 flex items-center gap-2">
-                                <p className="text-xs text-amber-800">You are not registered with a doctor yet.</p>
-                                <button
-                                    onClick={() => navigate('/patient/book-appointment')}
-                                    className="px-3 py-1.5 rounded-md bg-medical-blue text-white text-xs font-semibold hover:bg-medical-blue/90"
-                                >
-                                    Register With Doctor
-                                </button>
+                            <div className="mt-3">
+                                <p className="text-sm text-amber-700">
+                                    You are responsible for the integrity and accuracy of the data you submit, and any decisions made based on that data.
+                                </p>
+                                <div className="mt-2 flex items-center gap-2">
+                                    <p className="text-xs text-amber-800">You are not registered with a doctor yet.</p>
+                                    <button
+                                        onClick={() => navigate('/patient/book-appointment')}
+                                        className="px-3 py-1.5 rounded-md bg-medical-blue text-white text-xs font-semibold hover:bg-medical-blue/90"
+                                    >
+                                        Register With Doctor
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -447,17 +523,47 @@ const DataEntry = () => {
                             <div className="flex items-center gap-2 mb-4">
                                 <div className="h-1 w-8 rounded-full bg-gradient-to-r from-medical-pink to-medical-blue" />
                                 <h2 className="text-lg font-semibold text-foreground">
-                                    Clinical Notes
+                                    AI Extraction Input
                                 </h2>
                             </div>
+
+                            {isPatientUser && !isRegisteredPatient && (
+                                <p className="mb-3 text-xs text-amber-700">
+                                    These AI clinical entries are saved as dated clinical visits and will be labeled as self-entered by patient.
+                                </p>
+                            )}
 
                             <Textarea
                                 value={notes}
                                 onChange={(e) => handleNotesChange(e.target.value)}
-                                disabled={!selectedPatient}
-                                placeholder={selectedPatient ? "Type or paste clinical notes here...\n\nExample:\nBP 130/85, weight 70kg, height 160cm\nFasting glucose 105 mg/dL\nFamily history of gestational diabetes" : "Please select a patient first"}
+                                disabled={!selectedPatient || isRegisteredPatient}
+                                placeholder={
+                                    !selectedPatient
+                                        ? "Please select a patient first"
+                                        : isRegisteredPatient
+                                            ? "You are registered with a doctor. Your doctor should enter notes and vitals."
+                                            : "Type or paste clinical notes here...\n\nExample:\nBP 130/85, weight 70kg, height 160cm\nFasting glucose 105 mg/dL\nFamily history of gestational diabetes"
+                                }
                                 className="min-h-[400px] resize-none border-border/50 bg-background/50 backdrop-blur-sm focus-visible:ring-medical-blue/50 text-base disabled:opacity-50"
                             />
+
+                            {isPatientUser && (
+                                <div className="mt-4 rounded-xl border border-border/50 bg-background/50 p-3">
+                                    <p className="text-xs font-semibold text-foreground mb-2">Ultrasound Images (optional)</p>
+                                    <input
+                                        type="file"
+                                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                                        multiple
+                                        onChange={handleUltrasoundSelection}
+                                        disabled={!selectedPatient || isRegisteredPatient}
+                                        className="block w-full text-xs text-muted-foreground"
+                                    />
+                                    <p className="text-[11px] text-muted-foreground mt-1">Allowed: JPG, PNG, WEBP up to 10MB each.</p>
+                                    {ultrasoundFiles.length > 0 && (
+                                        <p className="text-[11px] text-medical-blue mt-1">{ultrasoundFiles.length} file(s) selected</p>
+                                    )}
+                                </div>
+                            )}
 
                             {isProcessing && (
                                 <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
@@ -466,26 +572,79 @@ const DataEntry = () => {
                                 </div>
                             )}
 
-                            <div className="mt-4 flex gap-3">
-                                <Button
-                                    onClick={handleSave}
-                                    className="flex-1 bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-lg transition-all duration-300 hover:scale-[1.02]"
-                                    disabled={!notes.trim() || !selectedPatient || isSaving || extractedFields.length === 0}
-                                >
-                                    {isSaving ? (
-                                        <>
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                            Saving...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Save className="h-4 w-4 mr-2" />
-                                            Save Patient Data as New Visit
-                                        </>
-                                    )}
-                                </Button>
-                            </div>
+                            {isPatientUser && (
+                                <div className="mt-4 flex gap-3">
+                                    <Button
+                                        onClick={handleSave}
+                                        className="flex-1 bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-lg transition-all duration-300 hover:scale-[1.02]"
+                                        disabled={!canSave || isRegisteredPatient}
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                Saving...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="h-4 w-4 mr-2" />
+                                                Save Patient Data as New Visit
+                                            </>
+                                        )}
+                                    </Button>
+                                </div>
+                            )}
                         </div>
+
+                        {!isPatientUser && (
+                            <div className="relative bg-card/30 backdrop-blur-xl rounded-2xl p-6 border border-border/50 shadow-soft">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="h-1 w-8 rounded-full bg-gradient-to-r from-medical-blue to-medical-pink" />
+                                    <h2 className="text-lg font-semibold text-foreground">Doctor Visit Notes</h2>
+                                </div>
+                                <Textarea
+                                    value={doctorVisitNotes}
+                                    onChange={(e) => setDoctorVisitNotes(e.target.value)}
+                                    placeholder="Write your clinical visit notes here. This is the normal doctor notepad for this visit."
+                                    className="min-h-[160px] resize-y border-border/50 bg-background/50 backdrop-blur-sm focus-visible:ring-medical-blue/50 text-base"
+                                />
+                                <div className="mt-3 rounded-xl border border-border/50 bg-background/50 p-3">
+                                    <p className="text-xs font-semibold text-foreground mb-2">Ultrasound Images (optional)</p>
+                                    <input
+                                        type="file"
+                                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                                        multiple
+                                        onChange={handleUltrasoundSelection}
+                                        className="block w-full text-xs text-muted-foreground"
+                                    />
+                                    <p className="text-[11px] text-muted-foreground mt-1">Allowed: JPG, PNG, WEBP up to 10MB each.</p>
+                                    {ultrasoundFiles.length > 0 && (
+                                        <p className="text-[11px] text-medical-blue mt-1">{ultrasoundFiles.length} file(s) selected</p>
+                                    )}
+                                </div>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    This note is saved with the visit record. AI extraction remains optional.
+                                </p>
+                                <div className="mt-4 flex gap-3">
+                                    <Button
+                                        onClick={handleSave}
+                                        className="flex-1 bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-lg transition-all duration-300 hover:scale-[1.02]"
+                                        disabled={!canSave || isRegisteredPatient}
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                Saving Visit...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="h-4 w-4 mr-2" />
+                                                Save Visit (Notes + Clinical Data)
+                                            </>
+                                        )}
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Tips Card */}
                         <div className="relative bg-card/30 backdrop-blur-xl rounded-2xl p-5 border border-border/50 shadow-soft overflow-hidden">

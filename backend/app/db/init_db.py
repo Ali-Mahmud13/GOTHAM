@@ -2,7 +2,7 @@
 
 from sqlmodel import SQLModel
 from app.db.session import engine
-from app.models import Patient, Visit, User, AuthUser, DoctorAvailability, Appointment, RegistrationRequest
+from app.models import Patient, Visit, User, AuthUser, DoctorAvailability, Appointment, RegistrationRequest, UltrasoundImage
 import logging
 
 logger = logging.getLogger(__name__)

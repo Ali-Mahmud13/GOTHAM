@@ -1,7 +1,7 @@
 """Data entry service - Handles clinical notes parsing and visit creation."""
 
 from typing import List, Dict, Optional
-from sqlmodel import Session
+from sqlmodel import Session, select
 from datetime import datetime, timedelta
 from app.repositories import PatientRepository, VisitRepository
 from app.schemas import (
@@ -17,8 +17,9 @@ from langchain_core.messages import HumanMessage
 import logging
 import json
 import asyncio
-from app.models import Patient
+from app.models import Patient, Visit, UltrasoundImage
 from app.models.auth import AuthUser
+from app.utils.cloudinary_storage import upload_ultrasound_image, delete_ultrasound_image, is_cloudinary_configured
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,16 @@ class DataEntryService:
                         success=False,
                         message="Patients can only submit their own clinical notes."
                     )
+
+                # Registered patients cannot self-enter notes/vitals.
+                if patient.doctor_id:
+                    return VisitResponse(
+                        visit_id=0,
+                        patient_id=request.patient_id,
+                        visit_date=datetime.utcnow(),
+                        success=False,
+                        message="You are registered with a doctor. Your doctor should enter notes and vitals."
+                    )
             
             # Update patient static fields if provided
             if any([request.family_history, request.pcos, request.unexplained_prenatal_loss,
@@ -245,7 +256,9 @@ class DataEntryService:
                 patient_id=patient.id,
                 visit_date=datetime.utcnow(),
                 visit_type=request.visit_type,
-                notes=request.notes
+                notes=request.notes,
+                recorded_by_role=user.role if user else None,
+                recorded_by_user_id=user.id if user else None,
             )
             self.session.add(visit)
             self.session.flush()  # Get visit.id without committing
@@ -321,6 +334,128 @@ class DataEntryService:
                 success=False,
                 message=f"Error creating visit: {str(e)}"
             )
+
+    def upload_ultrasound_images(
+        self,
+        visit_id: int,
+        files: List,
+        user: Optional[AuthUser] = None,
+    ) -> List[UltrasoundImage]:
+        """Upload one or more ultrasound images to Cloudinary and store metadata."""
+        if not files:
+            return []
+
+        if not is_cloudinary_configured():
+            raise ValueError("Cloudinary credentials are missing. Configure CLOUDINARY_* env vars.")
+
+        visit = self.session.get(Visit, visit_id)
+        if not visit:
+            raise ValueError("Visit not found")
+
+        patient = self.session.get(Patient, visit.patient_id)
+        if not patient:
+            raise ValueError("Patient not found for visit")
+
+        self._validate_upload_access(patient, user)
+
+        allowed_types = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+        max_bytes = 10 * 1024 * 1024
+
+        uploaded_records: List[UltrasoundImage] = []
+        for file in files:
+            if not file or not getattr(file, "filename", None):
+                continue
+
+            content_type = (getattr(file, "content_type", "") or "").lower()
+            if content_type not in allowed_types:
+                raise ValueError(f"Unsupported file type: {content_type or 'unknown'}")
+
+            file.file.seek(0, 2)
+            file_size = file.file.tell()
+            file.file.seek(0)
+            if file_size > max_bytes:
+                raise ValueError(f"File {file.filename} exceeds 10MB limit")
+
+            cloudinary_meta = upload_ultrasound_image(
+                file_obj=file.file,
+                patient_identifier=patient.patient_identifier,
+                visit_id=visit.id,
+                filename=file.filename,
+            )
+
+            image_record = UltrasoundImage(
+                visit_id=visit.id,
+                patient_id=patient.id,
+                public_id=cloudinary_meta["public_id"],
+                secure_url=cloudinary_meta["secure_url"],
+                thumbnail_url=cloudinary_meta.get("thumbnail_url"),
+                file_name=cloudinary_meta.get("file_name"),
+                format=cloudinary_meta.get("format"),
+                bytes=cloudinary_meta.get("bytes") or file_size,
+                width=cloudinary_meta.get("width"),
+                height=cloudinary_meta.get("height"),
+                uploaded_by_role=user.role if user else None,
+                uploaded_by_user_id=user.id if user else None,
+            )
+            self.session.add(image_record)
+            uploaded_records.append(image_record)
+
+        self.session.commit()
+
+        for record in uploaded_records:
+            self.session.refresh(record)
+
+        return uploaded_records
+
+    def delete_ultrasound_image(self, image_id: int, user: Optional[AuthUser] = None) -> None:
+        """Delete a stored ultrasound image from DB and Cloudinary."""
+        image = self.session.get(UltrasoundImage, image_id)
+        if not image:
+            raise ValueError("Ultrasound image not found")
+
+        patient = self.session.get(Patient, image.patient_id)
+        if not patient:
+            raise ValueError("Patient not found for ultrasound image")
+
+        self._validate_delete_access(patient, user)
+
+        if image.public_id:
+            delete_ultrasound_image(image.public_id)
+
+        self.session.delete(image)
+        self.session.commit()
+
+    def _validate_upload_access(self, patient: Patient, user: Optional[AuthUser]) -> None:
+        """Authorize upload operations for patient or doctor context."""
+        if not user:
+            return
+
+        if user.role == "patient":
+            if not user.patient_id or user.patient_id != patient.id:
+                raise ValueError("Patients can only modify their own data")
+            if patient.doctor_id:
+                raise ValueError("You are registered with a doctor. Your doctor should enter notes and vitals.")
+            return
+
+        if user.role == "doctor":
+            if patient.doctor_id != user.id:
+                raise ValueError("You can only modify records for your registered patients")
+            return
+
+    def _validate_delete_access(self, patient: Patient, user: Optional[AuthUser]) -> None:
+        """Authorize delete operations for patient or doctor context."""
+        if not user:
+            return
+
+        if user.role == "patient":
+            if not user.patient_id or user.patient_id != patient.id:
+                raise ValueError("Patients can only delete their own ultrasound images")
+            return
+
+        if user.role == "doctor":
+            if patient.doctor_id != user.id:
+                raise ValueError("You can only delete records for your registered patients")
+            return
     
     def _build_extraction_prompt(self, notes: str, patient_id: str = None) -> str:
         """Build prompt for clinical notes extraction."""
