@@ -7,6 +7,16 @@ interface Visit {
     visit_date: string;
     visit_type: string;
     notes: string;
+    note_source?: 'patient' | 'doctor' | 'current_doctor' | 'previous_doctor' | 'unknown';
+    is_past_history?: boolean;
+    ultrasound_images?: Array<{
+        id: number;
+        secure_url: string;
+        thumbnail_url?: string | null;
+        file_name?: string | null;
+        uploaded_by_role?: string | null;
+        created_at?: string | null;
+    }>;
 
     // CBC Data (8 parameters)
     wbc: number | null;
@@ -22,7 +32,6 @@ interface Visit {
     baseline_value: number | null;
     accelerations: number | null;
     fetal_health_status: number | null;
-    fetal_health_confidence: number | null;
 
     // GDM Data
     glucose_level: number | null;
@@ -31,19 +40,34 @@ interface Visit {
     bmi: number | null;
     ogtt: number | null;
     gdm_risk_level: number | null;
-    gdm_confidence: number | null;
 
     // Predictions
     anemia_diagnosis: string | null;
-    anemia_confidence: number | null;
 }
 
 interface VisitTimelineProps {
     visits: Visit[];
+    showPastHistoryRow?: boolean;
+    pastHistoryMessage?: string;
+    hideCareStatusBadge?: boolean;
+    onDeleteUltrasound?: (imageId: number) => void | Promise<void>;
 }
 
-export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
+export const VisitTimeline = ({ visits, showPastHistoryRow = false, pastHistoryMessage, hideCareStatusBadge = false, onDeleteUltrasound }: VisitTimelineProps) => {
     const [expandedVisit, setExpandedVisit] = useState<number | null>(null);
+
+    const getSourceBadge = (visit: Visit) => {
+        if (visit.note_source === 'patient' && visit.visit_type === 'clinical_notes') {
+            return { text: 'Self Entered by Patient', className: 'bg-amber-100 text-amber-700' };
+        }
+        if (visit.note_source === 'previous_doctor') {
+            return { text: 'Past Doctor Record', className: 'bg-violet-100 text-violet-700' };
+        }
+        if (visit.note_source === 'current_doctor' || visit.note_source === 'doctor') {
+            return { text: 'Doctor Entered', className: 'bg-blue-100 text-blue-700' };
+        }
+        return null;
+    };
 
     const formatDate = (dateString: string) => {
         const date = new Date(dateString);
@@ -104,11 +128,21 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                 </div>
             </div>
 
+            {showPastHistoryRow && (
+                <div className="rounded-2xl border border-medical-blue/20 bg-medical-blue/5 p-4">
+                    <p className="text-sm font-bold text-medical-blue">Past History</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        {pastHistoryMessage || "These records were entered by the patient (Patient Notes) or a previous doctor."}
+                    </p>
+                </div>
+            )}
+
             {/* Timeline */}
             <div className="relative space-y-4">
                 {sortedVisits.map((visit, index) => {
                     const isExpanded = expandedVisit === visit.id;
                     const fetalStatus = getFetalHealthStatus(visit.fetal_health_status);
+                    const sourceBadge = getSourceBadge(visit);
 
                     return (
                         <div
@@ -129,9 +163,25 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                             <span className="text-sm font-medium text-muted-foreground">
                                                 {formatDate(visit.visit_date)}
                                             </span>
+                                            {!hideCareStatusBadge && (
+                                                visit.is_past_history ? (
+                                                    <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
+                                                        Past History
+                                                    </span>
+                                                ) : (
+                                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
+                                                        Current Care
+                                                    </span>
+                                                )
+                                            )}
                                             {index === 0 && (
                                                 <span className="px-2 py-0.5 bg-gradient-to-r from-medical-pink to-medical-blue text-white text-xs font-bold rounded-full">
                                                     Latest
+                                                </span>
+                                            )}
+                                            {sourceBadge && (
+                                                <span className={cn('px-2 py-0.5 text-xs font-bold rounded-full', sourceBadge.className)}>
+                                                    {sourceBadge.text}
                                                 </span>
                                             )}
                                         </div>
@@ -166,6 +216,16 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                                     <div className="flex items-center gap-2">
                                                         <Activity className="w-4 h-4 text-cyan-600" />
                                                         <span className="text-sm font-semibold text-cyan-600">GDM Screening</span>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {visit.ultrasound_images && visit.ultrasound_images.length > 0 && (
+                                                <div className="px-3 py-1.5 bg-sky-50 rounded-lg border border-sky-200">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sm">📷</span>
+                                                        <span className="text-sm font-semibold text-sky-600">
+                                                            Ultrasound {visit.ultrasound_images.length}
+                                                        </span>
                                                     </div>
                                                 </div>
                                             )}
@@ -221,6 +281,44 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                         </div>
                                     )}
 
+                                    {visit.ultrasound_images && visit.ultrasound_images.length > 0 && (
+                                        <div className="bg-sky-50/70 rounded-xl p-4 border border-sky-200">
+                                            <p className="text-sm font-semibold text-sky-700 mb-3">Ultrasound Images</p>
+                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                                {visit.ultrasound_images.map((image) => (
+                                                    <div key={image.id} className="rounded-lg border border-sky-200 bg-white p-2">
+                                                        <a
+                                                            href={image.secure_url}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="group block"
+                                                        >
+                                                            <img
+                                                                src={image.thumbnail_url || image.secure_url}
+                                                                alt={image.file_name || "Ultrasound image"}
+                                                                className="h-24 w-full object-cover rounded-lg border border-sky-200 group-hover:opacity-85 transition-opacity"
+                                                            />
+                                                        </a>
+                                                        <div className="mt-1 flex items-center justify-between gap-2">
+                                                            <p className="text-[11px] text-sky-700 truncate">
+                                                                {image.file_name || `Image #${image.id}`}
+                                                            </p>
+                                                            {onDeleteUltrasound && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => onDeleteUltrasound(image.id)}
+                                                                    className="text-[11px] font-semibold text-red-600 hover:text-red-700"
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* CBC Section */}
                                     {hasCBCData(visit) && (
                                         <div>
@@ -273,19 +371,9 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                             {/* AI Diagnosis */}
                                             {visit.anemia_diagnosis && (
                                                 <div className="bg-gradient-to-r from-medical-pink/10 to-rose-50/50 rounded-lg p-4 border border-medical-pink/20">
-                                                    <div className="flex items-center justify-between">
-                                                        <div>
-                                                            <p className="text-xs font-semibold text-medical-pink mb-1">AI Diagnosis</p>
-                                                            <p className="text-base font-bold text-foreground">{visit.anemia_diagnosis}</p>
-                                                        </div>
-                                                        {visit.anemia_confidence && (
-                                                            <div className="text-right">
-                                                                <p className="text-xs font-semibold text-muted-foreground mb-1">Confidence</p>
-                                                                <p className="text-2xl font-bold text-medical-pink">
-                                                                    {(visit.anemia_confidence * 100).toFixed(0)}%
-                                                                </p>
-                                                            </div>
-                                                        )}
+                                                    <div>
+                                                        <p className="text-xs font-semibold text-medical-pink mb-1">AI Diagnosis</p>
+                                                        <p className="text-base font-bold text-foreground">{visit.anemia_diagnosis}</p>
                                                     </div>
                                                 </div>
                                             )}
@@ -330,11 +418,6 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                                         <p className={cn("text-xl font-bold", fetalStatus.text)}>
                                                             {fetalStatus.label}
                                                         </p>
-                                                        {visit.fetal_health_confidence && (
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                {(visit.fetal_health_confidence * 100).toFixed(0)}% confidence
-                                                            </p>
-                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -403,11 +486,6 @@ export const VisitTimeline = ({ visits }: VisitTimelineProps) => {
                                                                 visit.gdm_risk_level === 1 ? 'Elevated' :
                                                                     'High Risk'}
                                                         </p>
-                                                        {visit.gdm_confidence && (
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                {(visit.gdm_confidence * 100).toFixed(0)}% confidence
-                                                            </p>
-                                                        )}
                                                     </div>
                                                 )}
                                             </div>

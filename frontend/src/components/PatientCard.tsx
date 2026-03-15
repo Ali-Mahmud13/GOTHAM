@@ -12,6 +12,8 @@ interface PatientCardProps {
 
 export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: PatientCardProps) => {
   const navigate = useNavigate();
+  const parsedAge = Number(age);
+  const ageDisplay = Number.isFinite(parsedAge) && parsedAge > 0 ? `${parsedAge} years old` : "Not provided";
 
   const getRiskConfig = () => {
     switch (riskLevel) {
@@ -26,10 +28,10 @@ export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: Patient
         };
       case 'medium':
         return {
-          color: 'from-purple-400 to-pink-400',
-          bgColor: 'bg-purple-400',
-          textColor: 'text-purple-600',
-          glowColor: 'shadow-purple-400/50',
+          color: 'from-violet-500 to-indigo-500',
+          bgColor: 'bg-violet-500',
+          textColor: 'text-violet-600',
+          glowColor: 'shadow-violet-500/50',
           label: 'Medium Risk',
           pulseAnimation: false,
         };
@@ -127,7 +129,7 @@ export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: Patient
             </div>
             <div>
               <p className="text-xs text-gray-500 font-medium">Age</p>
-              <p className="font-semibold">{age} years old</p>
+              <p className="font-semibold">{ageDisplay}</p>
             </div>
           </div>
 

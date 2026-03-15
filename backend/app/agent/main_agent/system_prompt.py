@@ -527,6 +527,8 @@ CRITICAL INSTRUCTIONS:
    - Whether it was completed
    - Exact results if completed
    - Exact reason if not completed
+   - Explicit risk level (low/medium/high or model-native class)
+   - AI-generated assessment report summary
 4. *SOURCED RECOMMENDATIONS*: All management MUST come from {rag_context}
 
 RESPONSE STRUCTURE (Use markdown):
@@ -538,6 +540,12 @@ RESPONSE STRUCTURE (Use markdown):
 
 ## Health Assessment Summary
 [Summarize findings ONLY from the requested assessment type(s)]
+
+## Assessment Outputs (Required)
+[For EACH completed assessment, include this exact structure:]
+- Assessment: [name]
+- Risk Level: [low/medium/high]
+- AI Generated Report: [short clinical summary derived from the model output]
 
 ## Risk Factors Identified  
 [List risk factors ONLY from the requested assessment reports]

@@ -35,6 +35,13 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 # Inngest Settings
 INNGEST_APP_ID = os.getenv("INNGEST_APP_ID", "GOTHAM")
 
+# Cloudinary Settings
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
+CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "gotham")
+CLOUDINARY_PUBLIC_URLS = os.getenv("CLOUDINARY_PUBLIC_URLS", "true").lower() == "true"
+
 # App Settings
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 

@@ -1,9 +1,11 @@
 """Patient service - Handles patient data fetching and management."""
 
 from typing import Dict, Optional, List
+import re
 from sqlmodel import Session, select
+from sqlalchemy import func
 from app.db.session import engine
-from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
 from app.models.patient_latest_assessments import PatientLatestAssessments
 import logging
 
@@ -16,6 +18,25 @@ class PatientService:
     def __init__(self):
         """Initialize the patient service."""
         logger.info("Patient service initialized with database connection")
+
+    def _normalize_patient_query(self, patient_query: str) -> str:
+        """Normalize patient lookup input for robust matching."""
+        normalized = (patient_query or "").strip().lower()
+        normalized = normalized.strip(" .,!?:;\"'`")
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized
+
+    def _resolve_patient(self, session: Session, patient_query: str) -> Optional[Patient]:
+        """Resolve patient by identifier OR name using case-insensitive matching."""
+        normalized = self._normalize_patient_query(patient_query)
+        if not normalized:
+            return None
+
+        statement = select(Patient).where(
+            (func.lower(Patient.patient_identifier) == normalized)
+            | (func.lower(Patient.name) == normalized)
+        )
+        return session.exec(statement).first()
     
     async def get_patient_data(self, patient_identifier: str) -> Dict:
         """
@@ -31,9 +52,8 @@ class PatientService:
             logger.info(f"Fetching data for patient: {patient_identifier}")
             
             with Session(engine) as session:
-                # Fetch patient
-                statement = select(Patient).where(Patient.patient_identifier == patient_identifier)
-                patient = session.exec(statement).first()
+                # Fetch patient by identifier or name (case-insensitive)
+                patient = self._resolve_patient(session, patient_identifier)
                 
                 if not patient:
                     logger.warning(f"No patient found with identifier: {patient_identifier}")
@@ -91,10 +111,8 @@ class PatientService:
             logger.info(f"[OPTIMIZED] Fetching data for patient: {patient_identifier}")
             
             with Session(engine) as session:
-                # Query 1: Get patient
-                patient = session.exec(
-                    select(Patient).where(Patient.patient_identifier == patient_identifier)
-                ).first()
+                # Query 1: Get patient by identifier or name (case-insensitive)
+                patient = self._resolve_patient(session, patient_identifier)
                 
                 if not patient:
                     logger.warning(f"No patient found with identifier: {patient_identifier}")
@@ -155,9 +173,16 @@ class PatientService:
                     .where(Visit.patient_id == patient.id)
                     .order_by(Visit.visit_date.desc())
                 ).first()
+
+                ultrasound_refs = session.exec(
+                    select(UltrasoundImage)
+                    .where(UltrasoundImage.patient_id == patient.id)
+                    .order_by(UltrasoundImage.created_at.desc())
+                    .limit(5)
+                ).all()
                 
                 # Build response
-                patient_data = self._build_patient_response_optimized(patient, latest, latest_visit)
+                patient_data = self._build_patient_response_optimized(patient, latest, latest_visit, ultrasound_refs)
                 logger.info(f"[OPTIMIZED] Successfully built patient response with {len(patient_data)} fields (3 queries)")
                 
                 return patient_data
@@ -178,8 +203,7 @@ class PatientService:
         """
         try:
             with Session(engine) as session:
-                statement = select(Patient).where(Patient.patient_identifier == patient_identifier)
-                patient = session.exec(statement).first()
+                patient = self._resolve_patient(session, patient_identifier)
                 return patient is not None
         except Exception as e:
             logger.error(f"Error validating patient ID: {str(e)}")
@@ -197,9 +221,8 @@ class PatientService:
         """
         try:
             with Session(engine) as session:
-                # Get patient
-                statement = select(Patient).where(Patient.patient_identifier == patient_identifier)
-                patient = session.exec(statement).first()
+                # Get patient by identifier or name (case-insensitive)
+                patient = self._resolve_patient(session, patient_identifier)
                 
                 if not patient:
                     logger.warning(f"No patient found with identifier: {patient_identifier}")
@@ -318,8 +341,6 @@ class PatientService:
                 merged["gestation_weeks"] = gdm.gestation_weeks
             if "gdm_risk_level" not in merged and gdm.risk_level is not None:
                 merged["gdm_risk_level"] = gdm.risk_level
-            if "gdm_confidence" not in merged and gdm.confidence is not None:
-                merged["gdm_confidence"] = gdm.confidence
             if "sys_bp" not in merged and gdm.blood_pressure_systolic is not None:
                 merged["sys_bp"] = gdm.blood_pressure_systolic
             if "dia_bp" not in merged and gdm.blood_pressure_diastolic is not None:
@@ -361,8 +382,6 @@ class PatientService:
             # For each field, use first non-null value encountered
             if "anemia_diagnosis" not in merged and anemia.diagnosis is not None:
                 merged["anemia_diagnosis"] = anemia.diagnosis
-            if "anemia_confidence" not in merged and anemia.confidence is not None:
-                merged["anemia_confidence"] = anemia.confidence
             
             # CBC parameters (uppercase for ML models)
             if "WBC" not in merged and anemia.wbc is not None:
@@ -415,15 +434,14 @@ class PatientService:
                 merged["fetal_movement"] = fhp.fetal_movement
             if "fetal_status" not in merged and fhp.status is not None:
                 merged["fetal_status"] = fhp.status
-            if "fetal_confidence" not in merged and fhp.confidence is not None:
-                merged["fetal_confidence"] = fhp.confidence
         return merged
     
     def _build_patient_response_optimized(
         self,
         patient: Patient,
         latest: Optional[PatientLatestAssessments],
-        latest_visit: Optional[Visit]
+        latest_visit: Optional[Visit],
+        ultrasound_refs: Optional[List[UltrasoundImage]] = None,
     ) -> Dict:
         """
         Build patient response from materialized table (optimized).
@@ -469,6 +487,24 @@ class PatientService:
             response["visit_date"] = latest_visit.visit_date.isoformat()
             response["visit_type"] = latest_visit.visit_type
             response["visit_notes"] = latest_visit.notes
+
+        if ultrasound_refs:
+            latest_image = ultrasound_refs[0]
+            response["latest_ultrasound_image_url"] = latest_image.secure_url
+            response["latest_ultrasound_thumbnail_url"] = latest_image.thumbnail_url
+            response["latest_ultrasound_visit_id"] = latest_image.visit_id
+            response["ultrasound_images"] = [
+                {
+                    "id": image.id,
+                    "visit_id": image.visit_id,
+                    "public_id": image.public_id,
+                    "secure_url": image.secure_url,
+                    "thumbnail_url": image.thumbnail_url,
+                    "uploaded_by_role": image.uploaded_by_role,
+                    "created_at": image.created_at.isoformat() if image.created_at else None,
+                }
+                for image in ultrasound_refs
+            ]
         
         # Add assessment data from materialized table
         if latest:

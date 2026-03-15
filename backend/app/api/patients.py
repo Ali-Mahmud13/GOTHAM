@@ -1,6 +1,6 @@
 """Patient API routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlmodel import Session, select
 from typing import List, Optional
 from datetime import datetime
@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.db.session import get_session
 from app.models.patient import Patient, Visit
 from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models.auth import AuthUser
 
 router = APIRouter(prefix="/api/patients", tags=["patients"])
 
@@ -22,6 +23,7 @@ class PatientCreate(BaseModel):
     contact_number: str
     clinical_notes: Optional[str] = None
     risk_level: str = "low"
+    doctor_id: Optional[int] = None
     number_of_pregnancies: Optional[int] = None
     bmi_category: Optional[int] = None
     family_history: Optional[bool] = None
@@ -56,6 +58,7 @@ class PatientResponse(BaseModel):
     contact_number: str
     clinical_notes: Optional[str]
     risk_level: str
+    doctor_id: Optional[int]
     number_of_pregnancies: Optional[int]
     bmi_category: Optional[int]
     family_history: Optional[bool]
@@ -71,9 +74,25 @@ class PatientResponse(BaseModel):
 
 
 @router.get("/", response_model=List[PatientResponse])
-def get_all_patients(session: Session = Depends(get_session)):
-    """Get all patients."""
-    statement = select(Patient).order_by(Patient.id)
+def get_all_patients(
+    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    session: Session = Depends(get_session)
+):
+    """Get all patients (filtered by doctor if authenticated)."""
+    # Get authenticated user
+    user = None
+    if user_email:
+        user = session.exec(
+            select(AuthUser).where(AuthUser.email == user_email)
+        ).first()
+    
+    # For doctors, filter by their assigned patients
+    if user and user.role == "doctor":
+        statement = select(Patient).where(Patient.doctor_id == user.id).order_by(Patient.id)
+    else:
+        # For patients or unauthenticated, return all (can be restricted later)
+        statement = select(Patient).order_by(Patient.id)
+    
     patients = session.exec(statement).all()
     return patients
 
@@ -115,8 +134,19 @@ def get_next_patient_id(session: Session) -> str:
 
 
 @router.post("/", response_model=PatientResponse)
-def create_patient(patient_data: PatientCreate, session: Session = Depends(get_session)):
+def create_patient(
+    patient_data: PatientCreate,
+    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    session: Session = Depends(get_session)
+):
     """Create a new patient."""
+    # Get authenticated user
+    user = None
+    if user_email:
+        user = session.exec(
+            select(AuthUser).where(AuthUser.email == user_email)
+        ).first()
+    
     # Auto-generate patient_identifier if not provided
     if not patient_data.patient_identifier:
         patient_data.patient_identifier = get_next_patient_id(session)
@@ -128,7 +158,13 @@ def create_patient(patient_data: PatientCreate, session: Session = Depends(get_s
     if existing:
         raise HTTPException(status_code=400, detail="Patient identifier already exists")
     
-    patient = Patient(**patient_data.dict())
+    patient_dict = patient_data.dict()
+    
+    # Assign to logged-in doctor if no doctor_id provided and user is a doctor
+    if not patient_dict.get('doctor_id') and user and user.role == "doctor":
+        patient_dict['doctor_id'] = user.id
+    
+    patient = Patient(**patient_dict)
     session.add(patient)
     session.commit()
     session.refresh(patient)

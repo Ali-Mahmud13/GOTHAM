@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 import ReactMarkdown from "react-markdown";
 
 interface Message {
@@ -17,6 +18,9 @@ interface Message {
 
 export const ChatPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { user } = useAuth();
+  const returnTo = searchParams.get("returnTo") || "/dashboard";
   const { toast } = useToast();
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -35,6 +39,13 @@ export const ChatPage = () => {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    const prefilledMessage = searchParams.get("message");
+    if (prefilledMessage) {
+      setInput(prefilledMessage);
+    }
+  }, [searchParams]);
 
   const pollAssessmentStatus = async (assessmentId: string) => {
     const maxAttempts = 60; // 60 attempts = 1 minute max
@@ -76,7 +87,7 @@ export const ChatPage = () => {
                 ? {
                   ...msg,
                   content:
-                    "⚠️ Assessment is taking longer than expected. Please check the Inngest dashboard at http://localhost:8288 for status.",
+                    "⚠️ Assessment is taking longer than expected. Please wait a bit and try again.",
                 }
                 : msg
             )
@@ -163,7 +174,7 @@ export const ChatPage = () => {
 
       const errorMessage = error instanceof ApiError
         ? error.message
-        : "Failed to get response. Please check if the backend is running.";
+        : "Failed to get response. Please try again in a moment.";
 
       toast({
         title: "Error",
@@ -175,12 +186,32 @@ export const ChatPage = () => {
       const errorResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: "I'm sorry, I encountered an error. Please make sure the backend server is running at http://localhost:8000",
+        content: "I'm sorry, I encountered an error. Please try again shortly.",
       };
       setMessages((prev) => [...prev, errorResponse]);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getUserInitials = () => {
+    const source = (user?.full_name || user?.email || "").trim();
+    if (!source) return "ME";
+
+    if (source.includes("@")) {
+      const emailName = source.split("@")[0];
+      const parts = emailName.split(/[._-]+/).filter(Boolean);
+      if (parts.length >= 2) {
+        return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+      }
+      return emailName.slice(0, 2).toUpperCase();
+    }
+
+    const parts = source.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return source.slice(0, 2).toUpperCase();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -199,12 +230,12 @@ export const ChatPage = () => {
 
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-white/20 backdrop-blur-2xl bg-white/10 shadow-lg">
-        <div className="container mx-auto px-6 py-4">
+        <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate("/")}
+              onClick={() => navigate(returnTo)}
               className="hover:bg-accent/50"
             >
               <ArrowLeft className="h-5 w-5" />
@@ -223,7 +254,7 @@ export const ChatPage = () => {
       </header>
 
       {/* Chat Container */}
-      <main className="container mx-auto px-6 py-8 max-w-4xl">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-4xl">
         <div className="h-[calc(100vh-16rem)]">
           <ScrollArea className="h-full pr-4" ref={scrollRef}>
             <div className="space-y-6 pb-4">
@@ -243,7 +274,7 @@ export const ChatPage = () => {
 
                   <div
                     className={cn(
-                      "max-w-[75%] rounded-3xl px-5 py-4 backdrop-blur-xl border border-white/30 transition-all duration-300 shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]",
+                      "max-w-[90%] sm:max-w-[75%] rounded-3xl px-4 sm:px-5 py-4 backdrop-blur-xl border border-white/30 transition-all duration-300 shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]",
                       message.role === "user"
                         ? "bg-white/40 text-foreground ml-auto"
                         : "bg-gradient-to-br from-white/50 to-white/30 shadow-[0_8px_32px_0_rgba(255,105,180,0.2)]"
@@ -278,7 +309,7 @@ export const ChatPage = () => {
 
                   {message.role === "user" && (
                     <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-medical-blue to-medical-blue-light flex items-center justify-center text-white font-semibold shadow-glow-blue">
-                      DS
+                      {getUserInitials()}
                     </div>
                   )}
                 </div>
@@ -288,7 +319,7 @@ export const ChatPage = () => {
         </div>
 
         {/* Input Area */}
-        <div className="sticky bottom-0 pt-6 pb-8">
+        <div className="sticky bottom-0 pt-4 sm:pt-6 pb-6 sm:pb-8">
           <div className="relative backdrop-blur-2xl bg-white/30 border border-white/30 rounded-3xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] p-4">
             <Textarea
               value={input}
@@ -298,7 +329,7 @@ export const ChatPage = () => {
               className="min-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-base"
               disabled={isLoading}
             />
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/20">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3 pt-3 border-t border-white/20">
               <p className="text-xs text-muted-foreground">
                 {isLoading ? "Thinking..." : "Press Enter to send, Shift + Enter for new line"}
               </p>

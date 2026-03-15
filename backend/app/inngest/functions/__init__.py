@@ -6,5 +6,5 @@ from app.inngest.functions.risk_processing import risk_processing
 # All registered Inngest functions
 ALL_FUNCTIONS = [
     process_agent_assessment,  # Main agent workflow
-    risk_processing,           # Risk processing example
+    risk_processing,           # Rule-based async risk processing
 ]

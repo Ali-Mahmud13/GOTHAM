@@ -13,6 +13,9 @@ class Patient(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     patient_identifier: str = Field(unique=True, index=True)
     
+    # Doctor Assignment
+    doctor_id: Optional[int] = Field(default=None, foreign_key="auth_users.id", index=True, description="Assigned doctor ID")
+    
     # Personal Information (merged from PatientProfile)
     name: str = Field(description="Patient full name")
     age: int = Field(description="Patient age")
@@ -51,6 +54,8 @@ class Visit(SQLModel, table=True):
     visit_date: datetime = Field(description="Date and time of the clinical visit", index=True)
     visit_type: Optional[str] = Field(default=None, description="Type of visit (e.g., first_trimester, routine)")
     notes: Optional[str] = Field(default=None, description="Doctor's clinical notes for this visit")  # Changed from doctor_notes
+    recorded_by_role: Optional[str] = Field(default=None, description="Who recorded this visit: doctor or patient")
+    recorded_by_user_id: Optional[int] = Field(default=None, index=True, description="Auth user ID who recorded this visit")
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -60,7 +65,8 @@ class Visit(SQLModel, table=True):
     gdm_assessment: Optional["GDMAssessment"] = Relationship(back_populates="visit")
     anemia_assessment: Optional["AnemiaAssessment"] = Relationship(back_populates="visit")
     fetal_health_assessment: Optional["FetalHealthAssessment"] = Relationship(back_populates="visit")
+    ultrasound_images: List["UltrasoundImage"] = Relationship(back_populates="visit")
 
 
 # Import here to avoid circular imports
-from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage

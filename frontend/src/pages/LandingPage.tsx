@@ -61,7 +61,7 @@ const steps = [
     {
         number: "03",
         title: "Risk Prediction",
-        description: "ML models predict preeclampsia, anemia, and mortality risks with confidence scores.",
+        description: "ML models predict preeclampsia, anemia, and mortality risk levels.",
     },
     {
         number: "04",
@@ -133,11 +133,20 @@ export const LandingPage = () => {
                         <div className="flex items-center gap-3">
                             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                                 <Button
-                                    onClick={() => navigate("/login")}
+                                    onClick={() => navigate("/patient/login")}
+                                    variant="outline"
+                                    className="border-medical-blue/50 text-medical-blue hover:bg-medical-blue/10"
+                                >
+                                    Patient Portal
+                                </Button>
+                            </motion.div>
+                            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                                <Button
+                                    onClick={() => navigate("/doctor/login")}
                                     variant="outline"
                                     className="border-border/50 hover:bg-card/50"
                                 >
-                                    Login
+                                    Doctor Login
                                 </Button>
                             </motion.div>
                             <motion.div
@@ -145,10 +154,10 @@ export const LandingPage = () => {
                                 whileTap={{ scale: 0.95 }}
                             >
                                 <Button
-                                    onClick={() => navigate("/signup")}
+                                    onClick={() => navigate("/doctor/signup")}
                                     className="relative overflow-hidden bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-lg shadow-medical-pink/25 group"
                                 >
-                                    <span className="relative z-10">Sign Up</span>
+                                    <span className="relative z-10">Get Started</span>
                                     <motion.div
                                         className="absolute inset-0 bg-gradient-to-r from-medical-blue to-medical-pink"
                                         initial={{ x: "100%" }}
@@ -223,11 +232,11 @@ export const LandingPage = () => {
                             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}>
                                 <Button
                                     size="lg"
-                                    onClick={() => navigate("/login")}
+                                    onClick={() => navigate("/doctor/signup")}
                                     className="group bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-xl shadow-medical-pink/30 px-8"
                                 >
                                     <span className="flex items-center">
-                                        Try Demo
+                                        Get Started
                                         <motion.span
                                             className="ml-2"
                                             animate={{ x: [0, 4, 0] }}
@@ -558,11 +567,11 @@ export const LandingPage = () => {
                                 <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}>
                                     <Button
                                         size="lg"
-                                        onClick={() => navigate("/login")}
+                                        onClick={() => navigate("/doctor/signup")}
                                         className="group bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-xl shadow-medical-pink/30 px-8"
                                     >
                                         <span className="flex items-center">
-                                            Try Demo
+                                            Get Started
                                             <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
                                         </span>
                                     </Button>

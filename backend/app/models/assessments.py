@@ -111,3 +111,29 @@ class FetalHealthAssessment(SQLModel, table=True):
     
     # Relationship to visit
     visit: "Visit" = Relationship(back_populates="fetal_health_assessment")
+
+
+class UltrasoundImage(SQLModel, table=True):
+    """Ultrasound image metadata linked to a visit and patient."""
+
+    __tablename__ = "ultrasound_images"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    visit_id: int = Field(foreign_key="visits.id", index=True)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
+
+    public_id: str = Field(index=True, description="Cloudinary public ID")
+    secure_url: str = Field(description="Cloudinary secure URL")
+    thumbnail_url: Optional[str] = Field(default=None, description="Cloudinary thumbnail URL")
+    file_name: Optional[str] = Field(default=None, description="Original file name")
+    format: Optional[str] = Field(default=None, description="Image format from Cloudinary")
+    bytes: Optional[int] = Field(default=None, description="File size in bytes")
+    width: Optional[int] = Field(default=None)
+    height: Optional[int] = Field(default=None)
+
+    uploaded_by_role: Optional[str] = Field(default=None, description="patient or doctor")
+    uploaded_by_user_id: Optional[int] = Field(default=None, foreign_key="auth_users.id", index=True)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    visit: "Visit" = Relationship(back_populates="ultrasound_images")
