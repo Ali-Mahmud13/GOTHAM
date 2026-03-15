@@ -16,4 +16,5 @@ inngest_client = inngest.Inngest(
     event_key=event_key,
     event_api_base_url=event_api_base_url,  # Point to local dev server
     logger=logging.getLogger("uvicorn"),
+    is_production=False,
 )

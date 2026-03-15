@@ -28,3 +28,4 @@ pypdf==6.4.0
 tqdm==4.66.5
 
 catboost==1.2.8
+ultralytics==8.3.107
