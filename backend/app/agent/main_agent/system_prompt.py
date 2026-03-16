@@ -530,6 +530,7 @@ CRITICAL INSTRUCTIONS:
    - Explicit risk level (low/medium/high or model-native class)
    - AI-generated assessment report summary
 4. *SOURCED RECOMMENDATIONS*: All management MUST come from {rag_context}
+5. Do not reproduce full raw model reports, tables, SHAP matrices, or confidence dumps. Summarize key findings in  bullet points per assessment
 
 RESPONSE STRUCTURE (Use markdown):
 

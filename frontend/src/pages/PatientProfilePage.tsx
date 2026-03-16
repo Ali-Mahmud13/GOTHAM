@@ -12,6 +12,7 @@ import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { BatEasterEgg } from "@/components/BatEasterEgg";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
 
 const API_URL = "http://localhost:8000";
 
@@ -22,6 +23,8 @@ interface PatientProfile {
   age: number;
   contact_number: string;
   clinical_notes: string | null;
+  latest_ai_report?: string | null;
+  latest_assessment_type?: string | null;
   risk_level: 'high' | 'medium' | 'low';
   number_of_pregnancies: number | null;
   family_history: boolean | null;
@@ -1021,9 +1024,22 @@ const PatientProfilePage = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                   <div className="lg:col-span-3 bg-gradient-to-br from-pink-50/70 to-purple-50/70 rounded-2xl p-6 border-l-4 border-medical-pink">
                     <h3 className="text-sm font-semibold text-purple-600 mb-4 uppercase tracking-wide">Clinical Summary</h3>
-                    <p className="text-gray-700 leading-relaxed text-base mb-4 whitespace-pre-wrap">
-                      {patient.clinical_notes || 'No clinical summary available yet. Add or update doctor notes to improve this report.'}
-                    </p>
+                    <div className="text-gray-700 leading-relaxed text-base mb-4">
+                      <ReactMarkdown
+                       components={{
+                        p: ({ node, ...props }) => <p className="mb-2 whitespace-pre-wrap" {...props} />,
+                        img: ({ node, ...props}) => (<img {...props} className="rounded-xl shadow-lg my-3 max-w-full border" />),
+                        h1: ({ node, ...props}) => <h1 className="text-lg font-bold mt-3 mb-2" {...props} />,
+                        h2: ({ node, ...props }) => <h2 className="text-base font-semibold mt-3 mb-2" {...props} />,
+                        h3: ({ node, ...props }) => <h3 className="text-sm font-semibold mt-2 mb-1" {...props} />,
+                        li: ({ node, ...props }) => <li className="ml-4 list-disc" {...props} />,
+                        table: ({ node, ...props }) => <table className="w-full text-sm border my-2" {...props} />,
+                        th: ({ node, ...props }) => <th className="border px-2 py-1 bg-gray-50" {...props} />,
+                        td: ({ node, ...props }) => <td className="border px-2 py-1" {...props} />,
+                       }}>
+                        {patient.latest_ai_report || patient.clinical_notes || "No AI analysis available yet. Click Regenerate to create one."}
+                       </ReactMarkdown>
+                    </div>
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <Brain className="w-4 h-4" />
                       <span>Summary combines patient profile fields and visit history</span>

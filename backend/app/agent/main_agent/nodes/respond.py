@@ -27,7 +27,6 @@ def _extract_maternal_risk_levels(maternal_report: str) -> dict:
     elif "low risk of gestational diabetes" in report_lower:
         risks["gdm"] = "low"
     elif "risk level" in report_lower and "gestational" in report_lower:
-        # Fallback when a textual risk level appears near gestational content.
         m = re.search(r"risk level\s*[:\-]\s*(high|medium|elevated|low)", report_lower)
         if m:
             risks["gdm"] = "medium" if m.group(1) == "elevated" else m.group(1)
@@ -61,35 +60,6 @@ def _extract_fetal_risk_level(fetal_report: str) -> str:
     return "unknown"
 
 
-def _build_assessment_report_payload(assessment_type: str, maternal_report: str, fetal_report: str) -> tuple[str, dict]:
-    maternal_risks = _extract_maternal_risk_levels(maternal_report)
-    fetal_risk = _extract_fetal_risk_level(fetal_report)
-
-    sections = [f"## Assessment Type\n{assessment_type}"]
-    risk_levels = {"gdm": None, "anemia": None, "fetal": None}
-
-    if assessment_type in ["maternal", "both"] and maternal_report and maternal_report != "Not assessed":
-        risk_levels["gdm"] = maternal_risks["gdm"]
-        risk_levels["anemia"] = maternal_risks["anemia"]
-        sections.append(
-            "## Maternal Assessments\n"
-            f"- Gestational Diabetes Risk Level: {maternal_risks['gdm']}\n"
-            f"- Maternal Anemia Risk Level: {maternal_risks['anemia']}\n\n"
-            "### AI Generated Report\n"
-            f"{maternal_report}"
-        )
-
-    if assessment_type in ["fetal", "both"] and fetal_report and fetal_report != "Not assessed":
-        risk_levels["fetal"] = fetal_risk
-        sections.append(
-            "## Fetal Assessment\n"
-            f"- Fetal Risk Level: {fetal_risk}\n\n"
-            "### AI Generated Report\n"
-            f"{fetal_report}"
-        )
-
-    return "\n\n".join(sections), risk_levels
-
 async def respond_node(state: AgentState) -> AgentState:
     llm = get_llm(temperature=0.3)
     state["assessment_type_to_save"] = None
@@ -109,7 +79,6 @@ async def respond_node(state: AgentState) -> AgentState:
         for msg in state["messages"][:-1]
     ])
     
-    # Case 1: Assessment response (maternal/fetal/both)
     if prediction_decision in ["maternal", "fetal", "both"]:
         logger.info("Response type: Health Assessment Report")
         
@@ -117,17 +86,16 @@ async def respond_node(state: AgentState) -> AgentState:
         fetal_report = state.get("fetal_report", "") or "Not assessed"
         rag_context = state.get("rag_context", "") or "No Docuemnts available"
         patient_data = state.get("patient_data", {})
-        assessment= state.get("prediction_decision", {})
+        assessment = state.get("prediction_decision", {})
         
         patient_data_str = "\n".join([f"{k}: {v}" for k, v in patient_data.items()]) if patient_data else "Not available"
 
-        assessment_report_payload, risk_levels = _build_assessment_report_payload(
-            prediction_decision,
-            maternal_report,
-            fetal_report,
-        )
+        risk_levels = {
+            "gdm": _extract_maternal_risk_levels(maternal_report)["gdm"],
+            "anemia": _extract_maternal_risk_levels(maternal_report)["anemia"],
+            "fetal": _extract_fetal_risk_level(fetal_report),
+        }
         state["assessment_type_to_save"] = prediction_decision
-        state["assessment_report_to_save"] = assessment_report_payload
         state["assessment_risk_levels"] = risk_levels
         
         response_prompt = ASSESSMENT_RESPONSE_PROMPT.format(
@@ -144,7 +112,6 @@ async def respond_node(state: AgentState) -> AgentState:
             HumanMessage(content=response_prompt)
         ]
     
-    # Case 2: RAG response (medical knowledge query)
     elif prediction_decision == "rag":
         logger.info("Response type: Medical Knowledge Query")
         
@@ -165,25 +132,18 @@ async def respond_node(state: AgentState) -> AgentState:
             HumanMessage(content=response_prompt)
         ]
     
-    # Case 3: Respond (followup/clarification/casual)
     else:
         logger.info("Response type: Followup/Clarification/Casual")
         
-        # Prepare context summary
         context_parts = []
-        
         if state.get("patient_data"):
-            patient_data = state["patient_data"]
-            context_parts.append(f"Patient Data: {patient_data}")
-        
+            context_parts.append(f"Patient Data: {state['patient_data']}")
         if state.get("maternal_report"):
-            context_parts.append(f"Maternal Report Available: Yes")
-        
+            context_parts.append("Maternal Report Available: Yes")
         if state.get("fetal_report"):
-            context_parts.append(f"Fetal Report Available: Yes")
-        
+            context_parts.append("Fetal Report Available: Yes")
         if state.get("rag_context"):
-            context_parts.append(f"RAG Context Available: Yes")
+            context_parts.append("RAG Context Available: Yes")
         
         context_summary = "\n".join(context_parts) if context_parts else "No specific context available"
         
@@ -203,51 +163,61 @@ async def respond_node(state: AgentState) -> AgentState:
     response = await llm.ainvoke(messages)
 
     final_response = response.content
+    if prediction_decision in ["maternal", "fetal", "both"]:
+        final_response = _enforce_concise_assessment_output(final_response)
 
     if prediction_decision in ["fetal", "both"]:
         fetal_report = state.get("fetal_report", "")
         image_url = _extract_ultrasound_image(fetal_report)
         if image_url:
             final_response += f"\n\n### Fetal Ultrasound Image\n\n![Annotated Ultrasound]({image_url})"
+
+    # ✅ CRITICAL FIX: save the concise final response, not raw payload
+    if prediction_decision in ["maternal", "fetal", "both"]:
+        state["assessment_report_to_save"] = final_response
     
     state["messages"].append(AIMessage(content=final_response))
-    logger.info(f"Response generated (length: {len(response.content)} chars)")
+    logger.info(f"Response generated (length: {len(final_response)} chars)")
     
-    # Reset per-message state
     reset_state(state)
-    
     logger.info("="*60 + "\n")
-    
     return state
 
 
 def reset_state(state: AgentState):
-    """Reset per-message state fields, keep conversation-persistent data"""
     logger.info("Resetting per-message state fields")
-    
-    # Reset clarity checks
     state["incomplete"] = None
     state["inscope"] = None
     state["clear"] = None
-    
-    # Reset decision
     state["prediction_decision"] = None
-    
-    # Reset temporary extraction
     state["patient_identifier"] = None
-    
-    # Reset retrieval decisions
     if "should_retrieve_decision" in state:
         state["should_retrieve_decision"] = None
     if "rag_keywords" in state:
         state["rag_keywords"] = None
-
-    # Keep persistent: messages, current_patient_id, patient_data, maternal_report, fetal_report, rag_context
-    
     logger.info("State reset complete")
+
 
 def _extract_ultrasound_image(fetal_report: str) -> str | None:
     match = re.search(r"!\[.*?\]\((.*?)\)", fetal_report)
     if match:
         return match.group(1)
     return None
+
+
+def _enforce_concise_assessment_output(text: str) -> str:
+    if not text:
+        return text
+    noisy_sections = [
+        r"##?\s*Confidence Scores[\s\S]*?(?=\n## |\Z)",
+        r"##?\s*Explainable AI Analysis[\s\S]*?(?=\n## |\Z)",
+        r"##?\s*Key Clinical Insights[\s\S]*?(?=\n## |\Z)",
+        r"##?\s*Interpretation Notes[\s\S]*?(?=\n## |\Z)",
+        r"##?\s*Detected Structures[\s\S]*?(?=\n## |\Z)",
+        r"##?\s*Patient Information[\s\S]*?(?=\n## |\Z)",
+    ]
+    out = text
+    for p in noisy_sections:
+        out = re.sub(p, "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return out

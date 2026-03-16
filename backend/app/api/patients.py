@@ -68,6 +68,8 @@ class PatientResponse(BaseModel):
     prediabetes: Optional[bool]
     created_at: datetime
     updated_at: datetime
+    latest_ai_report: Optional[str] = None
+    latest_assessment_type: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -106,7 +108,30 @@ def get_patient(patient_identifier: str, session: Session = Depends(get_session)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
-    return patient
+    latest_visit = session.exec(select(Visit).where(Visit.patient_id == patient.id).order_by(Visit.visit_date.desc())).first()
+    latest_ai_report = None
+    latest_assessment_type = None
+
+    if latest_visit:
+        gdm = session.exec(select(GDMAssessment).where(GDMAssessment.visit_id == latest_visit.id)).first()
+        anemia = session.exec(select(AnemiaAssessment).where(AnemiaAssessment.visit_id == latest_visit.id)).first()
+        fetal = session.exec(select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == latest_visit.id)).first()
+
+        for assessment_type, report in [
+            ("both", (fetal.ai_report if fetal and fetal.ai_report else None)),
+            ("maternal", (anemia.ai_report if anemia and anemia.ai_report else None)),
+            ("maternal", (gdm.ai_report if gdm and gdm.ai_report else None)),
+            ("fetal", (fetal.ai_report if fetal and fetal.ai_report else None)),
+        ]:
+            if report:
+                latest_ai_report = report
+                latest_assessment_type = assessment_type
+                break
+    payload = patient.model_dump()
+    payload["latest_ai_report"] = latest_ai_report
+    payload["latest_assessment_type"] = latest_assessment_type
+    
+    return payload
 
 
 def get_next_patient_id(session: Session) -> str:

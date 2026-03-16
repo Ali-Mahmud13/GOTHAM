@@ -8,7 +8,24 @@ from sqlmodel import Session, select
 
 from app.db.session import engine
 from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+import re
 
+def _compact_assessment_report(report: str) -> str:
+    if not report:
+        return report
+    text = report
+    noisy_headers = ["## Confidence Scores",
+                     "## Explainable AI Analysis",
+                     "## Key Clinical Insights",
+                     "## Interpretation Notes",
+                     "## Detected Structures",
+                     "## Patient Information",]
+    for h in noisy_headers:
+        pattern = rf"{re.escape(h)}[\s\S]*?(?=\n## |\Z)"
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
 
 def _to_gdm_risk_value(level: Optional[str]) -> Optional[int]:
     if not level:
@@ -45,6 +62,7 @@ def save_assessment_report(
     """Save only structured assessment report output to latest assessment records."""
     if not patient_identifier or not assessment_report:
         return False
+    assessment_report =_compact_assessment_report(assessment_report)
 
     risk_levels = risk_levels or {}
 
