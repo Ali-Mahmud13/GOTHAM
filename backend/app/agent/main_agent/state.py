@@ -9,7 +9,7 @@ class AgentState(MessagesState):
     
     # Prediction and routing fields
     prediction_decision: Optional[Literal["both", "maternal", "fetal", "rag", "respond"]] = None
-    should_retrieve_decision: Optional[Literal["retrieve", "not_retrieve"]] = None
+    should_retrieve_decision: Optional[Literal["load", "not_load"]] = None
     
     # Patient tracking
     current_patient_id: Optional[str] = None
@@ -21,3 +21,8 @@ class AgentState(MessagesState):
     fetal_report: Optional[str] = None
     rag_context: Optional[str] = None
     rag_keywords: Optional[str] = None
+
+    # Latest assessment payload for persistence (per run)
+    assessment_type_to_save: Optional[str] = None
+    assessment_report_to_save: Optional[str] = None
+    assessment_risk_levels: Optional[dict] = None

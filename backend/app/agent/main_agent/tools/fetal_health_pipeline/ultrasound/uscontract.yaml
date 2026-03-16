@@ -1,2 +1,2 @@
 required_features:
-  - ultrasound_image_path
+  - latest_ultrasound_image_url

@@ -18,11 +18,29 @@ if not DATABASE_URL:
     )
 
 # LLM Settings
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Kept for backward compatibility
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+
+# Gemini Settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+
+# OpenAI Settings (Primary LLM)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+
+# LLM Provider Selection (openai, groq, gemini)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 
 # Inngest Settings
 INNGEST_APP_ID = os.getenv("INNGEST_APP_ID", "GOTHAM")
+
+# Cloudinary Settings
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
+CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "gotham")
+CLOUDINARY_PUBLIC_URLS = os.getenv("CLOUDINARY_PUBLIC_URLS", "true").lower() == "true"
 
 # App Settings
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
@@ -38,3 +56,8 @@ def setup_logging():
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    
+    # Reduce verbose logging to prevent terminal overflow
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("inngest").setLevel(logging.WARNING)

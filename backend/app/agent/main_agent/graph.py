@@ -60,7 +60,7 @@ def create_graph():
             return "should_retrieve"
     
     workflow.add_conditional_edges(
-        "decide_prediction",  # ✅ CHANGED
+        "decide_prediction",  
         route_after_prediction,
         {
             "load_data": "load_data",
@@ -117,18 +117,17 @@ def create_graph():
     
     # Route after should_retrieve
     def route_after_should_retrieve(state: AgentState):
-        decision = state.get("should_retrieve_decision")
-        
-        if decision == "retrieve":
-            return "rag_retrieval"
-        return "respond"
-    
+        decision = state.get("should_load_patient") 
+        if decision == "load":
+            return "load_data"  
+        return "respond"  
+
     workflow.add_conditional_edges(
         "should_retrieve",
         route_after_should_retrieve,
         {
-            "rag_retrieval": "rag_retrieval",
-            "respond": "respond"
+        "load_data": "load_data",  
+        "respond": "respond"
         }
     )
     

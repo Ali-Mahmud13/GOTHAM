@@ -12,33 +12,35 @@ interface PatientCardProps {
 
 export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: PatientCardProps) => {
   const navigate = useNavigate();
+  const parsedAge = Number(age);
+  const ageDisplay = Number.isFinite(parsedAge) && parsedAge > 0 ? `${parsedAge} years old` : "Not provided";
 
   const getRiskConfig = () => {
     switch (riskLevel) {
       case 'high':
         return {
-          color: 'from-rose-500 via-pink-500 to-red-500',
-          bgColor: 'bg-rose-500',
-          textColor: 'text-rose-600',
-          glowColor: 'shadow-rose-500/50',
+          color: 'from-medical-pink to-rose-500',
+          bgColor: 'bg-medical-pink',
+          textColor: 'text-medical-pink',
+          glowColor: 'shadow-medical-pink/50',
           label: 'High Risk',
           pulseAnimation: true,
         };
       case 'medium':
         return {
-          color: 'from-purple-500 via-violet-500 to-purple-600',
-          bgColor: 'bg-purple-500',
-          textColor: 'text-purple-600',
-          glowColor: 'shadow-purple-500/50',
+          color: 'from-violet-500 to-indigo-500',
+          bgColor: 'bg-violet-500',
+          textColor: 'text-violet-600',
+          glowColor: 'shadow-violet-500/50',
           label: 'Medium Risk',
           pulseAnimation: false,
         };
       case 'low':
         return {
-          color: 'from-cyan-500 via-blue-500 to-teal-500',
-          bgColor: 'bg-cyan-500',
-          textColor: 'text-cyan-600',
-          glowColor: 'shadow-cyan-500/50',
+          color: 'from-medical-blue to-cyan-400',
+          bgColor: 'bg-medical-blue',
+          textColor: 'text-medical-blue',
+          glowColor: 'shadow-medical-blue/50',
           label: 'Low Risk',
           pulseAnimation: false,
         };
@@ -122,19 +124,19 @@ export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: Patient
         <div className="space-y-3">
           {/* Age */}
           <div className="flex items-center gap-3 text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-              <User className="w-4 h-4 text-blue-600" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-medical-blue/10 to-medical-blue/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+              <User className="w-4 h-4 text-medical-blue" />
             </div>
             <div>
               <p className="text-xs text-gray-500 font-medium">Age</p>
-              <p className="font-semibold">{age} years old</p>
+              <p className="font-semibold">{ageDisplay}</p>
             </div>
           </div>
 
           {/* Contact Number */}
           <div className="flex items-center gap-3 text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-100 to-purple-50 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-              <Phone className="w-4 h-4 text-purple-600" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-medical-pink/10 to-medical-pink/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+              <Phone className="w-4 h-4 text-medical-pink" />
             </div>
             <div>
               <p className="text-xs text-gray-500 font-medium">Contact</p>

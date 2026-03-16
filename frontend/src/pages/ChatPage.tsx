@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 import ReactMarkdown from "react-markdown";
 
 interface Message {
@@ -17,6 +18,9 @@ interface Message {
 
 export const ChatPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { user } = useAuth();
+  const returnTo = searchParams.get("returnTo") || "/dashboard";
   const { toast } = useToast();
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -36,6 +40,13 @@ export const ChatPage = () => {
     }
   }, [messages]);
 
+  useEffect(() => {
+    const prefilledMessage = searchParams.get("message");
+    if (prefilledMessage) {
+      setInput(prefilledMessage);
+    }
+  }, [searchParams]);
+
   const pollAssessmentStatus = async (assessmentId: string) => {
     const maxAttempts = 60; // 60 attempts = 1 minute max
     let attempts = 0;
@@ -45,23 +56,26 @@ export const ChatPage = () => {
         attempts++;
         const status = await api.getAssessmentStatus(assessmentId);
 
-        if (status.status === "completed") {
+        if (status.status === "completed" || status.status === "failed") {
           // Replace processing message with result
+          // Response is now at root level (status.response) not nested (status.result.response)
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assessmentId
                 ? {
-                    ...msg,
-                    content: status.result?.response || "Assessment completed successfully!",
-                  }
+                  ...msg,
+                  content: status.response || "Assessment completed successfully!",
+                }
                 : msg
             )
           );
 
-          toast({
-            title: "Assessment Complete",
-            description: "Your risk assessment is ready!",
-          });
+          if (status.status === "completed") {
+            toast({
+              title: "Assessment Complete",
+              description: "Your risk assessment is ready!",
+            });
+          }
         } else if (attempts < maxAttempts) {
           // Still processing, poll again in 1 second
           setTimeout(poll, 1000);
@@ -71,10 +85,10 @@ export const ChatPage = () => {
             prev.map((msg) =>
               msg.id === assessmentId
                 ? {
-                    ...msg,
-                    content:
-                      "⚠️ Assessment is taking longer than expected. Please check the Inngest dashboard at http://localhost:8288 for status.",
-                  }
+                  ...msg,
+                  content:
+                    "⚠️ Assessment is taking longer than expected. Please wait a bit and try again.",
+                }
                 : msg
             )
           );
@@ -114,8 +128,8 @@ export const ChatPage = () => {
 
     try {
       // Check if this is a risk assessment request (triggers background job)
-      const isAssessmentRequest = /assess.*risk|risk.*assess|evaluate.*patient|patient.*assessment/i.test(currentInput);
-      
+      const isAssessmentRequest = /assess.*risk|risk.*assess|evaluate.*patient|patient.*assessment|full.*assessment|complete.*assessment|complete.*checkup|checkup.*for|assess.*p\d{3}/i.test(currentInput);
+
       if (isAssessmentRequest) {
         // Use background job for assessments
         const response = await api.assess({
@@ -130,9 +144,9 @@ export const ChatPage = () => {
           role: "assistant",
           content: `🔄 **Processing Risk Assessment...**\n\nPlease wait while I analyze:\n- Patient data validation\n- Maternal health predictions\n- Fetal health analysis\n- Medical guidelines integration\n\nThis may take a few moments...`,
         };
-        
+
         setMessages((prev) => [...prev, processingMessage]);
-        
+
         toast({
           title: "Assessment Started",
           description: "Processing your risk assessment...",
@@ -152,32 +166,52 @@ export const ChatPage = () => {
           role: "assistant",
           content: response.response,
         };
-        
+
         setMessages((prev) => [...prev, aiResponse]);
       }
     } catch (error) {
       console.error("Chat error:", error);
-      
-      const errorMessage = error instanceof ApiError 
-        ? error.message 
-        : "Failed to get response. Please check if the backend is running.";
-      
+
+      const errorMessage = error instanceof ApiError
+        ? error.message
+        : "Failed to get response. Please try again in a moment.";
+
       toast({
         title: "Error",
         description: errorMessage,
         variant: "destructive",
       });
-      
+
       // Add error message to chat
       const errorResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: "I'm sorry, I encountered an error. Please make sure the backend server is running at http://localhost:8000",
+        content: "I'm sorry, I encountered an error. Please try again shortly.",
       };
       setMessages((prev) => [...prev, errorResponse]);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getUserInitials = () => {
+    const source = (user?.full_name || user?.email || "").trim();
+    if (!source) return "ME";
+
+    if (source.includes("@")) {
+      const emailName = source.split("@")[0];
+      const parts = emailName.split(/[._-]+/).filter(Boolean);
+      if (parts.length >= 2) {
+        return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+      }
+      return emailName.slice(0, 2).toUpperCase();
+    }
+
+    const parts = source.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return source.slice(0, 2).toUpperCase();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -193,15 +227,15 @@ export const ChatPage = () => {
       <div className="absolute top-20 left-10 w-96 h-96 bg-medical-pink/20 rounded-full blur-3xl animate-pulse" />
       <div className="absolute bottom-20 right-10 w-96 h-96 bg-medical-blue/20 rounded-full blur-3xl animate-pulse delay-1000" />
       <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-purple-300/10 rounded-full blur-3xl" />
-      
+
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-white/20 backdrop-blur-2xl bg-white/10 shadow-lg">
-        <div className="container mx-auto px-6 py-4">
+        <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate("/")}
+              onClick={() => navigate(returnTo)}
               className="hover:bg-accent/50"
             >
               <ArrowLeft className="h-5 w-5" />
@@ -220,7 +254,7 @@ export const ChatPage = () => {
       </header>
 
       {/* Chat Container */}
-      <main className="container mx-auto px-6 py-8 max-w-4xl">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-4xl">
         <div className="h-[calc(100vh-16rem)]">
           <ScrollArea className="h-full pr-4" ref={scrollRef}>
             <div className="space-y-6 pb-4">
@@ -237,10 +271,10 @@ export const ChatPage = () => {
                       <Sparkles className="h-5 w-5 text-white" />
                     </div>
                   )}
-                  
+
                   <div
                     className={cn(
-                      "max-w-[75%] rounded-3xl px-5 py-4 backdrop-blur-xl border border-white/30 transition-all duration-300 shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]",
+                      "max-w-[90%] sm:max-w-[75%] rounded-3xl px-4 sm:px-5 py-4 backdrop-blur-xl border border-white/30 transition-all duration-300 shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]",
                       message.role === "user"
                         ? "bg-white/40 text-foreground ml-auto"
                         : "bg-gradient-to-br from-white/50 to-white/30 shadow-[0_8px_32px_0_rgba(255,105,180,0.2)]"
@@ -253,16 +287,16 @@ export const ChatPage = () => {
                       {message.role === "assistant" ? (
                         <ReactMarkdown
                           components={{
-                            h1: ({node, ...props}) => <h1 className="text-xl font-bold mb-3 mt-4 text-medical-pink" {...props} />,
-                            h2: ({node, ...props}) => <h2 className="text-lg font-semibold mb-2 mt-3 text-medical-pink" {...props} />,
-                            h3: ({node, ...props}) => <h3 className="text-base font-semibold mb-2 mt-2 text-medical-blue" {...props} />,
-                            p: ({node, ...props}) => <p className="mb-2 text-justify" {...props} />,
-                            ul: ({node, ...props}) => <ul className="list-disc list-inside mb-2 space-y-1" {...props} />,
-                            ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-2 space-y-1" {...props} />,
-                            li: ({node, ...props}) => <li className="ml-2" {...props} />,
-                            strong: ({node, ...props}) => <strong className="font-bold text-medical-pink" {...props} />,
-                            em: ({node, ...props}) => <em className="italic" {...props} />,
-                            code: ({node, ...props}) => <code className="bg-white/30 px-1 py-0.5 rounded text-xs" {...props} />,
+                            h1: ({ node, ...props }) => <h1 className="text-xl font-bold mb-3 mt-4 text-medical-pink" {...props} />,
+                            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mb-2 mt-3 text-medical-pink" {...props} />,
+                            h3: ({ node, ...props }) => <h3 className="text-base font-semibold mb-2 mt-2 text-medical-blue" {...props} />,
+                            p: ({ node, ...props }) => <p className="mb-2 text-justify" {...props} />,
+                            ul: ({ node, ...props }) => <ul className="list-disc list-inside mb-2 space-y-1" {...props} />,
+                            ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-2 space-y-1" {...props} />,
+                            li: ({ node, ...props }) => <li className="ml-2" {...props} />,
+                            strong: ({ node, ...props }) => <strong className="font-bold text-medical-pink" {...props} />,
+                            em: ({ node, ...props }) => <em className="italic" {...props} />,
+                            code: ({ node, ...props }) => <code className="bg-white/30 px-1 py-0.5 rounded text-xs" {...props} />,
                           }}
                         >
                           {message.content}
@@ -275,7 +309,7 @@ export const ChatPage = () => {
 
                   {message.role === "user" && (
                     <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-medical-blue to-medical-blue-light flex items-center justify-center text-white font-semibold shadow-glow-blue">
-                      DS
+                      {getUserInitials()}
                     </div>
                   )}
                 </div>
@@ -285,7 +319,7 @@ export const ChatPage = () => {
         </div>
 
         {/* Input Area */}
-        <div className="sticky bottom-0 pt-6 pb-8">
+        <div className="sticky bottom-0 pt-4 sm:pt-6 pb-6 sm:pb-8">
           <div className="relative backdrop-blur-2xl bg-white/30 border border-white/30 rounded-3xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] p-4">
             <Textarea
               value={input}
@@ -295,7 +329,7 @@ export const ChatPage = () => {
               className="min-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-base"
               disabled={isLoading}
             />
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/20">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3 pt-3 border-t border-white/20">
               <p className="text-xs text-muted-foreground">
                 {isLoading ? "Thinking..." : "Press Enter to send, Shift + Enter for new line"}
               </p>

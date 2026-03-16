@@ -1,3 +1,4 @@
+
 """Setup script for initializing the database with patient and visit tables."""
 
 import sys

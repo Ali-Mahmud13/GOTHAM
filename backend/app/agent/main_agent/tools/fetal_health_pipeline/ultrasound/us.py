@@ -16,8 +16,8 @@ def generate_xai_report(image_path, patient_id="Patient_001", conf_threshold=0.2
     report = xai.generate_markdown_report(image_path, patient_id, conf_threshold)
     return report
 
-async def predict_ultrasound(ultrasound_image_path: str) -> str:
-    return await asyncio.to_thread(generate_xai_report, ultrasound_image_path)
+async def predict_ultrasound(latest_ultrasound_image_url: str) -> str:
+    return await asyncio.to_thread(generate_xai_report, latest_ultrasound_image_url)
 
 
 if __name__ == "__main__":

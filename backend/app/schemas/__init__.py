@@ -8,6 +8,9 @@ from app.schemas.data_entry import (
     NotesParseResponse,
     CreateVisitRequest,
     VisitResponse,
+    UltrasoundImageResponse,
+    UltrasoundUploadResponse,
+    UltrasoundDeleteResponse,
 )
 
 __all__ = [
@@ -18,4 +21,7 @@ __all__ = [
     "NotesParseResponse",
     "CreateVisitRequest",
     "VisitResponse",
+    "UltrasoundImageResponse",
+    "UltrasoundUploadResponse",
+    "UltrasoundDeleteResponse",
 ]

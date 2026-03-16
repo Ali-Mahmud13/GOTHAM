@@ -50,7 +50,6 @@ Thumbs.db
 data/**/*.json
 notebooks/**/*.json
 *.h5
-*.pkl
 *.pickle
 
 # Models
@@ -84,3 +83,6 @@ INNGEST_SETUP.md
 backend/DATABASE_MIGRATION.md
 backend/PERFORMANCE_OPTIMIZATION_TODO.md
 docs
+TECHNICAL_DETAILS.md
+RISK_ASSESSMENT_VERIFICATION.md
+ML_PREDICTION_PIPELINE_ANALYSIS.md

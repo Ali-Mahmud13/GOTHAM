@@ -70,23 +70,34 @@ class CreateVisitRequest(BaseModel):
     patient_id: str = Field(description="Patient identifier")
     visit_type: str = Field(default="clinical_notes", description="Type of visit")
     
-    # Vitals
-    age: Optional[int] = None
+    # GDM Assessment fields
+    glucose_level: Optional[float] = None  # Blood glucose (different from OGTT)
+    gestation_weeks: Optional[int] = None  # Current gestation weeks
     bmi: Optional[float] = None
     sys_bp: Optional[int] = None
     dia_bp: Optional[int] = None
-    
-    # Lab results
     hdl: Optional[float] = None
-    hemoglobin: Optional[float] = None
     ogtt: Optional[float] = None
+    sedentary_lifestyle: Optional[bool] = None
+    
+    # Anemia/CBC Assessment fields (Complete Blood Count)
+    wbc: Optional[float] = None  # White Blood Cell count (10⁹/L)
+    rbc: Optional[float] = None  # Red Blood Cell count (10¹²/L)
+    hgb: Optional[float] = None  # Hemoglobin (g/dL) - renamed from hemoglobin
+    hct: Optional[float] = None  # Hematocrit (%)
+    mcv: Optional[float] = None  # Mean Corpuscular Volume (fL)
+    mch: Optional[float] = None  # Mean Corpuscular Hemoglobin (pg)
+    mchc: Optional[float] = None  # Mean Corpuscular Hemoglobin Concentration (g/dL)
+    plt: Optional[float] = None  # Platelet count (10⁹/L)
+    
+    # Fetal Health/CTG Assessment fields (Basic)
+    baseline_value: Optional[float] = None  # Baseline Fetal Heart Rate (bpm)
+    accelerations: Optional[float] = None  # Accelerations per second
+    fetal_movement: Optional[float] = None  # Fetal movements per second
     
     # Pregnancy history
     no_of_pregnancy: Optional[int] = None
     gestation_in_previous_pregnancy: Optional[int] = None
-    
-    # Lifestyle & conditions
-    sedentary_lifestyle: Optional[bool] = None
     
     # Static patient features (will update patient record if provided)
     family_history: Optional[bool] = None
@@ -106,3 +117,40 @@ class VisitResponse(BaseModel):
     visit_date: datetime = Field(description="Visit timestamp")
     success: bool = Field(description="Whether creation was successful")
     message: str = Field(description="Success or error message")
+
+
+class UltrasoundImageResponse(BaseModel):
+    """Ultrasound image payload for frontend and ML references."""
+
+    id: int
+    visit_id: int
+    patient_id: int
+    public_id: str
+    secure_url: str
+    thumbnail_url: Optional[str] = None
+    file_name: Optional[str] = None
+    format: Optional[str] = None
+    bytes: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    uploaded_by_role: Optional[str] = None
+    uploaded_by_user_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UltrasoundUploadResponse(BaseModel):
+    """Response payload after uploading one or more ultrasound images."""
+
+    success: bool
+    message: str
+    uploaded: List[UltrasoundImageResponse] = Field(default_factory=list)
+
+
+class UltrasoundDeleteResponse(BaseModel):
+    """Response payload after deleting an ultrasound image."""
+
+    success: bool
+    message: str
