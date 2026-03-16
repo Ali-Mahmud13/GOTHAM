@@ -58,7 +58,7 @@ export const DoctorLoginPage = () => {
         
         // Login successful
         login(data.user);
-        navigate('/dashboard');
+        navigate('/doctor/welcome');
       } else {
         setError(data.message || 'Login failed. Please check your credentials.');
       }

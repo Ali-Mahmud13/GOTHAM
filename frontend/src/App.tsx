@@ -21,6 +21,7 @@ import { BookAppointmentPage } from "./pages/BookAppointmentPage";
 import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthProvider } from "./context/AuthContext";
 import { PatientAuthProvider } from "./context/PatientAuthContext";
+import { GothamWelcomePage } from "./pages/GothamWelcomePage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,6 +55,7 @@ function App() {
               <Route path="/data-entry" element={<DataEntry />} />
               <Route path="/schedule" element={<DoctorSchedulePage />} />
               <Route path="/appointments" element={<AppointmentsPage />} />
+              <Route path="/doctor/welcome" element={<GothamWelcomePage />} />
               
               {/* Patient Portal Routes */}
               <Route path="/patient/login" element={<PatientLoginPage />} />
