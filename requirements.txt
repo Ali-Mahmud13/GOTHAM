@@ -6,7 +6,7 @@ python-dotenv==1.1.0
 
 # Database
 sqlmodel==0.0.27
-psycopg2-binary==2.9.9
+psycopg2-binary
 SQLAlchemy==1.4.54
 
 # Background Jobs

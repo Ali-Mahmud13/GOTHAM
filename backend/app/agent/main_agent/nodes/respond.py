@@ -201,8 +201,16 @@ async def respond_node(state: AgentState) -> AgentState:
     
     logger.info("Sending to LLM for response generation...")
     response = await llm.ainvoke(messages)
+
+    final_response = response.content
+
+    if prediction_decision in ["fetal", "both"]:
+        fetal_report = state.get("fetal_report", "")
+        image_url = _extract_ultrasound_image(fetal_report)
+        if image_url:
+            final_response += f"\n\n### Fetal Ultrasound Image\n\n![Annotated Ultrasound]({image_url})"
     
-    state["messages"].append(AIMessage(content=response.content))
+    state["messages"].append(AIMessage(content=final_response))
     logger.info(f"Response generated (length: {len(response.content)} chars)")
     
     # Reset per-message state
@@ -237,3 +245,9 @@ def reset_state(state: AgentState):
     # Keep persistent: messages, current_patient_id, patient_data, maternal_report, fetal_report, rag_context
     
     logger.info("State reset complete")
+
+def _extract_ultrasound_image(fetal_report: str) -> str | None:
+    match = re.search(r"!\[.*?\]\((.*?)\)", fetal_report)
+    if match:
+        return match.group(1)
+    return None
