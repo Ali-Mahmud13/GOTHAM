@@ -62,7 +62,7 @@ def save_assessment_report(
     """Save only structured assessment report output to latest assessment records."""
     if not patient_identifier or not assessment_report:
         return False
-    assessment_report =_compact_assessment_report(assessment_report)
+    assessment_report = _compact_assessment_report(assessment_report)
 
     risk_levels = risk_levels or {}
 
@@ -85,26 +85,29 @@ def save_assessment_report(
 
         if assessment_type in {"maternal", "both"}:
             gdm = session.exec(select(GDMAssessment).where(GDMAssessment.visit_id == latest_visit.id)).first()
-            if gdm:
-                gdm.ai_report = assessment_report
-                gdm_risk = _to_gdm_risk_value(risk_levels.get("gdm"))
-                if gdm_risk is not None:
-                    gdm.risk_level = gdm_risk
-                session.add(gdm)
+            if not gdm:
+                gdm = GDMAssessment(visit_id=latest_visit.id)
+            gdm.ai_report = assessment_report
+            gdm_risk = _to_gdm_risk_value(risk_levels.get("gdm"))
+            if gdm_risk is not None:
+                gdm.risk_level = gdm_risk
+            session.add(gdm)
 
             anemia = session.exec(select(AnemiaAssessment).where(AnemiaAssessment.visit_id == latest_visit.id)).first()
-            if anemia:
-                anemia.ai_report = assessment_report
-                session.add(anemia)
+            if not anemia:
+                anemia = AnemiaAssessment(visit_id=latest_visit.id)
+            anemia.ai_report = assessment_report
+            session.add(anemia)
 
         if assessment_type in {"fetal", "both"}:
             fetal = session.exec(select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == latest_visit.id)).first()
-            if fetal:
-                fetal.ai_report = assessment_report
-                fetal_status = _to_fetal_status_value(risk_levels.get("fetal"))
-                if fetal_status is not None:
-                    fetal.status = fetal_status
-                session.add(fetal)
+            if not fetal:
+                fetal = FetalHealthAssessment(visit_id=latest_visit.id)
+            fetal.ai_report = assessment_report
+            fetal_status = _to_fetal_status_value(risk_levels.get("fetal"))
+            if fetal_status is not None:
+                fetal.status = fetal_status
+            session.add(fetal)
 
         overall_risk = None
         if assessment_type in {"maternal", "both"}:
