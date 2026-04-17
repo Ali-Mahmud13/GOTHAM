@@ -2,6 +2,7 @@ from pathlib import Path
 from ..state import AgentState
 from ..tools.helper.clean_data import clean_data_for_model
 from ..tools.fetal_health_pipeline.FHP.FHP_predictor import predict_fetal_health
+from ..tools.fetal_health_pipeline.ultrasound.us import predict_ultrasound
 import logging
 
 logging.basicConfig(
@@ -28,6 +29,11 @@ async def run_fetal_node(state: AgentState) -> AgentState:
             "name": "Fetal Health Assessment",
             "contract_path": tools_path / "FHP" / "FHP_contract.yaml",
             "predictor_function": predict_fetal_health
+        },
+        {
+            "name": "Fetal Ultrasound Brain Structure Detection",
+            "contract_path": tools_path / "ultrasound" / "uscontract.yaml",
+            "predictor_function": predict_ultrasound
         },
         # Add more fetal health models here in the future:
         # {

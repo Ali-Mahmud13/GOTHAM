@@ -6,7 +6,7 @@ python-dotenv==1.1.0
 
 # Database
 sqlmodel==0.0.27
-psycopg2-binary==2.9.9
+psycopg2-binary
 SQLAlchemy==1.4.54
 
 # Background Jobs
@@ -74,3 +74,4 @@ pillow==10.4.0
 opencv-python-headless==4.10.0.84
 scikit-image==0.25.0
 cloudinary==1.41.0
+ultralytics==8.3.107

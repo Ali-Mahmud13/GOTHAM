@@ -297,6 +297,7 @@ export const ChatPage = () => {
                             strong: ({ node, ...props }) => <strong className="font-bold text-medical-pink" {...props} />,
                             em: ({ node, ...props }) => <em className="italic" {...props} />,
                             code: ({ node, ...props }) => <code className="bg-white/30 px-1 py-0.5 rounded text-xs" {...props} />,
+                            img: ({ node, ...props}) => (<img {...props} className="rounded-xl shadow-lg my-3 max-w-full border" />),
                           }}
                         >
                           {message.content}

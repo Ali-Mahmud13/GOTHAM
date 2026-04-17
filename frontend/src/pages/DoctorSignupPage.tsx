@@ -71,7 +71,7 @@ export const DoctorSignupPage = () => {
       if (data.success && data.user) {
         // Signup successful, log in the user
         login(data.user);
-        navigate('/dashboard');
+        navigate('/doctor/welcome');
       } else {
         setError(data.message || 'Signup failed. Please try again.');
       }
