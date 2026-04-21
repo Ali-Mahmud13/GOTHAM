@@ -60,6 +60,134 @@ def _extract_fetal_risk_level(fetal_report: str) -> str:
     return "unknown"
 
 
+def _extract_percentage(value: str) -> float | None:
+    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", value)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _extract_maternal_pipeline_confidence(maternal_report: str) -> float | None:
+    gdp_conf = None
+    anemia_conf = None
+
+    no_gd = re.search(
+        r"Confidence\s*-\s*No\s*GD\s*:\s*([0-9]+(?:\.[0-9]+)?\s*%)",
+        maternal_report,
+        re.IGNORECASE,
+    )
+    gd_yes = re.search(
+        r"Confidence\s*-\s*GD\s*Present\s*:\s*([0-9]+(?:\.[0-9]+)?\s*%)",
+        maternal_report,
+        re.IGNORECASE,
+    )
+
+    gdp_vals = []
+    if no_gd:
+        pct = _extract_percentage(no_gd.group(1))
+        if pct is not None:
+            gdp_vals.append(pct)
+    if gd_yes:
+        pct = _extract_percentage(gd_yes.group(1))
+        if pct is not None:
+            gdp_vals.append(pct)
+    if gdp_vals:
+        gdp_conf = max(gdp_vals)
+
+    anemia_section = re.search(
+        r"##\s*Confidence Scores([\s\S]*?)(?:\n---|\Z)",
+        maternal_report,
+        re.IGNORECASE,
+    )
+    if anemia_section:
+        entries = re.findall(
+            r"-\s*\*\*[^*]+\*\*\s*:\s*([0-9]+(?:\.[0-9]+)?\s*%)",
+            anemia_section.group(1),
+            re.IGNORECASE,
+        )
+        anemia_vals = []
+        for e in entries:
+            pct = _extract_percentage(e)
+            if pct is not None:
+                anemia_vals.append(pct)
+        if anemia_vals:
+            anemia_conf = max(anemia_vals)
+
+    parts = [x for x in [gdp_conf, anemia_conf] if x is not None]
+    if not parts:
+        return None
+
+    return sum(parts) / len(parts)
+
+
+def _extract_fetal_pipeline_confidence(fetal_report: str) -> float | None:
+    ctg_conf = None
+    us_conf = None
+
+    ctg_vals = []
+    for label in ["Normal", "Suspect", "Pathological"]:
+        m = re.search(
+            rf"{label}\s*:\s*([0-9]+(?:\.[0-9]+)?\s*%)",
+            fetal_report,
+            re.IGNORECASE,
+        )
+        if m:
+            pct = _extract_percentage(m.group(1))
+            if pct is not None:
+                ctg_vals.append(pct)
+    if ctg_vals:
+        ctg_conf = max(ctg_vals)
+
+    us_avg = re.search(
+        r"Average\s+Confidence\s*:\s*([0-9]+(?:\.[0-9]+)?\s*%)",
+        fetal_report,
+        re.IGNORECASE,
+    )
+    if us_avg:
+        pct = _extract_percentage(us_avg.group(1))
+        if pct is not None:
+            us_conf = pct
+
+    if ctg_conf is not None and us_conf is not None:
+        return (0.7 * ctg_conf) + (0.3 * us_conf)
+    if ctg_conf is not None:
+        return ctg_conf
+    if us_conf is not None:
+        return us_conf
+    return None
+
+
+def _build_pipeline_confidence_footer(
+    prediction_decision: str,
+    maternal_report: str,
+    fetal_report: str,
+) -> str:
+    maternal_conf = _extract_maternal_pipeline_confidence(maternal_report)
+    fetal_conf = _extract_fetal_pipeline_confidence(fetal_report)
+
+    lines = []
+
+    if prediction_decision in ["maternal", "both"] and maternal_conf is not None:
+        lines.append(f"Maternal pipeline confidence: {maternal_conf:.1f}%")
+
+    if prediction_decision in ["fetal", "both"] and fetal_conf is not None:
+        lines.append(f"Fetal pipeline confidence: {fetal_conf:.1f}%")
+
+    if not lines:
+        return ""
+
+    joined = "<br>".join(lines)
+    joined_clean = joined.replace("<br>", "\n")
+    return (
+        "**Pipeline confidence**\n"
+        f"{joined_clean}\n"
+        "_Model certainty only, not diagnostic certainty._"
+    )
+
+
 async def respond_node(state: AgentState) -> AgentState:
     llm = get_llm(temperature=0.3)
     state["assessment_type_to_save"] = None
@@ -165,6 +293,13 @@ async def respond_node(state: AgentState) -> AgentState:
     final_response = response.content
     if prediction_decision in ["maternal", "fetal", "both"]:
         final_response = _enforce_concise_assessment_output(final_response)
+        confidence_footer = _build_pipeline_confidence_footer(
+            prediction_decision,
+            state.get("maternal_report", "") or "",
+            state.get("fetal_report", "") or "",
+        )
+        if confidence_footer:
+            final_response += f"\n\n{confidence_footer}"
 
     if prediction_decision in ["fetal", "both"]:
         fetal_report = state.get("fetal_report", "")
@@ -209,6 +344,7 @@ def _enforce_concise_assessment_output(text: str) -> str:
     if not text:
         return text
     noisy_sections = [
+        r"<sub><strong>Pipeline confidence</strong>[\s\S]*?</sub>",
         r"##?\s*Confidence Scores[\s\S]*?(?=\n## |\Z)",
         r"##?\s*Explainable AI Analysis[\s\S]*?(?=\n## |\Z)",
         r"##?\s*Key Clinical Insights[\s\S]*?(?=\n## |\Z)",
