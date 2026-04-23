@@ -1,12 +1,14 @@
 import time
 from tqdm import tqdm
-from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone
 from src.config.settings import EMBEDDING_MODEL
 from src.utils.pinecone_client import index  # Use the shared client
 
 def create_embeddings(chunks, existing_ids):
     """Create embeddings only for new chunks."""
+    # Lazy import to avoid TensorFlow initialization
+    from sentence_transformers import SentenceTransformer
+
     print("🧠 Loading embedding model...")
     model = SentenceTransformer(EMBEDDING_MODEL)
     print(f"✅ Loaded model: {EMBEDDING_MODEL}")

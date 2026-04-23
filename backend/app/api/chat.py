@@ -8,7 +8,9 @@ from app.services.agent_service import get_agent_service
 from app.inngest.client import inngest_client
 from app.services.assessment_results import (
     get_assessment_result,
-    mark_assessment_processing
+    mark_assessment_processing,
+    queue_inngest_event,
+    get_fallback_queue_size
 )
 import inngest
 import logging
@@ -114,21 +116,37 @@ async def assess_risk(request: AssessmentRequest):
         
         # Mark as processing
         mark_assessment_processing(assessment_id)
-        
+
+        # Prepare event data
+        event_data = {
+            "assessment_id": assessment_id,
+            "message": request.message,
+            "session_id": session_id,
+            "patient_id": request.patient_id,
+        }
+
         # Trigger Inngest background job using official SDK
-        await inngest_client.send(
-            inngest.Event(
-                name="agent/assessment.request",
-                data={
-                    "assessment_id": assessment_id,
-                    "message": request.message,
-                    "session_id": session_id,
-                    "patient_id": request.patient_id,
-                },
-                id=assessment_id
+        try:
+            await inngest_client.send(
+                inngest.Event(
+                    name="agent/assessment.request",
+                    data=event_data,
+                    id=assessment_id
+                )
             )
-        )
-        
+            logger.info(f"Assessment {assessment_id} sent to Inngest")
+        except (inngest.errors.SendEventsError, Exception) as e:
+            logger.warning(
+                f"Failed to send assessment {assessment_id} to Inngest: {str(e)}. "
+                f"Queuing for fallback retry."
+            )
+            # Add to fallback queue for manual retry
+            queue_inngest_event(event_data)
+            logger.info(
+                f"Assessment {assessment_id} queued to fallback queue. "
+                f"Total queued: {get_fallback_queue_size()}"
+            )
+
         return AssessmentResponse(
             assessment_id=assessment_id,
             session_id=session_id,

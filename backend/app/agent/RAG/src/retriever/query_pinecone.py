@@ -7,17 +7,27 @@ project_root = Path(__file__).resolve().parents[6]  # 6 levels up to GOTHAM/
 sys.path.insert(0, str(project_root))
 
 # Now do your imports
-from sentence_transformers import SentenceTransformer
 from typing import List, Dict
 from app.agent.RAG.src.utils.pinecone_client import index, index_exists_and_populated
 from config import EMBEDDING_MODEL, DIMENSION
 
 def retrieve_similar_chunks(question: str, top_k: int = 5) -> List[str]:
     """Retrieve similar chunks from Pinecone based on question. Returns only content."""
+    try:
+        from sentence_transformers import SentenceTransformer
+    except (ImportError, ValueError, RuntimeError) as e:
+        # Handle TensorFlow/Keras import errors
+        error_msg = str(e)
+        if any(kw in error_msg for kw in ['tf_keras', 'Keras', 'TensorFlow']):
+            print(f"⚠️ Warning: Could not load sentence_transformers due to TensorFlow issue: {error_msg}")
+            print("⚠️ Falling back to empty retrieval (embeddings unavailable)")
+            return []
+        raise
+
     if not index_exists_and_populated():
         print("⚠️ Cannot retrieve chunks, Pinecone index is not ready or is empty.")
         return []
-        
+
     try:
         print(f"🧠 Embedding query and searching for top {top_k} similar chunks...")
         model = SentenceTransformer(EMBEDDING_MODEL)

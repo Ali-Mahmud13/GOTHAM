@@ -7,17 +7,17 @@ python-dotenv==1.1.0
 # Database
 sqlmodel==0.0.27
 psycopg2-binary
-SQLAlchemy==1.4.54
+SQLAlchemy==2.0.36
 
 # Background Jobs
 inngest==0.5.10
 
 # LangChain & LLM
 langchain==0.3.26
-langchain-core==1.1.2
-langchain-groq==1.1.0
-langchain-openai==0.3.28
-langchain-community==0.3.27
+langchain-core==0.3.66
+langchain-groq==0.2.5
+langchain-openai==0.2.14
+langchain-community==0.3.26
 langchain-text-splitters==0.3.8
 langgraph==0.2.59
 langsmith==0.4.8
@@ -28,11 +28,11 @@ tiktoken==0.9.0
 # ML & Data Science
 scikit-learn==1.6.1
 pandas==2.2.3
-numpy==2.1.0rc1
+numpy==2.1.0
 scipy==1.14.1
 matplotlib==3.9.2
 seaborn==0.13.2
-joblib==1.1.1
+joblib==1.4.2
 statsmodels==0.14.4
 
 # ML Models
@@ -45,11 +45,12 @@ torch==2.7.1
 torchvision==0.22.1
 pytorch-lightning==2.5.2
 torchmetrics==1.7.4
+tf-keras==2.21.0
 
 # NLP & Embeddings
 sentence-transformers==3.3.1
-transformers==4.45.1
-huggingface-hub==0.24.6
+transformers==4.48.1
+huggingface-hub==0.27.0
 
 # Vector Database
 pinecone-client==5.0.1
@@ -64,7 +65,7 @@ PyPDF2==3.0.1
 # Utilities
 pyyaml==6.0.2
 tqdm==4.67.1
-python-multipart==0.0.20
+python-multipart==0.0.26
 pydantic==2.11.7
 pydantic-settings==2.10.1
 email-validator==2.3.0

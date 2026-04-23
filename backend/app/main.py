@@ -1,5 +1,10 @@
 """Main application."""
 
+# Disable TensorFlow/Keras imports in transformers before any other imports
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logs
+os.environ['TRANSFORMERS_OFFLINE'] = '0'
+
 import inngest.fast_api
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
