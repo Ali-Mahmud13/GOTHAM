@@ -10,8 +10,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -45,11 +45,11 @@ Thumbs.db
 .env
 .env.local
 
-# Data files
+# Data files (only ignore JSON in data directories, not config files!)
 *.csv
-*.json
+data/**/*.json
+notebooks/**/*.json
 *.h5
-*.pkl
 *.pickle
 
 # Models
@@ -67,3 +67,22 @@ docker-compose.override.yml
 
 # Node modules (if any frontend dependencies)
 node_modules/
+
+
+REFACTORING_SUMMARY.md
+ARCHITECTURE.md
+PROJECT_STRUCTURE.md
+QUICK_START.md
+INNGEST_SUCCESS.md
+INNGEST_NOTES.md
+INNGEST_SETUP.md
+TESTING_GUIDE.md
+FRONTEND_BACKEND_SETUP.md
+INTEGRATION_COMPLETE.md
+INNGEST_SETUP.md
+backend/DATABASE_MIGRATION.md
+backend/PERFORMANCE_OPTIMIZATION_TODO.md
+docs
+TECHNICAL_DETAILS.md
+RISK_ASSESSMENT_VERIFICATION.md
+ML_PREDICTION_PIPELINE_ANALYSIS.md

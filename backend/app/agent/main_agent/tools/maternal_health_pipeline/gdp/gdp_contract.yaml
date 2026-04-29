@@ -1,0 +1,16 @@
+required_features:
+  - age
+  - bmi
+  - dia_bp
+  - hdl
+  - hemoglobin
+  - no_of_pregnancy
+  - ogtt
+  - sys_bp
+  - gestation_in_previous_pregnancy
+  - family_history
+  - unexplained_prenatal_loss
+  - large_child_or_birth_default
+  - pcos
+  - sedentary_lifestyle
+  - prediabetes
