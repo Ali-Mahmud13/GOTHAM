@@ -188,6 +188,15 @@ def _build_pipeline_confidence_footer(
     )
 
 
+def _extract_ultrasound_image(text: str) -> str | None:
+    """Extract image URL from markdown or report text"""
+    # Try markdown image syntax first
+    match = re.search(r"!\[.*?\]\((.*?)\)", text)
+    if match:
+        return match.group(1)
+    return None
+
+
 async def respond_node(state: AgentState) -> AgentState:
     report_progress(6, "Generating assessment report")
     llm = get_llm(temperature=0.3)
@@ -302,11 +311,19 @@ async def respond_node(state: AgentState) -> AgentState:
         if confidence_footer:
             final_response += f"\n\n{confidence_footer}"
 
+    # ✅ ADD: Extract image from stored ultrasound report
     if prediction_decision in ["fetal", "both"]:
-        fetal_report = state.get("fetal_report", "")
-        image_url = _extract_ultrasound_image(fetal_report)
-        if image_url:
-            final_response += f"\n\n### Fetal Ultrasound Image\n\n![Annotated Ultrasound]({image_url})"
+        ultrasound_report = state.get("ultrasound_report", "")
+        if ultrasound_report:
+            logger.info("DEBUG: Checking stored ultrasound_report for image")
+            image_url = _extract_ultrasound_image(ultrasound_report)
+            if image_url:
+                logger.info(f"✓ Found image URL: {image_url}")
+                final_response += f"\n\n### Fetal Ultrasound Image\n\n![Annotated Ultrasound]({image_url})"
+            else:
+                logger.info("DEBUG: No image URL found in ultrasound_report")
+        else:
+            logger.info("DEBUG: No ultrasound_report in state")
 
     # ✅ CRITICAL FIX: save the concise final response, not raw payload
     if prediction_decision in ["maternal", "fetal", "both"]:
@@ -315,7 +332,6 @@ async def respond_node(state: AgentState) -> AgentState:
     state["messages"].append(AIMessage(content=final_response))
     logger.info(f"Response generated (length: {len(final_response)} chars)")
     
-    reset_state(state)
     logger.info("="*60 + "\n")
     return state
 
@@ -334,11 +350,51 @@ def reset_state(state: AgentState):
     logger.info("State reset complete")
 
 
-def _extract_ultrasound_image(fetal_report: str) -> str | None:
-    match = re.search(r"!\[.*?\]\((.*?)\)", fetal_report)
-    if match:
-        return match.group(1)
-    return None
+async def persist_node(state: AgentState) -> AgentState:
+    """Persist assessment report to database after response is generated."""
+    from app.services.assessment_persistence import save_assessment_report
+    
+    assessment_type_to_save = state.get("assessment_type_to_save")
+    assessment_report_to_save = state.get("assessment_report_to_save")
+    assessment_risk_levels = state.get("assessment_risk_levels")
+    patient_identifier = state.get("patient_identifier")
+    
+    logger.info("="*60)
+    logger.info("PERSIST NODE - Saving Assessment Report")
+    logger.info("="*60)
+    
+    # Only save if we have an assessment to save
+    if assessment_type_to_save and assessment_report_to_save and patient_identifier:
+        logger.info(f"Patient: {patient_identifier}")
+        logger.info(f"Assessment Type: {assessment_type_to_save}")
+        
+        try:
+            success = save_assessment_report(
+                patient_identifier=patient_identifier,
+                assessment_type=assessment_type_to_save,
+                assessment_report=assessment_report_to_save,
+                risk_levels=assessment_risk_levels,
+            )
+            
+            if success:
+                logger.info(f"✅ Report saved successfully for patient {patient_identifier}")
+                state["persistence_status"] = "success"
+            else:
+                logger.error(f"❌ Failed to save report for patient {patient_identifier}")
+                state["persistence_status"] = "failed"
+        except Exception as e:
+            logger.error(f"❌ Error during persistence: {str(e)}", exc_info=True)
+            state["persistence_status"] = "error"
+    else:
+        logger.warning("⚠️ No assessment data to persist")
+        state["persistence_status"] = "skipped"
+    
+    logger.info("="*60 + "\n")
+    
+    # ✅ Reset state after persistence completes
+    reset_state(state)
+    
+    return state
 
 
 def _enforce_concise_assessment_output(text: str) -> str:
