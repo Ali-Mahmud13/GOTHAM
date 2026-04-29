@@ -46,6 +46,7 @@ npx inngest-cli@latest dev
 or
 install -g inngest-cli
 inngest dev
+or npx inngest-cli@latest dev -u http://localhost:8000/api/inngest  #to auto sync
 
 
 ```
