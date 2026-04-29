@@ -1,5 +1,5 @@
 from pathlib import Path
-from ..state import AgentState
+from ..state import AgentState, report_progress
 from ..tools.helper.clean_data import clean_data_for_model
 from ..tools.maternal_health_pipeline.gdp.gdp_predictor_function import predict_gdp
 from ..tools.maternal_health_pipeline.anemia.anemia import generate_anemia_xai_report as predict_anemia
@@ -18,6 +18,7 @@ async def run_maternal_node(state: AgentState) -> AgentState:
     """
     Run all maternal health models and concatenate results
     """
+    report_progress(3, "Running maternal health models")
     logger.info("="*60)
     logger.info("RUN MATERNAL NODE - Starting all models")
     logger.info("="*60)

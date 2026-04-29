@@ -5,6 +5,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logs
 os.environ['TRANSFORMERS_OFFLINE'] = '0'
 
+import inngest
 import inngest.fast_api
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -153,8 +154,14 @@ async def ensure_local_cors_headers(request: Request, call_next):
         response.headers["Access-Control-Allow-Methods"] = "*"
     return response
 
-# Register Inngest
-inngest.fast_api.serve(app, inngest_client, ALL_FUNCTIONS)
+# Register Inngest — streaming sends keepalive bytes so long-running
+# step handlers (ML inference, LLM calls) don't hit idle-connection resets.
+inngest.fast_api.serve(
+    app,
+    inngest_client,
+    ALL_FUNCTIONS,
+    streaming=inngest.Streaming.FORCE,
+)
 
 # Register API routes
 app.include_router(auth_router)
@@ -171,6 +178,6 @@ async def root():
     return {"app": "GOTHAM", "docs": "/docs"}
 
 
-@app. get("/health")
+@app.get("/health")
 async def health():
     return {"status": "healthy"}

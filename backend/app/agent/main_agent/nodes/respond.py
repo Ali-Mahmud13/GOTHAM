@@ -1,5 +1,5 @@
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from ..state import AgentState
+from ..state import AgentState, report_progress
 from ..system_prompt import (
     SYSTEM_PROMPT, 
     RAG_RESPONSE_PROMPT, 
@@ -189,6 +189,7 @@ def _build_pipeline_confidence_footer(
 
 
 async def respond_node(state: AgentState) -> AgentState:
+    report_progress(6, "Generating assessment report")
     llm = get_llm(temperature=0.3)
     state["assessment_type_to_save"] = None
     state["assessment_report_to_save"] = None

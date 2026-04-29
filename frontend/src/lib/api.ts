@@ -75,6 +75,16 @@ export interface AssessmentResponse {
   message: string;
 }
 
+export interface AssessmentStatus {
+  status: 'processing' | 'completed' | 'failed';
+  response?: string;
+  current_step?: number;
+  total_steps?: number;
+  step_label?: string;
+  completed_steps?: string[];
+  [key: string]: unknown;
+}
+
 /**
  * API Client
  */
@@ -112,9 +122,9 @@ export const api = {
   /**
    * Get assessment status and results
    */
-  getAssessmentStatus: async (assessmentId: string): Promise<any> => {
+  getAssessmentStatus: async (assessmentId: string): Promise<AssessmentStatus> => {
     const response = await fetch(`${API_BASE_URL}/api/chat/assess/${assessmentId}`);
-    return handleResponse<any>(response);
+    return handleResponse<AssessmentStatus>(response);
   },
 
   /**

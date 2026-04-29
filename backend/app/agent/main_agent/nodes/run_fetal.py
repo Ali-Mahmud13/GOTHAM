@@ -1,5 +1,5 @@
 from pathlib import Path
-from ..state import AgentState
+from ..state import AgentState, report_progress
 from ..tools.helper.clean_data import clean_data_for_model
 from ..tools.fetal_health_pipeline.FHP.FHP_predictor import predict_fetal_health
 from ..tools.fetal_health_pipeline.ultrasound.us import predict_ultrasound
@@ -16,6 +16,7 @@ async def run_fetal_node(state: AgentState) -> AgentState:
     """
     Run all fetal health models and concatenate results
     """
+    report_progress(4, "Running fetal health models")
     logger.info("="*60)
     logger.info("RUN FETAL NODE - Starting all models")
     logger.info("="*60)

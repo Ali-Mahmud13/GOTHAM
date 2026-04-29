@@ -1,4 +1,4 @@
-from ..state import AgentState
+from ..state import AgentState, report_progress
 import logging
 import sys
 from pathlib import Path
@@ -17,6 +17,7 @@ async def rag_retrieval_node(state: AgentState) -> AgentState:
     """
     RAG retrieval node - retrieves medical literature from Pinecone based on keywords or user query.
     """
+    report_progress(5, "Retrieving medical guidelines")
     
     logger.info("="*60)
     logger.info("RAG RETRIEVAL - Starting")

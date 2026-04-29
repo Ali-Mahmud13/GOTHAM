@@ -9,6 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import ReactMarkdown from "react-markdown";
+import { AssessmentProgress, type ProgressData } from "@/components/AssessmentProgress";
 
 interface Message {
   id: string;
@@ -32,13 +33,14 @@ export const ChatPage = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId] = useState<string>(() => `session-${Date.now()}`);
+  const [progressData, setProgressData] = useState<Record<string, ProgressData>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, progressData]);
 
   useEffect(() => {
     const prefilledMessage = searchParams.get("message");
@@ -48,7 +50,7 @@ export const ChatPage = () => {
   }, [searchParams]);
 
   const pollAssessmentStatus = async (assessmentId: string) => {
-    const maxAttempts = 60; // 60 attempts = 1 minute max
+    const maxAttempts = 180;
     let attempts = 0;
 
     const poll = async () => {
@@ -57,8 +59,12 @@ export const ChatPage = () => {
         const status = await api.getAssessmentStatus(assessmentId);
 
         if (status.status === "completed" || status.status === "failed") {
-          // Replace processing message with result
-          // Response is now at root level (status.response) not nested (status.result.response)
+          setProgressData((prev) => {
+            const next = { ...prev };
+            delete next[assessmentId];
+            return next;
+          });
+
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assessmentId
@@ -77,17 +83,31 @@ export const ChatPage = () => {
             });
           }
         } else if (attempts < maxAttempts) {
-          // Still processing, poll again in 1 second
-          setTimeout(poll, 1000);
+          if (status.current_step != null && status.step_label) {
+            setProgressData((prev) => ({
+              ...prev,
+              [assessmentId]: {
+                currentStep: status.current_step!,
+                completedSteps: status.completed_steps ?? [],
+                stepLabel: status.step_label!,
+              },
+            }));
+          }
+          setTimeout(poll, 2000);
         } else {
-          // Timeout
+          setProgressData((prev) => {
+            const next = { ...prev };
+            delete next[assessmentId];
+            return next;
+          });
+
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assessmentId
                 ? {
                   ...msg,
                   content:
-                    "⚠️ Assessment is taking longer than expected. Please wait a bit and try again.",
+                    "Assessment is taking longer than expected. Please wait a bit and try again.",
                 }
                 : msg
             )
@@ -101,14 +121,12 @@ export const ChatPage = () => {
         }
       } catch (error) {
         console.error("Polling error:", error);
-        // Continue polling on error (assessment might still be processing)
         if (attempts < maxAttempts) {
           setTimeout(poll, 1000);
         }
       }
     };
 
-    // Start polling
     setTimeout(poll, 1000);
   };
 
@@ -138,12 +156,20 @@ export const ChatPage = () => {
           patient_id: currentInput.match(/patient\s+([A-Z0-9-]+)/i)?.[1] || undefined,
         });
 
-        // Add processing message
         const processingMessage: Message = {
           id: response.assessment_id,
           role: "assistant",
-          content: `🔄 **Processing Risk Assessment...**\n\nPlease wait while I analyze:\n- Patient data validation\n- Maternal health predictions\n- Fetal health analysis\n- Medical guidelines integration\n\nThis may take a few moments...`,
+          content: "",
         };
+
+        setProgressData((prev) => ({
+          ...prev,
+          [response.assessment_id]: {
+            currentStep: 0,
+            completedSteps: [],
+            stepLabel: "Starting...",
+          },
+        }));
 
         setMessages((prev) => [...prev, processingMessage]);
 
@@ -284,7 +310,9 @@ export const ChatPage = () => {
                       "text-sm leading-relaxed text-justify prose prose-sm max-w-none",
                       message.role === "assistant" && "text-medical-pink font-medium prose-headings:text-medical-pink prose-strong:text-medical-pink"
                     )}>
-                      {message.role === "assistant" ? (
+                      {message.role === "assistant" && progressData[message.id] ? (
+                        <AssessmentProgress data={progressData[message.id]} />
+                      ) : message.role === "assistant" ? (
                         <ReactMarkdown
                           components={{
                             h1: ({ node, ...props }) => <h1 className="text-xl font-bold mb-3 mt-4 text-medical-pink" {...props} />,

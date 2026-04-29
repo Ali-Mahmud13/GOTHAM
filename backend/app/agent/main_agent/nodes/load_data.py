@@ -1,5 +1,5 @@
 from langchain_core.messages import HumanMessage
-from ..state import AgentState
+from ..state import AgentState, report_progress
 from ..system_prompt import PATIENT_ID_EXTRACTION_PROMPT
 from app.core.llm import get_llm
 from app.services.patient_service import get_patient_service
@@ -34,6 +34,7 @@ def _normalize_patient_identifier(raw_value: str | None) -> str:
     return val if val else "NONE"
 
 async def load_data_node(state: AgentState) -> AgentState:
+    report_progress(2, "Loading patient data")
     llm = get_llm(temperature=0)
     
     user_message = state["messages"][-1].content

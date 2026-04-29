@@ -1,5 +1,6 @@
 from langgraph.graph import MessagesState
-from typing import Optional, Literal
+from typing import Optional, Literal, Callable
+from contextvars import ContextVar
 
 class AgentState(MessagesState):
     # Clarity check fields
@@ -26,3 +27,23 @@ class AgentState(MessagesState):
     assessment_type_to_save: Optional[str] = None
     assessment_report_to_save: Optional[str] = None
     assessment_risk_levels: Optional[dict] = None
+
+
+_progress_callback_var: ContextVar[Optional[Callable[[int, str], None]]] = ContextVar(
+    "_progress_callback_var", default=None
+)
+
+
+def set_progress_callback(cb: Optional[Callable[[int, str], None]]) -> None:
+    """Set the progress callback for the current async context."""
+    _progress_callback_var.set(cb)
+
+
+def report_progress(step_number: int, label: str) -> None:
+    """Fire the progress callback if one is set in the current context."""
+    cb = _progress_callback_var.get()
+    if cb is not None:
+        try:
+            cb(step_number, label)
+        except Exception:
+            pass
