@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Send, ArrowLeft, Sparkles, Loader2 } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, ArrowLeft, Sparkles, Loader2, X, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -34,7 +34,29 @@ export const ChatPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId] = useState<string>(() => `session-${Date.now()}`);
   const [progressData, setProgressData] = useState<Record<string, ProgressData>>({});
+  const [showQuickActions, setShowQuickActions] = useState(true);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeLightbox(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox, closeLightbox]);
+
+  const PROMPT_SUGGESTIONS = [
+    "Run complete patient assessment for P00_",
+    "Run maternal risk assessment for patient P00_",
+    "Run fetal risk assessment for P00_",
+  ];
+
+  const handleSuggestionClick = (template: string) => {
+    setInput(template);
+    setShowQuickActions(false);
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -143,6 +165,7 @@ export const ChatPage = () => {
     const currentInput = input;
     setInput("");
     setIsLoading(true);
+    setShowQuickActions(false);
 
     try {
       // Check if this is a risk assessment request (triggers background job)
@@ -280,7 +303,7 @@ export const ChatPage = () => {
       </header>
 
       {/* Chat Container */}
-      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-4xl">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-5xl">
         <div className="h-[calc(100vh-16rem)]">
           <ScrollArea className="h-full pr-4" ref={scrollRef}>
             <div className="space-y-6 pb-4">
@@ -300,40 +323,93 @@ export const ChatPage = () => {
 
                   <div
                     className={cn(
-                      "max-w-[90%] sm:max-w-[75%] rounded-3xl px-4 sm:px-5 py-4 backdrop-blur-xl border border-white/30 transition-all duration-300 shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]",
+                      "max-w-[90%] sm:max-w-[80%] rounded-2xl transition-all duration-300",
                       message.role === "user"
-                        ? "bg-white/40 text-foreground ml-auto"
-                        : "bg-gradient-to-br from-white/50 to-white/30 shadow-[0_8px_32px_0_rgba(255,105,180,0.2)]"
+                        ? "bg-white/40 backdrop-blur-xl border border-white/30 px-4 sm:px-5 py-3.5 text-foreground ml-auto shadow-[0_4px_20px_0_rgba(31,38,135,0.1)]"
+                        : "px-0 py-0"
                     )}
                   >
-                    <div className={cn(
-                      "text-sm leading-relaxed text-justify prose prose-sm max-w-none",
-                      message.role === "assistant" && "text-medical-pink font-medium prose-headings:text-medical-pink prose-strong:text-medical-pink"
-                    )}>
-                      {message.role === "assistant" && progressData[message.id] ? (
+                    {message.role === "assistant" && progressData[message.id] ? (
+                      <div className="bg-gradient-to-br from-white/60 via-white/40 to-white/30 backdrop-blur-2xl border border-white/40 rounded-2xl px-5 py-4 shadow-[0_8px_40px_-8px_rgba(31,38,135,0.12),0_0_0_1px_rgba(255,255,255,0.1)]">
                         <AssessmentProgress data={progressData[message.id]} />
-                      ) : message.role === "assistant" ? (
-                        <ReactMarkdown
-                          components={{
-                            h1: ({ node, ...props }) => <h1 className="text-xl font-bold mb-3 mt-4 text-medical-pink" {...props} />,
-                            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mb-2 mt-3 text-medical-pink" {...props} />,
-                            h3: ({ node, ...props }) => <h3 className="text-base font-semibold mb-2 mt-2 text-medical-blue" {...props} />,
-                            p: ({ node, ...props }) => <p className="mb-2 text-justify" {...props} />,
-                            ul: ({ node, ...props }) => <ul className="list-disc list-inside mb-2 space-y-1" {...props} />,
-                            ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-2 space-y-1" {...props} />,
-                            li: ({ node, ...props }) => <li className="ml-2" {...props} />,
-                            strong: ({ node, ...props }) => <strong className="font-bold text-medical-pink" {...props} />,
-                            em: ({ node, ...props }) => <em className="italic" {...props} />,
-                            code: ({ node, ...props }) => <code className="bg-white/30 px-1 py-0.5 rounded text-xs" {...props} />,
-                            img: ({ node, ...props}) => (<img {...props} className="rounded-xl shadow-lg my-3 max-w-full border" />),
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                      ) : (
-                        <p className="whitespace-pre-wrap">{message.content}</p>
-                      )}
-                    </div>
+                      </div>
+                    ) : message.role === "assistant" ? (
+                      <div className="bg-gradient-to-br from-white/60 via-white/40 to-white/30 backdrop-blur-2xl border border-white/40 rounded-2xl px-5 py-5 shadow-[0_8px_40px_-8px_rgba(31,38,135,0.12),0_0_0_1px_rgba(255,255,255,0.1)]">
+                        <div className="text-sm leading-relaxed prose prose-sm max-w-none text-foreground/80">
+                          <ReactMarkdown
+                            components={{
+                              h1: ({ node, ...props }) => (
+                                <h1 className="text-xl font-bold mb-3 mt-5 pb-2 border-b border-medical-pink/15 text-medical-pink tracking-tight first:mt-0" {...props} />
+                              ),
+                              h2: ({ node, ...props }) => (
+                                <div className="flex items-center gap-2.5 mt-5 mb-2 first:mt-0">
+                                  <div className="w-[3px] h-4 rounded-full bg-gradient-to-b from-medical-pink to-medical-blue flex-shrink-0" />
+                                  <h2 className="text-base font-semibold text-medical-pink tracking-tight" {...props} />
+                                </div>
+                              ),
+                              h3: ({ node, ...props }) => (
+                                <h3 className="text-sm font-semibold mb-1.5 mt-3 text-medical-blue" {...props} />
+                              ),
+                              p: ({ node, ...props }) => (
+                                <p className="mb-2.5 leading-[1.7] text-foreground/75 text-justify" {...props} />
+                              ),
+                              ul: ({ node, ...props }) => <ul className="mb-3 space-y-1.5" {...props} />,
+                              ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-3 space-y-1.5 text-foreground/75" {...props} />,
+                              li: ({ node, children, ...props }) => (
+                                <li className="flex gap-2.5 items-start text-foreground/75" {...props}>
+                                  <span className="mt-[7px] h-1.5 w-1.5 rounded-full bg-gradient-to-br from-medical-pink to-medical-blue flex-shrink-0" />
+                                  <span className="leading-[1.7]">{children}</span>
+                                </li>
+                              ),
+                              strong: ({ node, ...props }) => (
+                                <strong className="font-semibold text-foreground" {...props} />
+                              ),
+                              em: ({ node, ...props }) => <em className="italic text-foreground/60" {...props} />,
+                              code: ({ node, ...props }) => (
+                                <code className="bg-medical-blue/8 text-medical-blue px-1.5 py-0.5 rounded-md text-xs font-mono" {...props} />
+                              ),
+                              hr: () => (
+                                <div className="my-5 h-px bg-gradient-to-r from-transparent via-medical-pink/20 to-transparent" />
+                              ),
+                              blockquote: ({ node, ...props }) => (
+                                <blockquote className="border-l-[3px] border-medical-blue/30 pl-3.5 my-3 py-1 text-foreground/60 italic bg-medical-blue/5 rounded-r-lg" {...props} />
+                              ),
+                              img: ({ node, alt, src, ...props }) => (
+                                <div className="my-5 rounded-2xl overflow-hidden bg-gradient-to-br from-medical-blue/5 via-white/40 to-medical-pink/5 border border-white/40 shadow-[0_8px_32px_-4px_rgba(31,38,135,0.12)]">
+                                  <button
+                                    type="button"
+                                    onClick={() => src && setLightbox({ src, alt: alt || "" })}
+                                    className="relative group w-full cursor-zoom-in"
+                                  >
+                                    <img
+                                      src={src}
+                                      alt={alt}
+                                      {...props}
+                                      className="w-full object-contain max-h-[350px] bg-black/5"
+                                    />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                                    <div className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0">
+                                      <ZoomIn className="h-3 w-3" />
+                                      View full size
+                                    </div>
+                                  </button>
+                                  {alt && (
+                                    <div className="flex items-center gap-2 px-4 py-2.5 border-t border-white/30">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-gradient-to-br from-medical-pink to-medical-blue flex-shrink-0" />
+                                      <span className="text-xs font-medium text-foreground/60">{alt}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ),
+                            }}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap px-4 sm:px-5 py-3.5">{message.content}</p>
+                    )}
                   </div>
 
                   {message.role === "user" && (
@@ -343,38 +419,53 @@ export const ChatPage = () => {
                   )}
                 </div>
               ))}
+
             </div>
           </ScrollArea>
         </div>
 
         {/* Input Area */}
         <div className="sticky bottom-0 pt-4 sm:pt-6 pb-6 sm:pb-8">
-          <div className="relative backdrop-blur-2xl bg-white/30 border border-white/30 rounded-3xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] p-4">
+          {showQuickActions && !isLoading && (
+            <div className="flex flex-wrap gap-2 mb-3 animate-in fade-in duration-500">
+              {PROMPT_SUGGESTIONS.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => handleSuggestionClick(prompt)}
+                  className="text-[12px] px-4 py-2 rounded-full bg-medical-blue/5 border border-medical-blue-light/40 text-medical-blue hover:bg-medical-blue/10 hover:border-medical-blue/50 hover:shadow-[0_2px_16px_0_hsl(200_60%_55%/0.15)] transition-all duration-300"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="relative backdrop-blur-2xl bg-white/30 border border-white/30 rounded-2xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] px-4 py-3">
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask me anything about patient care, risk assessment, or medical records..."
-              className="min-h-[80px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-base"
+              className="min-h-[60px] max-h-[140px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm"
               disabled={isLoading}
             />
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3 pt-3 border-t border-white/20">
-              <p className="text-xs text-muted-foreground">
-                {isLoading ? "Thinking..." : "Press Enter to send, Shift + Enter for new line"}
+            <div className="flex items-center justify-between gap-3 mt-2 pt-2 border-t border-white/15">
+              <p className="text-[11px] text-muted-foreground/70">
+                {isLoading ? "Thinking..." : "Enter to send \u00b7 Shift+Enter for new line"}
               </p>
               <Button
+                size="sm"
                 onClick={handleSend}
                 disabled={!input.trim() || isLoading}
-                className="bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-lg transition-all duration-300 hover:scale-105"
+                className="bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-md transition-all duration-300 hover:scale-105 rounded-xl px-5 h-9"
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                     Thinking...
                   </>
                 ) : (
                   <>
-                    <Send className="h-4 w-4 mr-2" />
+                    <Send className="h-3.5 w-3.5 mr-1.5" />
                     Send
                   </>
                 )}
@@ -383,6 +474,39 @@ export const ChatPage = () => {
           </div>
         </div>
       </main>
+
+      {/* Lightbox modal */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center animate-in fade-in duration-200"
+          onClick={closeLightbox}
+        >
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-md" />
+
+          <button
+            onClick={closeLightbox}
+            className="absolute top-5 right-5 z-10 p-2 rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-colors duration-200"
+          >
+            <X className="h-5 w-5" />
+          </button>
+
+          <div
+            className="relative z-10 max-w-[90vw] max-h-[90vh] animate-in zoom-in-95 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightbox.src}
+              alt={lightbox.alt}
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl border border-white/10"
+            />
+            {lightbox.alt && (
+              <p className="text-center text-sm text-white/70 mt-3 font-medium">
+                {lightbox.alt}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
