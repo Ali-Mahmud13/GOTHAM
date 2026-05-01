@@ -88,6 +88,7 @@ type TabType = 'overview' | 'medical' | 'notes' | 'visits' | 'vitals';
 export const PatientDashboard = () => {
   const { isAuthenticated, user, logout } = useAuth();
   const navigate = useNavigate();
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [patient, setPatient] = useState<PatientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -613,6 +614,7 @@ export const PatientDashboard = () => {
                   <CalendarCheck className="w-5 h-5 text-medical-blue" />
                   Upcoming Appointments
                 </h3>
+                <span className="text-xs text-gray-500">Times in {localTz}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => navigate('/patient/appointments')}

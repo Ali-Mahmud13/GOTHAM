@@ -1,7 +1,9 @@
 """Appointment and Doctor Availability models."""
-from sqlmodel import SQLModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import Index, text
+from sqlmodel import Field, SQLModel
 
 
 class RegistrationRequest(SQLModel, table=True):
@@ -39,10 +41,46 @@ class DoctorAvailability(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class DoctorScheduleException(SQLModel, table=True):
+    """Per-date override of a doctor's recurring weekly availability (block day or custom hours)."""
+
+    __tablename__ = "doctor_schedule_exceptions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    doctor_id: int = Field(foreign_key="auth_users.id", index=True)
+    exception_date: str = Field(index=True, description="YYYY-MM-DD")
+    kind: str = Field(description="'blocked' or 'custom'")
+    start_time: Optional[str] = Field(default=None, description="HH:MM when kind=custom")
+    end_time: Optional[str] = Field(default=None, description="HH:MM when kind=custom")
+    slot_duration_minutes: Optional[int] = Field(default=None, description="Slot length when kind=custom")
+    timezone: str = Field(default="UTC")
+    notes: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DoctorNotificationState(SQLModel, table=True):
+    """Lightweight per-doctor notification read state."""
+
+    __tablename__ = "doctor_notification_state"
+
+    doctor_id: int = Field(foreign_key="auth_users.id", primary_key=True)
+    last_seen_new_bookings_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class Appointment(SQLModel, table=True):
     """A booked appointment between a doctor and a patient."""
 
     __tablename__ = "appointments"
+    __table_args__ = (
+        Index(
+            "uq_appt_active_slot",
+            "doctor_id",
+            "appointment_date",
+            "start_time",
+            unique=True,
+            postgresql_where=text("status IN ('booked', 'pending_approval')"),
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     doctor_id: int = Field(foreign_key="auth_users.id", index=True)

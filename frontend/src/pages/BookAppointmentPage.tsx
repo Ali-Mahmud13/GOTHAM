@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Calendar, Clock, User, ChevronRight, AlertCircle, CheckCircle, ArrowLeft, UserCheck, UserX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -28,11 +28,25 @@ interface TimeSlot {
   available: boolean;
 }
 
+interface ScheduleException {
+  id: number;
+  doctor_id: number;
+  exception_date: string;
+  kind: string;
+  start_time: string | null;
+  end_time: string | null;
+  slot_duration_minutes: number | null;
+  timezone: string;
+  notes: string | null;
+  created_at: string;
+}
+
 type Step = 'select-doctor' | 'select-date' | 'select-time' | 'confirm';
 
 export const BookAppointmentPage = () => {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const [step, setStep] = useState<Step>('select-doctor');
   const [doctors, setDoctors] = useState<Doctor[]>([]);
@@ -51,6 +65,7 @@ export const BookAppointmentPage = () => {
   const [isPendingApproval, setIsPendingApproval] = useState(false);
   const [showUnregisterConfirm, setShowUnregisterConfirm] = useState(false);
   const [unregistering, setUnregistering] = useState(false);
+  const [scheduleExceptions, setScheduleExceptions] = useState<ScheduleException[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== 'patient') {
@@ -62,6 +77,7 @@ export const BookAppointmentPage = () => {
   }, [isAuthenticated, user]);
 
   const handleUnregister = async () => {
+    if (unregistering) return;
     setUnregistering(true);
     try {
       const res = await fetch(`${API_URL}/appointments/unregister`, {
@@ -110,6 +126,7 @@ export const BookAppointmentPage = () => {
     setTimeSlots([]);
     setSelectedSlot(null);
     setMessage(null);
+    setScheduleExceptions([]);
 
     // Load availability to know which days to enable
     try {
@@ -119,10 +136,37 @@ export const BookAppointmentPage = () => {
     } catch {
       setAvailability([]);
     }
+
+    // Load date exceptions for the same window as the date picker (next 14 days)
+    try {
+      const from = new Date();
+      from.setDate(from.getDate() + 1);
+      const fromStr = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
+      const to = new Date();
+      to.setDate(to.getDate() + 14);
+      const toStr = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}-${String(to.getDate()).padStart(2, '0')}`;
+      const exRes = await fetch(
+        `${API_URL}/appointments/doctors/${doctor.id}/exceptions?date_from=${encodeURIComponent(fromStr)}&date_to=${encodeURIComponent(toStr)}`,
+      );
+      if (exRes.ok) {
+        setScheduleExceptions(await exRes.json());
+      }
+    } catch {
+      setScheduleExceptions([]);
+    }
     setStep('select-date');
   };
 
   const availableDays = new Set(availability.map(s => s.day_of_week));
+
+  const blockedDateSet = useMemo(
+    () => new Set(scheduleExceptions.filter(e => e.kind === 'blocked').map(e => e.exception_date)),
+    [scheduleExceptions],
+  );
+  const customDateSet = useMemo(
+    () => new Set(scheduleExceptions.filter(e => e.kind === 'custom').map(e => e.exception_date)),
+    [scheduleExceptions],
+  );
 
   // Get the minimum bookable date (tomorrow)
   const minDate = (() => {
@@ -132,6 +176,8 @@ export const BookAppointmentPage = () => {
   })();
 
   const isDateAvailable = (dateStr: string): boolean => {
+    if (blockedDateSet.has(dateStr)) return false;
+    if (customDateSet.has(dateStr)) return true;
     const dow = new Date(dateStr + 'T12:00:00').getDay(); // 0=Sun, shift to Mon=0
     const mondayBased = (dow + 6) % 7;
     return availableDays.has(mondayBased);
@@ -166,6 +212,7 @@ export const BookAppointmentPage = () => {
   };
 
   const confirmBooking = async (requestRegistration: boolean) => {
+    if (booking) return;
     if (!selectedDoctor || !selectedDate || !selectedSlot) return;
     setShowRegModal(false);
     setBooking(true);
@@ -338,9 +385,9 @@ export const BookAppointmentPage = () => {
               </button>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Booking with <strong>{selectedDoctor.full_name}</strong>. Available days are highlighted.
+              Booking with <strong>{selectedDoctor.full_name}</strong>. Available days are highlighted. Custom one-off hours show a &quot;Mod&quot; tag.
             </p>
-            {availability.length === 0 ? (
+            {availability.length === 0 && scheduleExceptions.filter(e => e.kind === 'custom').length === 0 ? (
               <div className="text-center py-8">
                 <Clock className="h-10 w-10 mx-auto text-gray-300 mb-3" />
                 <p className="text-sm font-medium text-gray-600">No slots available</p>
@@ -354,13 +401,17 @@ export const BookAppointmentPage = () => {
                   const dayLabel = DAY_NAMES[dow].substring(0, 3);
                   const dayNum = new Date(d + 'T12:00:00').getDate();
                   const mon = new Date(d + 'T12:00:00').toLocaleString('default', { month: 'short' });
+                  const isCustomDay = customDateSet.has(d);
                   return (
                     <button
                       key={d}
                       disabled={!avail}
                       onClick={() => selectDate(d)}
-                      className={`p-3 rounded-xl border text-center transition-all ${avail ? 'border-medical-blue/30 bg-blue-50/50 hover:bg-blue-100 cursor-pointer' : 'border-gray-200 bg-gray-50 opacity-40 cursor-not-allowed'} ${selectedDate === d ? 'bg-gradient-to-br from-medical-pink to-medical-blue text-white border-transparent' : ''}`}
+                      className={`p-3 rounded-xl border text-center transition-all relative ${avail ? 'border-medical-blue/30 bg-blue-50/50 hover:bg-blue-100 cursor-pointer' : 'border-gray-200 bg-gray-50 opacity-40 cursor-not-allowed'} ${selectedDate === d ? 'bg-gradient-to-br from-medical-pink to-medical-blue text-white border-transparent' : ''}`}
                     >
+                      {isCustomDay && avail && (
+                        <span className="absolute top-1 right-1 text-[9px] font-bold uppercase bg-amber-400 text-amber-950 px-1 rounded">Mod</span>
+                      )}
                       <p className="text-xs font-medium">{dayLabel}</p>
                       <p className="text-lg font-bold leading-none my-1">{dayNum}</p>
                       <p className="text-xs">{mon}</p>
@@ -386,6 +437,7 @@ export const BookAppointmentPage = () => {
             </div>
             <p className="text-sm text-gray-600 mb-4">
               <strong>{formatDate(selectedDate)}</strong> — {selectedDoctor.full_name}
+              <span className="text-xs text-gray-500"> · Times shown in {localTz}</span>
             </p>
             {slotsLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -424,7 +476,7 @@ export const BookAppointmentPage = () => {
                     <div className="p-4 bg-blue-50 rounded-xl mb-4">
                       <p className="text-sm font-semibold text-gray-800 mb-1">Selected slot</p>
                       <p className="text-medical-blue font-bold">{selectedSlot.start_time} – {selectedSlot.end_time}</p>
-                      <p className="text-xs text-gray-600 mt-1">{formatDate(selectedDate)} · {selectedDoctor.full_name}</p>
+                      <p className="text-xs text-gray-600 mt-1">{formatDate(selectedDate)} · {selectedDoctor.full_name} · {localTz}</p>
                     </div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
                     <textarea
@@ -496,6 +548,7 @@ export const BookAppointmentPage = () => {
                 {!registeredDoctor && (
                   <Button
                     onClick={() => confirmBooking(true)}
+                    disabled={booking}
                     className="w-full bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white"
                   >
                     <UserCheck className="mr-2 h-4 w-4" />
@@ -505,13 +558,15 @@ export const BookAppointmentPage = () => {
                 <Button
                   variant="outline"
                   onClick={() => confirmBooking(false)}
+                  disabled={booking}
                   className="w-full"
                 >
-                  Just Book Appointment
+                  {booking ? 'Booking...' : 'Just Book Appointment'}
                 </Button>
                 <Button
                   variant="ghost"
                   onClick={() => setShowRegModal(false)}
+                  disabled={booking}
                   className="w-full text-gray-500"
                 >
                   Cancel
