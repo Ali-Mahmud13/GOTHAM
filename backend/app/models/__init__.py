@@ -5,7 +5,13 @@ from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthA
 from app.models.patient_latest_assessments import PatientLatestAssessments
 from app.models.example import User
 from app.models.auth import AuthUser
-from app.models.appointments import DoctorAvailability, Appointment, RegistrationRequest
+from app.models.appointments import (
+    DoctorAvailability,
+    DoctorScheduleException,
+    DoctorNotificationState,
+    Appointment,
+    RegistrationRequest,
+)
 
 __all__ = [
     "Patient",
@@ -18,6 +24,8 @@ __all__ = [
     "User",
     "AuthUser",
     "DoctorAvailability",
+    "DoctorScheduleException",
+    "DoctorNotificationState",
     "Appointment",
     "RegistrationRequest",
 ]
