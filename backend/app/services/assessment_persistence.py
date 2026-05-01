@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 from sqlmodel import Session, select
+from sqlalchemy import func
+import difflib
 
 from app.db.session import engine
 from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
@@ -53,6 +55,52 @@ def _to_fetal_status_value(level: Optional[str]) -> Optional[int]:
     return None
 
 
+def _normalize_patient_query(patient_query: str) -> str:
+    normalized = (patient_query or "").strip().lower()
+    normalized = normalized.strip(" .,!?:;\"'`")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def _resolve_patient(session: Session, patient_query: str) -> Optional[Patient]:
+    """
+    Resolve patient by identifier OR name using case-insensitive matching,
+    with a fuzzy fallback for small typos in names.
+    """
+    normalized = _normalize_patient_query(patient_query)
+    if not normalized:
+        return None
+
+    patient = session.exec(
+        select(Patient).where(
+            (func.lower(Patient.patient_identifier) == normalized)
+            | (func.lower(Patient.name) == normalized)
+        )
+    ).first()
+    if patient:
+        return patient
+
+    tokens = [t for t in normalized.split(" ") if t]
+    if not tokens:
+        return None
+
+    first = tokens[0]
+    candidates = session.exec(
+        select(Patient).where(func.lower(Patient.name).like(f"%{first}%"))
+    ).all()
+    if not candidates:
+        return None
+
+    scored: list[tuple[float, Patient]] = []
+    for c in candidates:
+        name_norm = _normalize_patient_query(c.name)
+        score = difflib.SequenceMatcher(a=normalized, b=name_norm).ratio()
+        scored.append((score, c))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_patient = scored[0]
+    return best_patient if best_score >= 0.82 else None
+
+
 def save_assessment_report(
     patient_identifier: str,
     assessment_type: str,
@@ -67,9 +115,7 @@ def save_assessment_report(
     risk_levels = risk_levels or {}
 
     with Session(engine) as session:
-        patient = session.exec(
-            select(Patient).where(Patient.patient_identifier == patient_identifier)
-        ).first()
+        patient = _resolve_patient(session, patient_identifier)
 
         if not patient:
             return False

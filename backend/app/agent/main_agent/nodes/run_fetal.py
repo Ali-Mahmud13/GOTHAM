@@ -5,6 +5,7 @@ from ..tools.fetal_health_pipeline.FHP.FHP_predictor import predict_fetal_health
 from ..tools.fetal_health_pipeline.ultrasound.us import predict_ultrasound
 import logging
 import asyncio
+import re
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,6 +80,10 @@ async def run_fetal_node(state: AgentState) -> AgentState:
                         timeout=30
                     )
                     ultrasound_report = report  # ✅ Store separately
+                    if isinstance(report, str):
+                        matches = re.findall(r"!\[.*?\]\((.*?)\)", report)
+                        if matches:
+                            state["annotated_ultrasound_image_url"] = matches[-1]
                     formatted_report = f"## {model_name}\n\n{report}\n"
                     fetal_reports.append(formatted_report)
                     logger.info(f"✓ {model_name} completed successfully")

@@ -81,6 +81,12 @@ async def load_data_node(state: AgentState) -> AgentState:
     
     if patient_data:
         state["patient_data"] = patient_data
+        # Canonicalize to the real Patient_ID so downstream persistence always saves correctly,
+        # even when we resolved the patient from a name/typo ("ariana frande" → P###).
+        canonical_id = patient_data.get("Patient_ID")
+        if canonical_id:
+            state["patient_identifier"] = canonical_id
+            state["current_patient_id"] = canonical_id
         logger.info(f"Patient data loaded successfully for: {patient_identifier}")
     else:
         logger.warning(f"No patient data found for: {patient_identifier}")

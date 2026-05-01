@@ -190,10 +190,13 @@ def _build_pipeline_confidence_footer(
 
 def _extract_ultrasound_image(text: str) -> str | None:
     """Extract image URL from markdown or report text"""
-    # Try markdown image syntax first
-    match = re.search(r"!\[.*?\]\((.*?)\)", text)
-    if match:
-        return match.group(1)
+    if not text:
+        return None
+    # Some reports may contain multiple images (e.g., thumbnails + annotated).
+    # Return the most recent match.
+    matches = re.findall(r"!\[.*?\]\((.*?)\)", text)
+    if matches:
+        return matches[-1]
     return None
 
 
@@ -313,17 +316,19 @@ async def respond_node(state: AgentState) -> AgentState:
 
     # ✅ ADD: Extract image from stored ultrasound report
     if prediction_decision in ["fetal", "both"]:
-        ultrasound_report = state.get("ultrasound_report", "")
-        if ultrasound_report:
-            logger.info("DEBUG: Checking stored ultrasound_report for image")
-            image_url = _extract_ultrasound_image(ultrasound_report)
-            if image_url:
-                logger.info(f"✓ Found image URL: {image_url}")
-                final_response += f"\n\n### Fetal Ultrasound Image\n\n![Annotated Ultrasound]({image_url})"
-            else:
-                logger.info("DEBUG: No image URL found in ultrasound_report")
+        image_url = (
+            state.get("annotated_ultrasound_image_url")
+            or _extract_ultrasound_image(state.get("ultrasound_report") or "")
+            or _extract_ultrasound_image(state.get("fetal_report") or "")
+            or (state.get("patient_data") or {}).get("latest_ultrasound_thumbnail_url")
+            or (state.get("patient_data") or {}).get("latest_ultrasound_image_url")
+        )
+
+        if image_url:
+            logger.info(f"✓ Appending ultrasound image: {image_url}")
+            final_response += f"\n\n### Fetal Ultrasound Image\n\n![Annotated Ultrasound]({image_url})"
         else:
-            logger.info("DEBUG: No ultrasound_report in state")
+            logger.info("DEBUG: No ultrasound image URL available to append")
 
     # ✅ CRITICAL FIX: save the concise final response, not raw payload
     if prediction_decision in ["maternal", "fetal", "both"]:

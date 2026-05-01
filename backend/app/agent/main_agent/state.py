@@ -20,6 +20,8 @@ class AgentState(MessagesState):
     # Reports and context (persist across conversation)
     maternal_report: Optional[str] = None
     fetal_report: Optional[str] = None
+    ultrasound_report: Optional[str] = None
+    annotated_ultrasound_image_url: Optional[str] = None
     rag_context: Optional[str] = None
     rag_keywords: Optional[str] = None
 
