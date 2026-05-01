@@ -1,5 +1,5 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle,
@@ -11,7 +11,10 @@ import { VitalsChart } from "@/components/charts/VitalsChart";
 import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { BatEasterEgg } from "@/components/BatEasterEgg";
+import { MicButton } from "@/components/MicButton";
 import { cn } from "@/lib/utils";
+import { insertAtCaret } from "@/lib/text";
+import type { TranscriptionLanguage } from "@/lib/transcribe";
 import ReactMarkdown from "react-markdown";
 
 const API_URL = "http://localhost:8000";
@@ -106,6 +109,20 @@ const PatientProfilePage = () => {
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [editedNotes, setEditedNotes] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const editedNotesRef = useRef<HTMLTextAreaElement>(null);
+  const [notesDictationLanguage, setNotesDictationLanguage] = useState<TranscriptionLanguage>("en");
+
+  const dictateIntoEditedNotes = (text: string) => {
+    const result = insertAtCaret(editedNotes, text, editedNotesRef.current);
+    setEditedNotes(result.value);
+    requestAnimationFrame(() => {
+      const el = editedNotesRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(result.caret, result.caret);
+      }
+    });
+  };
   const [registeredPatientAuthId, setRegisteredPatientAuthId] = useState<number | null>(null);
   const [showUnregisterConfirm, setShowUnregisterConfirm] = useState(false);
   const [isUnregistering, setIsUnregistering] = useState(false);
@@ -892,15 +909,54 @@ const PatientProfilePage = () => {
                 {isEditingNotes ? (
                   <div>
                     <textarea
+                      ref={editedNotesRef}
                       value={editedNotes}
                       onChange={(e) => setEditedNotes(e.target.value)}
-                      placeholder="Enter clinical notes, observations, and recommendations here..."
+                      placeholder="Enter clinical notes here, or click the mic to dictate."
                       disabled={isSavingNotes}
                       className="w-full min-h-[240px] p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-medical-blue focus:border-transparent resize-y text-gray-700 leading-relaxed disabled:bg-gray-50 disabled:cursor-not-allowed"
                     />
                     <div className="mt-4 flex items-center justify-between">
                       <p className="text-xs text-gray-500">{editedNotes.length} characters</p>
                       <div className="flex items-center gap-2">
+                        <div className="flex items-center rounded-full border border-gray-300 bg-white/70 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setNotesDictationLanguage("en")}
+                            disabled={isSavingNotes}
+                            className={cn(
+                              "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                              notesDictationLanguage === "en"
+                                ? "bg-white text-medical-blue shadow-sm"
+                                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50",
+                            )}
+                            title="Dictate in English"
+                            aria-pressed={notesDictationLanguage === "en"}
+                          >
+                            EN
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNotesDictationLanguage("ur")}
+                            disabled={isSavingNotes}
+                            className={cn(
+                              "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                              notesDictationLanguage === "ur"
+                                ? "bg-white text-medical-blue shadow-sm"
+                                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50",
+                            )}
+                            title="Dictate in Urdu / Minglish"
+                            aria-pressed={notesDictationLanguage === "ur"}
+                          >
+                            اردو
+                          </button>
+                        </div>
+                        <MicButton
+                          onTranscript={dictateIntoEditedNotes}
+                          language={notesDictationLanguage}
+                          disabled={isSavingNotes}
+                          size="sm"
+                        />
                         <button
                           onClick={() => setIsEditingNotes(false)}
                           disabled={isSavingNotes}

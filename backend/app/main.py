@@ -21,6 +21,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.patient_portal import router as patient_portal_router
 from app.api.auth import router as auth_router
 from app.api.appointments import router as appointments_router
+from app.api.transcription import router as transcription_router
 from app.db.init_db import create_db_and_tables
 from app.db.session import engine
 from sqlalchemy import text
@@ -171,6 +172,7 @@ app.include_router(patients_router)
 app.include_router(dashboard_router)
 app.include_router(patient_portal_router)
 app.include_router(appointments_router)
+app.include_router(transcription_router)
 
 
 @app.get("/")

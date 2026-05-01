@@ -10,6 +10,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import ReactMarkdown from "react-markdown";
 import { AssessmentProgress, type ProgressData } from "@/components/AssessmentProgress";
+import { MicButton } from "@/components/MicButton";
+import { insertAtCaret } from "@/lib/text";
+import type { TranscriptionLanguage } from "@/lib/transcribe";
 
 interface Message {
   id: string;
@@ -37,6 +40,20 @@ export const ChatPage = () => {
   const [showQuickActions, setShowQuickActions] = useState(true);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [dictationLanguage, setDictationLanguage] = useState<TranscriptionLanguage>("en");
+
+  const dictateIntoInput = (text: string) => {
+    const result = insertAtCaret(input, text, inputRef.current);
+    setInput(result.value);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(result.caret, result.caret);
+      }
+    });
+  };
 
   const closeLightbox = useCallback(() => setLightbox(null), []);
 
@@ -169,7 +186,13 @@ export const ChatPage = () => {
 
     try {
       // Check if this is a risk assessment request (triggers background job)
-      const isAssessmentRequest = /assess.*risk|risk.*assess|evaluate.*patient|patient.*assessment|full.*assessment|complete.*assessment|complete.*checkup|checkup.*for|assess.*p\d{3}/i.test(currentInput);
+      const isAssessmentRequest =
+        // English intent patterns
+        /assess.*risk|risk.*assess|evaluate.*patient|patient.*assessment|full.*assessment|complete.*assessment|complete.*checkup|checkup.*for|assess.*p\d{3}/i.test(currentInput)
+        // Urdu intent patterns (risk/assessment)
+        || /خطرہ|رسک|جائزہ|تشخیص/i.test(currentInput)
+        // Patient-id + assessment keyword heuristic (covers Minglish)
+        || (/\bP\d{3,}\b/i.test(currentInput) && /(assessment|assess|risk|checkup|analysis|evaluate)/i.test(currentInput));
 
       if (isAssessmentRequest) {
         // Use background job for assessments
@@ -441,10 +464,11 @@ export const ChatPage = () => {
           )}
           <div className="relative backdrop-blur-2xl bg-white/30 border border-white/30 rounded-2xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] px-4 py-3">
             <Textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask me anything about patient care, risk assessment, or medical records..."
+              placeholder="Ask me anything, or click the mic to dictate..."
               className="min-h-[60px] max-h-[140px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm"
               disabled={isLoading}
             />
@@ -452,12 +476,51 @@ export const ChatPage = () => {
               <p className="text-[11px] text-muted-foreground/70">
                 {isLoading ? "Thinking..." : "Enter to send \u00b7 Shift+Enter for new line"}
               </p>
-              <Button
-                size="sm"
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
-                className="bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-md transition-all duration-300 hover:scale-105 rounded-xl px-5 h-9"
-              >
+              <div className="flex items-center gap-2">
+                <div className="flex items-center rounded-full border border-white/30 bg-white/20 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDictationLanguage("en")}
+                    disabled={isLoading}
+                    className={cn(
+                      "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                      dictationLanguage === "en"
+                        ? "bg-white/70 text-medical-blue shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-white/20",
+                    )}
+                    title="Dictate in English"
+                    aria-pressed={dictationLanguage === "en"}
+                  >
+                    EN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDictationLanguage("ur")}
+                    disabled={isLoading}
+                    className={cn(
+                      "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                      dictationLanguage === "ur"
+                        ? "bg-white/70 text-medical-blue shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-white/20",
+                    )}
+                    title="Dictate in Urdu / Minglish"
+                    aria-pressed={dictationLanguage === "ur"}
+                  >
+                    اردو
+                  </button>
+                </div>
+                <MicButton
+                  onTranscript={dictateIntoInput}
+                  language={dictationLanguage}
+                  disabled={isLoading}
+                  size="sm"
+                />
+                <Button
+                  size="sm"
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  className="bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-md transition-all duration-300 hover:scale-105 rounded-xl px-5 h-9"
+                >
                 {isLoading ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
@@ -469,7 +532,8 @@ export const ChatPage = () => {
                     Send
                   </>
                 )}
-              </Button>
+                </Button>
+              </div>
             </div>
           </div>
         </div>
