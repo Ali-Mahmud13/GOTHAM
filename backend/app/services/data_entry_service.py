@@ -12,6 +12,7 @@ from app.schemas import (
     CreateVisitRequest,
     VisitResponse,
 )
+from app.core import config
 from app.core.llm import get_llm
 from langchain_core.messages import HumanMessage
 import logging
@@ -105,7 +106,11 @@ class DataEntryService:
             NotesParseResponse with extracted and missing fields
         """
         try:
-            llm = get_llm(temperature=0, max_tokens=2048)  # Increased from 512 to handle full response
+            llm = get_llm(
+                temperature=0,
+                max_tokens=768,
+                model=config.EXTRACTION_MODEL,
+            )
             
             prompt = self._build_extraction_prompt(notes, patient_id)
             response = await asyncio.wait_for(
@@ -144,13 +149,57 @@ class DataEntryService:
             
             # Parse JSON response
             extracted_data = json.loads(json_str)
-            
+
+            # Defensive filtering: sometimes the model invents fields (e.g. weight/height)
+            # or returns an overly long missing list. Only keep known db_fields so we
+            # never pass unexpected keys into CreateVisitRequest later.
+            allowed_db_fields = {
+                # GDM
+                "glucose_level",
+                "gestation_weeks",
+                "bmi",
+                "sys_bp",
+                "dia_bp",
+                "hdl",
+                "ogtt",
+                "sedentary_lifestyle",
+                "family_history",
+                "pcos",
+                "prediabetes",
+                "unexplained_prenatal_loss",
+                "large_child_or_birth_default",
+                # CBC
+                "wbc",
+                "rbc",
+                "hgb",
+                "hct",
+                "mcv",
+                "mch",
+                "mchc",
+                "plt",
+                # Fetal
+                "baseline_value",
+                "accelerations",
+                "fetal_movement",
+                # Pregnancy history
+                "no_of_pregnancy",
+                "gestation_in_previous_pregnancy",
+            }
+
+            raw_extracted = extracted_data.get("extracted", []) or []
+            raw_missing = extracted_data.get("missing", []) or []
+
             extracted_fields = [
-                ExtractedField(**field) for field in extracted_data.get("extracted", [])
+                ExtractedField(**field)
+                for field in raw_extracted
+                if isinstance(field, dict)
+                and (field.get("db_field") or field.get("dbField")) in allowed_db_fields
             ]
-            
+
             missing_fields = [
-                MissingField(**field) for field in extracted_data.get("missing", [])
+                MissingField(**field)
+                for field in raw_missing
+                if isinstance(field, dict) and field.get("db_field") in allowed_db_fields
             ]
             
             return NotesParseResponse(
@@ -465,6 +514,11 @@ Clinical Notes:
 {notes}
 
 Extract the following fields if present in the notes. Return JSON format with two arrays: "extracted" and "missing".
+
+CRITICAL: Keep the output SHORT and VALID JSON.
+- Only include fields that appear in the notes.
+- For \"missing\", include AT MOST 12 items (prioritize core vitals/labs: glucose_level, gestation_weeks, bmi, sys_bp, dia_bp, hgb, wbc, rbc, baseline_value).
+- Do NOT include any fields outside the allowed db_field list below.
 
 IMPORTANT: Use these EXACT database field names in db_field:
 
