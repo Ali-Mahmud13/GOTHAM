@@ -1,6 +1,7 @@
 """Patient service - Handles patient data fetching and management."""
 
 from typing import Dict, Optional, List
+import difflib
 import re
 from sqlmodel import Session, select
 from sqlalchemy import func
@@ -36,7 +37,40 @@ class PatientService:
             (func.lower(Patient.patient_identifier) == normalized)
             | (func.lower(Patient.name) == normalized)
         )
-        return session.exec(statement).first()
+        patient = session.exec(statement).first()
+        if patient:
+            return patient
+
+        # Fuzzy fallback for small typos in names (e.g., "Ariana Grade" vs "Ariana Grande")
+        # We first narrow candidates using the first token (keeps query fast), then pick the
+        # closest full-name match with a conservative similarity threshold.
+        tokens = [t for t in normalized.split(" ") if t]
+        if not tokens:
+            return None
+
+        first = tokens[0]
+        candidates = session.exec(
+            select(Patient).where(func.lower(Patient.name).like(f"%{first}%"))
+        ).all()
+        if not candidates:
+            return None
+
+        scored: list[tuple[float, Patient]] = []
+        for c in candidates:
+            name_norm = self._normalize_patient_query(c.name)
+            score = difflib.SequenceMatcher(a=normalized, b=name_norm).ratio()
+            scored.append((score, c))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_patient = scored[0]
+        if best_score >= 0.82:
+            logger.info(
+                f"[FUZZY] Resolved patient '{patient_query}' → '{best_patient.name}' "
+                f"(score={best_score:.2f})"
+            )
+            return best_patient
+
+        return None
     
     async def get_patient_data(self, patient_identifier: str) -> Dict:
         """

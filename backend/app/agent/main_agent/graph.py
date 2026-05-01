@@ -11,6 +11,7 @@ from .nodes.generate_keywords import generate_keywords_node
 from .nodes.should_retrieve import should_retrieve_node
 from .nodes.rag_retrieval import rag_retrieval_node
 from .nodes.respond import respond_node
+from .nodes.respond import respond_node, persist_node 
 
 def create_graph():
     workflow = StateGraph(AgentState)
@@ -25,6 +26,7 @@ def create_graph():
     workflow.add_node("should_retrieve", should_retrieve_node)
     workflow.add_node("rag_retrieval", rag_retrieval_node)
     workflow.add_node("respond", respond_node)
+    workflow.add_node("persist", persist_node)
     
     # Set entry point
     workflow.set_entry_point("check_clarity")
@@ -133,9 +135,11 @@ def create_graph():
     
     # After rag_retrieval - always go to respond
     workflow.add_edge("rag_retrieval", "respond")
+
+    workflow.add_edge("respond", "persist")
     
     # After respond - END
-    workflow.add_edge("respond", END)
+    workflow.add_edge("persist", END)
     
     # Compile with memory
     memory = MemorySaver()
