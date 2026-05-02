@@ -13,7 +13,11 @@ import logging
 import sys
 from sqlalchemy import inspect
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.rate_limit import limiter
 from app.core.config import setup_logging
+from app.core import config
 from app.inngest import inngest_client, ALL_FUNCTIONS
 from app.api.chat import router as chat_router
 from app.api.data_entry import router as data_entry_router
@@ -32,6 +36,8 @@ logger = logging.getLogger(__name__)
 # Setup
 setup_logging()
 app = FastAPI(title="GOTHAM - Medical Agent System")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Database initialization on startup
 @app.on_event("startup")
@@ -61,7 +67,7 @@ async def startup_event():
                         "Missing appointments.%s column detected. Applying startup migration...",
                         col_name,
                     )
-                    conn.execute(text(f"ALTER TABLE appointments ADD COLUMN {col_name} {col_type}"))
+                    conn.execute(text("ALTER TABLE appointments ADD COLUMN {} {}".format(col_name, col_type)))
                     conn.commit()
                     logger.info("✓ Added appointments.%s", col_name)
 
@@ -77,7 +83,7 @@ async def startup_event():
                         "Missing visits.%s column detected. Applying startup migration...",
                         col_name,
                     )
-                    conn.execute(text(f"ALTER TABLE visits ADD COLUMN {col_name} {col_type}"))
+                    conn.execute(text("ALTER TABLE visits ADD COLUMN {} {}".format(col_name, col_type)))
                     conn.commit()
                     logger.info("✓ Added visits.%s", col_name)
     except Exception as e:
@@ -126,35 +132,24 @@ async def startup_event():
         )
 
 # CORS for React frontend
+origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080",
+]
+if config.CORS_ALLOWED_ORIGINS:
+    origins.extend([o.strip() for o in config.CORS_ALLOWED_ORIGINS.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8080",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8080",
-    ],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def ensure_local_cors_headers(request: Request, call_next):
-    """Force CORS headers for localhost origins, even on error paths."""
-    response = await call_next(request)
-    origin = request.headers.get("origin", "")
-    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-    return response
 
 # Register Inngest — streaming sends keepalive bytes so long-running
 # step handlers (ML inference, LLM calls) don't hit idle-connection resets.

@@ -672,18 +672,11 @@ class PatientService:
         return visit_dict
 
 
-# Singleton instance
-_patient_service_instance = None
-
-
 def get_patient_service() -> PatientService:
     """
-    Get the singleton patient service instance.
+    Get the patient service instance.
     
     Returns:
         PatientService instance
     """
-    global _patient_service_instance
-    if _patient_service_instance is None:
-        _patient_service_instance = PatientService()
-    return _patient_service_instance
+    return PatientService()
