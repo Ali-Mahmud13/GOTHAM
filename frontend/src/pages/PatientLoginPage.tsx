@@ -49,12 +49,12 @@ export const PatientLoginPage = () => {
         throw new Error(data.detail || 'Login failed');
       }
 
-      if (data.success && data.user) {
+      if (data.success && data.user && data.access_token && data.refresh_token) {
         if (data.user.role !== 'patient') {
           setError('This login is for patients only. Please use the doctor login.');
           return;
         }
-        login(data.user);
+        login({ user: data.user, accessToken: data.access_token, refreshToken: data.refresh_token });
         navigate('/patient/dashboard');
       } else {
         setError(data.message || 'Login failed. Please check your credentials.');

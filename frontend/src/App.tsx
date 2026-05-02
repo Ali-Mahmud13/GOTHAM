@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { ChatPage } from "./pages/ChatPage";
@@ -31,6 +32,20 @@ const queryClient = new QueryClient({
   },
 });
 
+function RequireDoctor({ children }: { children: JSX.Element }) {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/doctor/login" replace />;
+  if (user?.role !== "doctor") return <Navigate to="/patient/dashboard" replace />;
+  return children;
+}
+
+function RequirePatient({ children }: { children: JSX.Element }) {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/patient/login" replace />;
+  if (user?.role !== "patient") return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -48,23 +63,23 @@ function App() {
               <Route path="/doctor/signup" element={<DoctorSignupPage />} />
               <Route path="/login" element={<Navigate to="/doctor/login" replace />} />
               <Route path="/signup" element={<Navigate to="/doctor/signup" replace />} />
-              <Route path="/dashboard" element={<Index />} />
-              <Route path="/chat" element={<ChatPage />} />
-              <Route path="/patients" element={<PatientsPage />} />
-              <Route path="/patients/:patientId" element={<PatientProfilePage />} />
-              <Route path="/data-entry" element={<DataEntry />} />
-              <Route path="/schedule" element={<DoctorSchedulePage />} />
-              <Route path="/appointments" element={<AppointmentsPage />} />
-              <Route path="/doctor/welcome" element={<GothamWelcomePage />} />
+              <Route path="/dashboard" element={<RequireDoctor><Index /></RequireDoctor>} />
+              <Route path="/chat" element={<RequireDoctor><ChatPage /></RequireDoctor>} />
+              <Route path="/patients" element={<RequireDoctor><PatientsPage /></RequireDoctor>} />
+              <Route path="/patients/:patientId" element={<RequireDoctor><PatientProfilePage /></RequireDoctor>} />
+              <Route path="/data-entry" element={<RequireDoctor><DataEntry /></RequireDoctor>} />
+              <Route path="/schedule" element={<RequireDoctor><DoctorSchedulePage /></RequireDoctor>} />
+              <Route path="/appointments" element={<RequireDoctor><AppointmentsPage /></RequireDoctor>} />
+              <Route path="/doctor/welcome" element={<RequireDoctor><GothamWelcomePage /></RequireDoctor>} />
               
               {/* Patient Portal Routes */}
               <Route path="/patient/login" element={<PatientLoginPage />} />
               <Route path="/patient/signup" element={<PatientSignupPage />} />
-              <Route path="/patient/dashboard" element={<PatientDashboard />} />
-              <Route path="/patient/notes" element={<PatientNotesPage />} />
-              <Route path="/patient/edit-profile" element={<EditProfilePage />} />
-              <Route path="/patient/book-appointment" element={<BookAppointmentPage />} />
-              <Route path="/patient/appointments" element={<AppointmentsPage />} />
+              <Route path="/patient/dashboard" element={<RequirePatient><PatientDashboard /></RequirePatient>} />
+              <Route path="/patient/notes" element={<RequirePatient><PatientNotesPage /></RequirePatient>} />
+              <Route path="/patient/edit-profile" element={<RequirePatient><EditProfilePage /></RequirePatient>} />
+              <Route path="/patient/book-appointment" element={<RequirePatient><BookAppointmentPage /></RequirePatient>} />
+              <Route path="/patient/appointments" element={<RequirePatient><AppointmentsPage /></RequirePatient>} />
               
               {/* 404 */}
               <Route path="*" element={<NotFound />} />

@@ -14,6 +14,7 @@ from app.schemas import (
 )
 from app.core import config
 from app.core.llm import get_llm
+from app.core.sanitize import sanitize_note
 from langchain_core.messages import HumanMessage
 import logging
 import json
@@ -305,7 +306,7 @@ class DataEntryService:
                 patient_id=patient.id,
                 visit_date=datetime.utcnow(),
                 visit_type=request.visit_type,
-                notes=request.notes,
+                notes=sanitize_note(request.notes or "") if request.notes else None,
                 recorded_by_role=user.role if user else None,
                 recorded_by_user_id=user.id if user else None,
             )

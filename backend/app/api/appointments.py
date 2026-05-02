@@ -6,12 +6,13 @@ from datetime import datetime, date, timedelta
 from typing import List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.db.session import get_session
+from app.core.security import get_current_user_compat
 from app.models.auth import AuthUser
 from app.models.appointments import (
     Appointment,
@@ -28,13 +29,6 @@ router = APIRouter(prefix="/appointments", tags=["Appointments"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _get_user_by_email(email: str, session: Session) -> AuthUser:
-    user = session.exec(select(AuthUser).where(AuthUser.email == email.lower())).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
-
 
 def _require_doctor(user: AuthUser) -> None:
     if user.role != "doctor":
@@ -421,13 +415,10 @@ def get_booking_config():
 
 @router.get("/new-booking-notifications", response_model=NewBookingNotificationsOut)
 def get_new_booking_notifications(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Doctor-only: count of newly created appointments since last dismissal."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     state = session.get(DoctorNotificationState, user.id)
@@ -448,13 +439,10 @@ def get_new_booking_notifications(
 
 @router.put("/dismiss-new-booking-notifications", status_code=204)
 def dismiss_new_booking_notifications(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Doctor-only: mark new bookings as seen."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     state = session.get(DoctorNotificationState, user.id)
@@ -468,13 +456,10 @@ def dismiss_new_booking_notifications(
 
 @router.get("/availability/my", response_model=List[AvailabilitySlotOut])
 def get_my_availability(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return the authenticated doctor's availability slots."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     slots = session.exec(
@@ -501,7 +486,7 @@ def get_my_availability(
 @router.post("/availability", response_model=List[AvailabilitySlotOut])
 def set_availability(
     request: SetAvailabilityRequest,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """
@@ -509,9 +494,6 @@ def set_availability(
 
     All existing active slots are soft-deleted and replaced with the new ones.
     """
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     def _mins(hhmm: str) -> int:
@@ -605,13 +587,10 @@ def set_availability(
 @router.delete("/availability/{slot_id}", status_code=204)
 def delete_availability_slot(
     slot_id: int,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Soft-delete a single availability slot."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     slot = session.get(DoctorAvailability, slot_id)
@@ -646,13 +625,10 @@ def _validate_custom_windows_no_overlap(windows: List[tuple[str, str, int]]) -> 
 @router.post("/exceptions", response_model=ScheduleExceptionOut, status_code=201)
 def create_schedule_exception(
     body: ScheduleExceptionIn,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Create a per-date schedule exception (block full day or custom hours for one date)."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     kind = body.kind.strip().lower()
@@ -831,15 +807,12 @@ def create_schedule_exception(
 
 @router.get("/exceptions/my", response_model=List[ScheduleExceptionOut])
 def list_my_schedule_exceptions(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     session: Session = Depends(get_session),
 ):
     """List the authenticated doctor's schedule exceptions, optionally filtered by date range."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     q = select(DoctorScheduleException).where(DoctorScheduleException.doctor_id == user.id)
@@ -855,13 +828,10 @@ def list_my_schedule_exceptions(
 @router.delete("/exceptions/{exception_id}", status_code=204)
 def delete_schedule_exception(
     exception_id: int,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Delete a schedule exception owned by the authenticated doctor."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     row = session.get(DoctorScheduleException, exception_id)
@@ -992,7 +962,7 @@ def get_available_slots(
 @router.post("/book", response_model=AppointmentOut, status_code=201)
 def book_appointment(
     request: BookingRequest,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """
@@ -1000,9 +970,6 @@ def book_appointment(
 
     Returns 409 if the slot is already taken.
     """
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_patient(user)
 
     doctor = session.get(AuthUser, request.doctor_id)
@@ -1146,14 +1113,10 @@ def _appointment_out(appt: Appointment, session: Session) -> AppointmentOut:
 
 @router.get("/my", response_model=List[AppointmentOut])
 def get_my_appointments(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return all appointments for the authenticated user (doctor or patient)."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
-
     if user.role == "doctor":
         appts = session.exec(
             select(Appointment)
@@ -1174,14 +1137,10 @@ def get_my_appointments(
 
 @router.get("/upcoming", response_model=List[AppointmentOut])
 def get_upcoming_appointments(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return upcoming (future) appointments for the authenticated user."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
-
     today = date.today().isoformat()
 
     if user.role == "doctor":
@@ -1206,13 +1165,10 @@ def get_upcoming_appointments(
 
 @router.get("/reschedule-notifications", response_model=List[AppointmentOut])
 def get_reschedule_notifications(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return appointments rescheduled by the OTHER party (unread reschedule notifications)."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     other_role = "patient" if user.role == "doctor" else "doctor"
     if user.role == "doctor":
         appts = session.exec(
@@ -1231,13 +1187,10 @@ def get_reschedule_notifications(
 
 @router.put("/dismiss-reschedule-notifications", status_code=204)
 def dismiss_reschedule_notifications(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Clear all reschedule notifications for the current user."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     other_role = "patient" if user.role == "doctor" else "doctor"
     if user.role == "doctor":
         appts = session.exec(
@@ -1259,13 +1212,10 @@ def dismiss_reschedule_notifications(
 
 @router.get("/cancel-notifications", response_model=List[AppointmentOut])
 def get_cancel_notifications(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return appointments cancelled by the OTHER party (unread cancel notifications)."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     other_role = "patient" if user.role == "doctor" else "doctor"
     if user.role == "doctor":
         appts = session.exec(
@@ -1284,13 +1234,10 @@ def get_cancel_notifications(
 
 @router.put("/dismiss-cancel-notifications", status_code=204)
 def dismiss_cancel_notifications(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Clear all cancel notifications for the current user."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     other_role = "patient" if user.role == "doctor" else "doctor"
     if user.role == "doctor":
         appts = session.exec(
@@ -1313,14 +1260,10 @@ def dismiss_cancel_notifications(
 @router.put("/{appointment_id}/cancel", response_model=AppointmentOut)
 def cancel_appointment(
     appointment_id: int,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Cancel an appointment. Both doctor and patient can cancel."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
-
     appt = session.get(Appointment, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
@@ -1347,14 +1290,10 @@ def cancel_appointment(
 def reschedule_appointment(
     appointment_id: int,
     request: RescheduleRequest,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Reschedule an appointment to a new date/time."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
-
     appt = session.get(Appointment, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
@@ -1439,13 +1378,10 @@ def reschedule_appointment(
 
 @router.get("/my-doctor", response_model=Optional[DoctorOut])
 def get_my_doctor(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return the patient's currently registered doctor, or null."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_patient(user)
 
     patient = session.get(Patient, user.patient_id) if user.patient_id else None
@@ -1462,13 +1398,10 @@ def get_my_doctor(
 
 @router.delete("/unregister", status_code=200)
 def patient_unregister(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Patient unregisters themselves from their current doctor."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_patient(user)
 
     patient = session.get(Patient, user.patient_id) if user.patient_id else None
@@ -1515,13 +1448,11 @@ class RegisteredPatientOut(BaseModel):
 
 @router.get("/my-registered-patients", response_model=List[RegisteredPatientOut])
 def get_my_registered_patients(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return all patients currently registered under this doctor."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    doctor = _get_user_by_email(user_email, session)
+    doctor = user
     _require_doctor(doctor)
 
     patients = session.exec(
@@ -1545,13 +1476,11 @@ def get_my_registered_patients(
 @router.delete("/unregister/{patient_auth_id}", status_code=200)
 def doctor_unregister_patient(
     patient_auth_id: int,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Doctor removes a patient from their registered list."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    doctor = _get_user_by_email(user_email, session)
+    doctor = user
     _require_doctor(doctor)
 
     patient_auth = session.get(AuthUser, patient_auth_id)
@@ -1593,13 +1522,10 @@ def doctor_unregister_patient(
 
 @router.get("/registration-requests", response_model=List[RegistrationRequestOut])
 def get_registration_requests(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return all pending registration requests for the authenticated doctor."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_doctor(user)
 
     requests = session.exec(
@@ -1631,7 +1557,7 @@ def get_registration_requests(
 @router.put("/registration-requests/{request_id}/approve", response_model=RegistrationRequestOut)
 def approve_registration_request(
     request_id: int,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """
@@ -1641,9 +1567,7 @@ def approve_registration_request(
     - Sets appointment status to 'booked'
     - Sets registration request status to 'approved'
     """
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    doctor = _get_user_by_email(user_email, session)
+    doctor = user
     _require_doctor(doctor)
 
     reg_req = session.get(RegistrationRequest, request_id)
@@ -1700,7 +1624,7 @@ def approve_registration_request(
 @router.put("/registration-requests/{request_id}/decline", response_model=RegistrationRequestOut)
 def decline_registration_request(
     request_id: int,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """
@@ -1709,9 +1633,7 @@ def decline_registration_request(
     - Sets appointment status to 'cancelled'
     - Sets registration request status to 'declined'
     """
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    doctor = _get_user_by_email(user_email, session)
+    doctor = user
     _require_doctor(doctor)
 
     reg_req = session.get(RegistrationRequest, request_id)
@@ -1756,13 +1678,10 @@ def decline_registration_request(
 
 @router.get("/my-registration-requests", response_model=List[RegistrationRequestOut])
 def get_my_registration_requests(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
     """Return the patient's own registration requests so they can see outcomes."""
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = _get_user_by_email(user_email, session)
     _require_patient(user)
 
     reqs = session.exec(

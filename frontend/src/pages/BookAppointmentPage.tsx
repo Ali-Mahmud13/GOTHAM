@@ -4,8 +4,8 @@ import { Loader2, Calendar, Clock, User, ChevronRight, AlertCircle, CheckCircle,
 import { Button } from '@/components/ui/button';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { useAuth } from '@/context/AuthContext';
+import { apiFetch } from '@/lib/apiClient';
 
-const API_URL = 'http://localhost:8000';
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 interface Doctor {
@@ -44,7 +44,7 @@ interface ScheduleException {
 type Step = 'select-doctor' | 'select-date' | 'select-time' | 'confirm';
 
 export const BookAppointmentPage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
   const navigate = useNavigate();
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -80,10 +80,13 @@ export const BookAppointmentPage = () => {
     if (unregistering) return;
     setUnregistering(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/unregister`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/unregister`,
+        { method: 'DELETE' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setRegisteredDoctor(null);
         setShowUnregisterConfirm(false);
@@ -93,9 +96,13 @@ export const BookAppointmentPage = () => {
 
   const loadRegisteredDoctor = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/my-doctor`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/my-doctor`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data = await res.json();
         setRegisteredDoctor(data); // null if no registered doctor
@@ -110,7 +117,13 @@ export const BookAppointmentPage = () => {
   const loadDoctors = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/doctors`);
+      const res = await apiFetch(
+        `/appointments/doctors`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       const data: Doctor[] = await res.json();
       setDoctors(data);
     } catch {
@@ -130,7 +143,13 @@ export const BookAppointmentPage = () => {
 
     // Load availability to know which days to enable
     try {
-      const res = await fetch(`${API_URL}/appointments/doctors/${doctor.id}/availability`);
+      const res = await apiFetch(
+        `/appointments/doctors/${doctor.id}/availability`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       const data: AvailabilitySlot[] = await res.json();
       setAvailability(data);
     } catch {
@@ -145,8 +164,12 @@ export const BookAppointmentPage = () => {
       const to = new Date();
       to.setDate(to.getDate() + 14);
       const toStr = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}-${String(to.getDate()).padStart(2, '0')}`;
-      const exRes = await fetch(
-        `${API_URL}/appointments/doctors/${doctor.id}/exceptions?date_from=${encodeURIComponent(fromStr)}&date_to=${encodeURIComponent(toStr)}`,
+      const exRes = await apiFetch(
+        `/appointments/doctors/${doctor.id}/exceptions?date_from=${encodeURIComponent(fromStr)}&date_to=${encodeURIComponent(toStr)}`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
       );
       if (exRes.ok) {
         setScheduleExceptions(await exRes.json());
@@ -190,7 +213,13 @@ export const BookAppointmentPage = () => {
     setMessage(null);
     setSlotsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/doctors/${selectedDoctor!.id}/slots?date=${dateStr}`);
+      const res = await apiFetch(
+        `/appointments/doctors/${selectedDoctor!.id}/slots?date=${dateStr}`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       const data: TimeSlot[] = await res.json();
       setTimeSlots(data);
     } catch {
@@ -219,19 +248,25 @@ export const BookAppointmentPage = () => {
     setMessage(null);
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${API_URL}/appointments/book`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Email': user!.email },
-        body: JSON.stringify({
-          doctor_id: selectedDoctor.id,
-          appointment_date: selectedDate,
-          start_time: selectedSlot.start_time,
-          end_time: selectedSlot.end_time,
-          timezone: tz,
-          notes: notes || null,
-          request_registration: requestRegistration,
-        }),
-      });
+      const res = await apiFetch(
+        `/appointments/book`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            doctor_id: selectedDoctor.id,
+            appointment_date: selectedDate,
+            start_time: selectedSlot.start_time,
+            end_time: selectedSlot.end_time,
+            timezone: tz,
+            notes: notes || null,
+            request_registration: requestRegistration,
+          }),
+        },
+        tokens,
+        setTokens,
+        logout,
+      );
       const data = await res.json();
       if (res.ok) {
         const pending = data.status === 'pending_approval';

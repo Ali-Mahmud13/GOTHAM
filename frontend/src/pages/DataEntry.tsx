@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { MicButton } from "@/components/MicButton";
 import { insertAtCaret } from "@/lib/text";
 import type { TranscriptionLanguage } from "@/lib/transcribe";
+import { apiFetch, ApiError } from "@/lib/apiClient";
 
 interface Patient {
     id: string;
@@ -37,7 +38,7 @@ const API_BASE = "http://localhost:8000/api";
 const DataEntry = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const { user } = useAuth();
+    const { user, tokens, setTokens, logout } = useAuth();
     const { toast } = useToast();
     const returnTo = searchParams.get("returnTo") || "/dashboard";
     const requestedPatientId = searchParams.get("patientId") || "";
@@ -81,15 +82,21 @@ const DataEntry = () => {
             }
             setIsProcessing(true);
             try {
-                const response = await fetch(`${API_BASE}/notes/parse`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    signal,
-                    body: JSON.stringify({
-                        notes: notesValue,
-                        patient_id: selectedPatient?.id,
-                    }),
-                });
+                const response = await apiFetch(
+                    `/api/notes/parse`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        signal,
+                        body: JSON.stringify({
+                            notes: notesValue,
+                            patient_id: selectedPatient?.id,
+                        }),
+                    },
+                    tokens,
+                    setTokens,
+                    logout,
+                );
 
                 if (signal?.aborted) return;
 
@@ -109,13 +116,51 @@ const DataEntry = () => {
                         });
                     }
                 } else {
-                    const errorData = await response.json();
-                    console.error("Failed to parse notes:", errorData);
-                    toast({
-                        title: "AI Busy",
-                        description: "Rate limit reached. Please wait a moment.",
-                        variant: "destructive",
-                    });
+                    let detail = "";
+                    try {
+                        const err = await response.json();
+                        detail =
+                            err && typeof err === "object" && err !== null && "detail" in err
+                                ? String((err as { detail?: unknown }).detail)
+                                : JSON.stringify(err);
+                    } catch {
+                        // ignore
+                    }
+
+                    const status = response.status;
+                    console.error("Failed to parse notes:", { status, detail });
+
+                    if (status === 401) {
+                        toast({
+                            title: "Not authenticated",
+                            description: "Please log in again.",
+                            variant: "destructive",
+                        });
+                    } else if (status === 403) {
+                        toast({
+                            title: "Access denied",
+                            description: "You do not have permission to run AI extraction.",
+                            variant: "destructive",
+                        });
+                    } else if (status === 413) {
+                        toast({
+                            title: "Notes too long",
+                            description: "Please shorten the notes and try again.",
+                            variant: "destructive",
+                        });
+                    } else if (status === 429) {
+                        toast({
+                            title: "AI Busy",
+                            description: "Rate limit reached. Please wait a moment.",
+                            variant: "destructive",
+                        });
+                    } else {
+                        toast({
+                            title: "Parsing Failed",
+                            description: detail || `Request failed (${status}).`,
+                            variant: "destructive",
+                        });
+                    }
                 }
             } catch (error) {
                 if (error instanceof DOMException && error.name === "AbortError") {
@@ -123,16 +168,20 @@ const DataEntry = () => {
                 }
                 if (signal?.aborted) return;
                 console.error("Error parsing notes:", error);
+                const message =
+                    error instanceof ApiError
+                        ? error.message
+                        : "Failed to parse notes. Request timed out or AI service unavailable.";
                 toast({
                     title: "Connection Error",
-                    description: "Failed to parse notes. Request timed out or AI service unavailable.",
+                    description: message,
                     variant: "destructive",
                 });
             } finally {
                 setIsProcessing(false);
             }
         },
-        [isRegisteredPatient, selectedPatient?.id, toast],
+        [isRegisteredPatient, selectedPatient?.id, toast, tokens, setTokens, logout],
     );
 
     const dictateIntoNotes = (text: string) => {

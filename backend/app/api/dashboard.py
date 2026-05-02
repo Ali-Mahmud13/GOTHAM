@@ -1,13 +1,15 @@
 """Dashboard statistics API endpoint."""
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select, func
-from typing import Dict, List, Optional
+from typing import Dict
 from datetime import datetime, timedelta, date
 
 from app.db.session import get_session
 from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
 from app.models.auth import AuthUser
+from app.core.security import get_current_user_compat, assert_patient_access
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -15,7 +17,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 @router.get("/risk-trends")
 def get_risk_trends(
     days: int = 7,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ) -> Dict:
     """Get daily high/medium risk counts based on visit activity over the last N days."""
@@ -24,20 +26,18 @@ def get_risk_trends(
     start_date = today - timedelta(days=window_days - 1)
     start_dt = datetime.combine(start_date, datetime.min.time())
 
-    user = None
-    if user_email:
-        user = session.exec(
-            select(AuthUser).where(AuthUser.email == user_email)
-        ).first()
-
     query = (
         select(Visit.visit_date, Patient.id, Patient.risk_level)
         .join(Patient, Visit.patient_id == Patient.id)
         .where(Visit.visit_date >= start_dt)
     )
 
-    if user and user.role == "doctor":
+    if user.role == "doctor":
         query = query.where(Patient.doctor_id == user.id)
+    elif user.role == "patient" and user.patient_id:
+        query = query.where(Patient.id == user.patient_id)
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unsupported role for this resource")
 
     rows = session.exec(query).all()
 
@@ -70,20 +70,15 @@ def get_risk_trends(
 
 @router.get("/stats")
 def get_dashboard_stats(
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    session: Session = Depends(get_session)
+    response: Response,
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
 ) -> Dict:
-    """Get dashboard statistics based on user authentication."""
-    
-    # Get authenticated user
-    user = None
-    if user_email:
-        user = session.exec(
-            select(AuthUser).where(AuthUser.email == user_email)
-        ).first()
-    
+    """Get dashboard statistics for the authenticated user (patient or doctor)."""
+    response.headers["Cache-Control"] = "private, max-age=30"
+
     # For patients, return only their own data
-    if user and user.role == "patient":
+    if user.role == "patient":
         if user.patient_id:
             patient = session.exec(
                 select(Patient).where(Patient.id == user.patient_id)
@@ -133,8 +128,8 @@ def get_dashboard_stats(
             "error": "No patient record found"
         }
     
-    # For doctors (and unauthenticated access), return statistics filtered by doctor
-    if user and user.role == "doctor":
+    # For doctors, return statistics filtered by doctor
+    if user.role == "doctor":
         # Filter patients by this doctor's ID
         total_patients = session.exec(
             select(func.count(Patient.id)).where(Patient.doctor_id == user.id)
@@ -215,51 +210,11 @@ def get_dashboard_stats(
             .limit(5)
         ).all()
     else:
-        # For unauthenticated users, return all patients (legacy behavior)
-        total_patients = session.exec(select(func.count(Patient.id))).one()
-        
-        high_risk_count = session.exec(
-            select(func.count(Patient.id)).where(Patient.risk_level == "high")
-        ).one()
-        
-        medium_risk_count = session.exec(
-            select(func.count(Patient.id)).where(Patient.risk_level == "medium")
-        ).one()
-        
-        low_risk_count = session.exec(
-            select(func.count(Patient.id)).where(Patient.risk_level == "low")
-        ).one()
-        
-        total_visits = session.exec(select(func.count(Visit.id))).one()
-        
-        week_ago = datetime.utcnow() - timedelta(days=7)
-        gdm_this_week = session.exec(
-            select(func.count(GDMAssessment.id)).where(GDMAssessment.created_at >= week_ago)
-        ).one()
-        anemia_this_week = session.exec(
-            select(func.count(AnemiaAssessment.id)).where(AnemiaAssessment.created_at >= week_ago)
-        ).one()
-        fetal_this_week = session.exec(
-            select(func.count(FetalHealthAssessment.id)).where(FetalHealthAssessment.created_at >= week_ago)
-        ).one()
-        assessments_this_week = gdm_this_week + anemia_this_week + fetal_this_week
-        
-        high_risk_patients = session.exec(
-            select(Patient)
-            .where(Patient.risk_level == "high")
-            .order_by(Patient.updated_at.desc())
-            .limit(5)
-        ).all()
-        
-        recent_patients = session.exec(
-            select(Patient)
-            .order_by(Patient.updated_at.desc())
-            .limit(5)
-        ).all()
-    
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unsupported role for dashboard stats")
+
     return {
-        "user_role": "doctor" if user and user.role == "doctor" else "unknown",
-        "doctor_name": user.full_name if user and user.role == "doctor" else None,
+        "user_role": "doctor",
+        "doctor_name": user.full_name,
         "total_patients": total_patients or 0,
         "high_risk_count": high_risk_count or 0,
         "medium_risk_count": medium_risk_count or 0,
@@ -293,68 +248,57 @@ def get_dashboard_stats(
 @router.get("/patient/{patient_identifier}/visits")
 def get_patient_visits(
     patient_identifier: str,
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    requester: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ) -> Dict:
     """Get visit count and recent visits for a patient with full assessment data."""
 
-    requester = None
-    if user_email:
-        requester = session.exec(select(AuthUser).where(AuthUser.email == user_email)).first()
-
-    # Get patient
     patient = session.exec(
         select(Patient).where(Patient.patient_identifier == patient_identifier)
     ).first()
-    
+
     if not patient:
-        return {"total_visits": 0, "recent_visits": []}
-    
-    # Total visits
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    assert_patient_access(requester, patient)
+
     total_visits = session.exec(
         select(func.count(Visit.id)).where(Visit.patient_id == patient.id)
     ).one()
-    
-    # Recent visits with full assessment data
+
     visits = session.exec(
         select(Visit)
         .where(Visit.patient_id == patient.id)
+        .options(
+            selectinload(Visit.anemia_assessment),
+            selectinload(Visit.fetal_health_assessment),
+            selectinload(Visit.gdm_assessment),
+            selectinload(Visit.ultrasound_images),
+        )
         .order_by(Visit.visit_date.desc())
         .limit(50)
     ).all()
-    
+
     visit_data = []
 
     for visit in visits:
-        # Get anemia assessment data
-        anemia = session.exec(
-            select(AnemiaAssessment).where(AnemiaAssessment.visit_id == visit.id)
-        ).first()
-        
-        # Get fetal health assessment data
-        fetal = session.exec(
-            select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == visit.id)
-        ).first()
-        
-        # Get GDM assessment data
-        gdm = session.exec(
-            select(GDMAssessment).where(GDMAssessment.visit_id == visit.id)
-        ).first()
+        anemia = visit.anemia_assessment
+        fetal = visit.fetal_health_assessment
+        gdm = visit.gdm_assessment
+        ultrasound_images = sorted(
+            visit.ultrasound_images or [],
+            key=lambda im: im.created_at or datetime.min,
+            reverse=True,
+        )
 
-        ultrasound_images = session.exec(
-            select(UltrasoundImage)
-            .where(UltrasoundImage.visit_id == visit.id)
-            .order_by(UltrasoundImage.created_at.desc())
-        ).all()
-        
         source = "unknown"
         if visit.recorded_by_role == "patient" or visit.visit_type == "patient_notes":
             source = "patient"
         elif visit.recorded_by_role == "doctor" or visit.visit_type == "doctor_notes":
             current_doctor_id = None
-            if requester and requester.role == "doctor":
+            if requester.role == "doctor":
                 current_doctor_id = requester.id
-            elif requester and requester.role == "patient":
+            elif requester.role == "patient":
                 current_doctor_id = patient.doctor_id
             else:
                 current_doctor_id = patient.doctor_id

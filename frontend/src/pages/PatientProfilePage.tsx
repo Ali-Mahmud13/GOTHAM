@@ -16,8 +16,7 @@ import { cn } from "@/lib/utils";
 import { insertAtCaret } from "@/lib/text";
 import type { TranscriptionLanguage } from "@/lib/transcribe";
 import ReactMarkdown from "react-markdown";
-
-const API_URL = "http://localhost:8000";
+import { apiFetch } from "@/lib/apiClient";
 
 interface PatientProfile {
   id: number;
@@ -96,7 +95,7 @@ const PatientProfilePage = () => {
   const { patientId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, tokens, setTokens, logout } = useAuth();
   const [patient, setPatient] = useState<PatientProfile | null>(null);
   const [medicalData, setMedicalData] = useState<PatientMedical | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,9 +139,13 @@ const PatientProfilePage = () => {
 
   useEffect(() => {
     if (user?.email && patientId) {
-      fetch(`${API_URL}/appointments/my-registered-patients`, {
-        headers: { 'X-User-Email': user.email },
-      })
+      apiFetch(
+        `/appointments/my-registered-patients`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      )
         .then(r => r.ok ? r.json() : [])
         .then((list: { patient_auth_id: number; patient_identifier: string }[]) => {
           const match = list.find(p => p.patient_identifier === patientId);
@@ -150,16 +153,19 @@ const PatientProfilePage = () => {
         })
         .catch(() => {});
     }
-  }, [user?.email, patientId]);
+  }, [user?.email, patientId, tokens, setTokens, logout]);
 
   const handleUnregister = async () => {
-    if (!registeredPatientAuthId || !user?.email) return;
+    if (!registeredPatientAuthId) return;
     setIsUnregistering(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/unregister/${registeredPatientAuthId}`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user.email },
-      });
+      const res = await apiFetch(
+        `/appointments/unregister/${registeredPatientAuthId}`,
+        { method: "DELETE" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setRegisteredPatientAuthId(null);
         setShowUnregisterConfirm(false);
@@ -202,15 +208,17 @@ const PatientProfilePage = () => {
 
     setIsSavingNotes(true);
     try {
-      const response = await fetch(`${API_URL}/api/patients/${patientId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
+      const response = await apiFetch(
+        `/api/patients/${patientId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clinical_notes: editedNotes }),
         },
-        body: JSON.stringify({
-          clinical_notes: editedNotes,
-        }),
-      });
+        tokens,
+        setTokens,
+        logout,
+      );
 
       if (!response.ok) {
         throw new Error('Failed to save clinical notes');
@@ -235,7 +243,13 @@ const PatientProfilePage = () => {
   const fetchPatientData = async () => {
     try {
       // Fetch patient data (merged schema - single endpoint)
-      const profileResponse = await fetch(`${API_URL}/api/patients/${patientId}`);
+      const profileResponse = await apiFetch(
+        `/api/patients/${patientId}`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (profileResponse.status === 404) {
         setPatient(null);
         setError("not_found");
@@ -249,8 +263,13 @@ const PatientProfilePage = () => {
       setMedicalData(profileData);  // Medical data is in the same object now
 
       // Fetch visit statistics
-      const visitHeaders: HeadersInit = user?.email ? { 'X-User-Email': user.email } : {};
-      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientId}/visits`, { headers: visitHeaders });
+      const visitsResponse = await apiFetch(
+        `/api/dashboard/patient/${patientId}/visits`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (visitsResponse.ok) {
         const visitsData: VisitStatsResponse = await visitsResponse.json();
         setVisitStats(visitsData);
@@ -278,12 +297,14 @@ const PatientProfilePage = () => {
   };
 
   const handleDeleteUltrasound = async (imageId: number) => {
-    if (!user?.email) return;
     try {
-      const res = await fetch(`${API_URL}/api/ultrasound/${imageId}`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user.email },
-      });
+      const res = await apiFetch(
+        `/api/ultrasound/${imageId}`,
+        { method: "DELETE" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!res.ok) {
         const errorPayload = await res.json();
         throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');

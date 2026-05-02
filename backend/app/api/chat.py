@@ -1,6 +1,6 @@
 """Chat API endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from uuid import uuid4
@@ -14,6 +14,9 @@ from app.services.assessment_results import (
 )
 import inngest
 import logging
+
+from app.core.security import get_current_user_compat
+from app.models.auth import AuthUser
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +51,7 @@ class AssessmentResponse(BaseModel):
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user_compat)):
     """
     Process a chat message through the medical agent.
     
@@ -63,6 +66,8 @@ async def chat(request: ChatRequest):
         
         # Get agent service and process message
         agent_service = get_agent_service()
+        # TODO: thread user_id into agent memory/persistence if needed.
+        _ = user
         result = await agent_service.process_message(
             message=request.message,
             session_id=request.session_id
@@ -91,7 +96,7 @@ async def chat(request: ChatRequest):
 
 
 @router.post("/assess", response_model=AssessmentResponse)
-async def assess_risk(request: AssessmentRequest):
+async def assess_risk(request: AssessmentRequest, user: AuthUser = Depends(get_current_user_compat)):
     """
     Trigger a background risk assessment.
     
@@ -114,6 +119,7 @@ async def assess_risk(request: AssessmentRequest):
             f"for patient {request.patient_id}"
         )
         
+        _ = user
         # Mark as processing
         mark_assessment_processing(assessment_id)
 
@@ -163,7 +169,7 @@ async def assess_risk(request: AssessmentRequest):
 
 
 @router.get("/assess/{assessment_id}")
-async def get_assessment_status(assessment_id: str) -> Dict[str, Any]:
+async def get_assessment_status(assessment_id: str, user: AuthUser = Depends(get_current_user_compat)) -> Dict[str, Any]:
     """
     Get the status and result of a background assessment.
     
@@ -173,6 +179,7 @@ async def get_assessment_status(assessment_id: str) -> Dict[str, Any]:
     Returns:
         Status and result (if completed)
     """
+    _ = user
     result = get_assessment_result(assessment_id)
     
     if result is None:
