@@ -10,6 +10,7 @@ import inngest.fast_api
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import sys
 from sqlalchemy import inspect
 
 from app.core.config import setup_logging
@@ -157,12 +158,13 @@ async def ensure_local_cors_headers(request: Request, call_next):
 
 # Register Inngest — streaming sends keepalive bytes so long-running
 # step handlers (ML inference, LLM calls) don't hit idle-connection resets.
-inngest.fast_api.serve(
-    app,
-    inngest_client,
-    ALL_FUNCTIONS,
-    streaming=inngest.Streaming.FORCE,
-)
+if "pytest" not in sys.modules:
+    inngest.fast_api.serve(
+        app,
+        inngest_client,
+        ALL_FUNCTIONS,
+        streaming=inngest.Streaming.FORCE,
+    )
 
 # Register API routes
 app.include_router(auth_router)

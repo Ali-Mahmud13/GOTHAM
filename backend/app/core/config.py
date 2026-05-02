@@ -9,13 +9,24 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database Settings
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError(
-        "DATABASE_URL environment variable is not set. "
-        "Please create a .env file in the backend/ directory with your Neon connection string. "
-        "Example: DATABASE_URL=postgresql://user:pass@host/database"
-    )
+try:
+    import sys
+
+    _is_pytest = "pytest" in sys.modules
+except Exception:
+    _is_pytest = False
+
+if _is_pytest:
+    # Tests should not depend on an external Postgres/Neon URL from a developer .env.
+    DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///./test.db")
+else:
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    if not DATABASE_URL:
+        raise ValueError(
+            "DATABASE_URL environment variable is not set. "
+            "Please create a .env file in the backend/ directory with your Neon connection string. "
+            "Example: DATABASE_URL=postgresql://user:pass@host/database"
+        )
 
 # LLM Settings
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Kept for backward compatibility
@@ -80,6 +91,40 @@ CLOUDINARY_PUBLIC_URLS = os.getenv("CLOUDINARY_PUBLIC_URLS", "true").lower() == 
 
 # App Settings
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+# JWT (required in production; dev falls back when DEBUG=true)
+_JWT_FROM_ENV = os.getenv("JWT_SECRET", "").strip()
+if _JWT_FROM_ENV:
+    JWT_SECRET = _JWT_FROM_ENV
+elif DEBUG:
+    JWT_SECRET = "dev-insecure-jwt-secret-change-me"
+else:
+    # Test runner: keep import-time config from crashing collection.
+    try:
+        import sys
+
+        _is_pytest = "pytest" in sys.modules
+    except Exception:
+        _is_pytest = False
+    if _is_pytest:
+        JWT_SECRET = "test-jwt-secret"
+    else:
+        raise ValueError(
+            "JWT_SECRET environment variable must be set when DEBUG is false. "
+            "Generate a long random string (e.g. openssl rand -hex 32)."
+        )
+
+JWT_ACCESS_MINUTES = int(os.getenv("JWT_ACCESS_MINUTES", "1440"))  # default 24h
+JWT_REFRESH_DAYS = int(os.getenv("JWT_REFRESH_DAYS", "30"))
+
+ALLOW_LEGACY_PASSWORD_HASH = os.getenv("ALLOW_LEGACY_PASSWORD_HASH", "true").lower() == "true"
+ALLOW_LEGACY_HEADER_AUTH = os.getenv("ALLOW_LEGACY_HEADER_AUTH", "true").lower() == "true"
+
+# CORS (comma-separated origins; empty = use localhost defaults in main.py)
+CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+
+# Rate limiting (slowapi)
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent.parent

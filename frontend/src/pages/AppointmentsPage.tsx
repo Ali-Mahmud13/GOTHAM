@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Navbar } from '@/components/Navbar';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { useAuth } from '@/context/AuthContext';
+import { apiFetch } from '@/lib/apiClient';
 
 const API_URL = 'http://localhost:8000';
 
@@ -77,7 +78,7 @@ function getRescheduleFormError(form: RescheduleForm): string | null {
 }
 
 export const AppointmentsPage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
   const navigate = useNavigate();
   const isDoctor = user?.role === 'doctor';
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -106,9 +107,13 @@ export const AppointmentsPage = () => {
 
   const loadRegisteredDoctor = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/my-doctor`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/my-doctor`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) setRegisteredDoctor(await res.json());
       else setRegisteredDoctor(null);
     } catch { setRegisteredDoctor(null); }
@@ -117,10 +122,13 @@ export const AppointmentsPage = () => {
   const handleUnregister = async () => {
     setUnregistering(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/unregister`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/unregister`,
+        { method: 'DELETE' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) { setRegisteredDoctor(null); setShowUnregisterConfirm(false); }
     } catch { } finally { setUnregistering(false); }
   };
@@ -129,9 +137,13 @@ export const AppointmentsPage = () => {
     setMessage(null);
     try {
       const endpoint = filter === 'upcoming' ? '/appointments/upcoming' : '/appointments/my';
-      const res = await fetch(`${API_URL}${endpoint}`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        endpoint,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: Appointment[] = await res.json();
         setAppointments(data);
@@ -153,10 +165,13 @@ export const AppointmentsPage = () => {
     setActionLoading(id);
     setMessage(null);
     try {
-      const res = await fetch(`${API_URL}/appointments/${id}/cancel`, {
-        method: 'PUT',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/${id}/cancel`,
+        { method: 'PUT' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setMessage({ type: 'success', text: 'Appointment cancelled.' });
         setCancelTarget(null);
@@ -190,11 +205,13 @@ export const AppointmentsPage = () => {
     setMessage(null);
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${API_URL}/appointments/${rescheduleFor.id}/reschedule`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-User-Email': user!.email },
-        body: JSON.stringify({ ...rescheduleForm, timezone: tz }),
-      });
+      const res = await apiFetch(
+        `/appointments/${rescheduleFor.id}/reschedule`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...rescheduleForm, timezone: tz }) },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setMessage({ type: 'success', text: 'Appointment rescheduled successfully.' });
         setRescheduleFor(null);

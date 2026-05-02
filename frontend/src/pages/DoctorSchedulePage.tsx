@@ -5,6 +5,7 @@ import { Navbar } from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/context/AuthContext';
+import { apiFetch } from '@/lib/apiClient';
 
 const API_URL = 'http://localhost:8000';
 
@@ -62,7 +63,7 @@ function addDaysISO(base: string, days: number): string {
 }
 
 export const DoctorSchedulePage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState<'weekly' | 'exceptions'>('weekly');
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
@@ -93,9 +94,13 @@ export const DoctorSchedulePage = () => {
 
   const fetchAvailability = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/availability/my`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/availability/my`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: AvailabilitySlot[] = await res.json();
         setSlots(data.length > 0 ? data : []);
@@ -115,9 +120,12 @@ export const DoctorSchedulePage = () => {
     try {
       const from = todayLocalISO();
       const to = addDaysISO(from, 400);
-      const res = await fetch(
-        `${API_URL}/appointments/exceptions/my?date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}`,
-        { headers: { 'X-User-Email': user!.email } },
+      const res = await apiFetch(
+        `/appointments/exceptions/my?date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
       );
       if (res.ok) {
         const data: ScheduleException[] = await res.json();
@@ -161,11 +169,17 @@ export const DoctorSchedulePage = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/appointments/availability`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Email': user!.email },
-        body: JSON.stringify({ slots }),
-      });
+      const res = await apiFetch(
+        `/appointments/availability`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slots }),
+        },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data = await res.json();
         setSlots(data);
@@ -209,11 +223,17 @@ export const DoctorSchedulePage = () => {
         body.end_time = excForm.end_time;
         body.slot_duration_minutes = excForm.slot_duration_minutes;
       }
-      const res = await fetch(`${API_URL}/appointments/exceptions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Email': user!.email },
-        body: JSON.stringify(body),
-      });
+      const res = await apiFetch(
+        `/appointments/exceptions`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setMessage({ type: 'success', text: 'Exception saved.' });
         setExcForm(prev => ({ ...prev, exception_date: '' }));
@@ -240,10 +260,13 @@ export const DoctorSchedulePage = () => {
 
   const deleteException = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/appointments/exceptions/${id}`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/exceptions/${id}`,
+        { method: 'DELETE' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setMessage({ type: 'success', text: 'Exception removed.' });
         fetchExceptions();

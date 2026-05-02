@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, ApiError } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import ReactMarkdown from "react-markdown";
@@ -23,7 +23,7 @@ interface Message {
 export const ChatPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, tokens, setTokens, logout } = useAuth();
   const returnTo = searchParams.get("returnTo") || "/dashboard";
   const { toast } = useToast();
   const [messages, setMessages] = useState<Message[]>([
@@ -95,7 +95,19 @@ export const ChatPage = () => {
     const poll = async () => {
       try {
         attempts++;
-        const status = await api.getAssessmentStatus(assessmentId);
+        const res = await apiFetch(
+          `/api/chat/assess/${assessmentId}`,
+          { method: "GET" },
+          tokens,
+          setTokens,
+          logout,
+        );
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new ApiError(text || `API Error: ${res.status} ${res.statusText}`, res.status);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const status: any = await res.json();
 
         if (status.status === "completed" || status.status === "failed") {
           setProgressData((prev) => {
@@ -196,11 +208,27 @@ export const ChatPage = () => {
 
       if (isAssessmentRequest) {
         // Use background job for assessments
-        const response = await api.assess({
-          message: currentInput,
-          session_id: sessionId,
-          patient_id: currentInput.match(/patient\s+([A-Z0-9-]+)/i)?.[1] || undefined,
-        });
+        const res = await apiFetch(
+          `/api/chat/assess`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: currentInput,
+              session_id: sessionId,
+              patient_id: currentInput.match(/patient\s+([A-Z0-9-]+)/i)?.[1] || undefined,
+            }),
+          },
+          tokens,
+          setTokens,
+          logout,
+        );
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new ApiError(text || `API Error: ${res.status} ${res.statusText}`, res.status);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response: any = await res.json();
 
         const processingMessage: Message = {
           id: response.assessment_id,
@@ -228,10 +256,26 @@ export const ChatPage = () => {
         pollAssessmentStatus(response.assessment_id);
       } else {
         // Use synchronous chat for regular queries
-        const response = await api.chat({
-          message: currentInput,
-          session_id: sessionId,
-        });
+        const res = await apiFetch(
+          `/api/chat`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: currentInput,
+              session_id: sessionId,
+            }),
+          },
+          tokens,
+          setTokens,
+          logout,
+        );
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new ApiError(text || `API Error: ${res.status} ${res.statusText}`, res.status);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response: any = await res.json();
 
         const aiResponse: Message = {
           id: (Date.now() + 1).toString(),

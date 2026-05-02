@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-
-const API_URL = "http://localhost:8000";
+import { apiFetch } from "@/lib/apiClient";
 
 interface RegistrationRequestResult {
   id: number;
@@ -26,7 +25,7 @@ interface VisitRow {
 
 export const PatientNotesPage = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
   const { toast } = useToast();
 
   const patientIdentifier = user?.patient_info?.patient_identifier;
@@ -47,9 +46,13 @@ export const PatientNotesPage = () => {
 
       let resolvedDoctorName: string | null = null;
       try {
-        const myDoctorRes = await fetch(`${API_URL}/appointments/my-doctor`, {
-          headers: { "X-User-Email": user.email },
-        });
+        const myDoctorRes = await apiFetch(
+          `/appointments/my-doctor`,
+          { method: "GET" },
+          tokens,
+          setTokens,
+          logout,
+        );
         if (myDoctorRes.ok) {
           const doctor = await myDoctorRes.json();
           resolvedDoctorName = doctor?.full_name || null;
@@ -63,9 +66,13 @@ export const PatientNotesPage = () => {
 
       if (!resolvedDoctorName) {
         try {
-          const reqRes = await fetch(`${API_URL}/appointments/my-registration-requests`, {
-            headers: { "X-User-Email": user.email },
-          });
+          const reqRes = await apiFetch(
+            `/appointments/my-registration-requests`,
+            { method: "GET" },
+            tokens,
+            setTokens,
+            logout,
+          );
           if (reqRes.ok) {
             const reqs: RegistrationRequestResult[] = await reqRes.json();
             const pending = reqs.find((r) => r.status === "pending");
@@ -79,9 +86,13 @@ export const PatientNotesPage = () => {
       }
 
       try {
-        const visitsRes = await fetch(`${API_URL}/api/dashboard/patient/${patientIdentifier}/visits`, {
-          headers: { 'X-User-Email': user.email },
-        });
+        const visitsRes = await apiFetch(
+          `/api/dashboard/patient/${patientIdentifier}/visits`,
+          { method: "GET" },
+          tokens,
+          setTokens,
+          logout,
+        );
         if (visitsRes.ok) {
           const payload = await visitsRes.json();
           const rows: VisitRow[] = payload?.recent_visits || [];
@@ -93,7 +104,7 @@ export const PatientNotesPage = () => {
     };
 
     loadState();
-  }, [isAuthenticated, user, navigate, patientIdentifier]);
+  }, [isAuthenticated, user, navigate, patientIdentifier, tokens, setTokens, logout]);
 
   const isRegistered = Boolean(doctorName);
 
@@ -108,7 +119,7 @@ export const PatientNotesPage = () => {
   }, [doctorName, pendingDoctor]);
 
   const saveNote = async () => {
-    if (!patientIdentifier || !user?.email || !note.trim()) return;
+    if (!patientIdentifier || !note.trim()) return;
 
     if (isRegistered) {
       toast({
@@ -121,18 +132,21 @@ export const PatientNotesPage = () => {
 
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/visits`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-User-Email": user.email,
+      const res = await apiFetch(
+        `/api/visits`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patient_id: patientIdentifier,
+            visit_type: "patient_notes",
+            notes: note.trim(),
+          }),
         },
-        body: JSON.stringify({
-          patient_id: patientIdentifier,
-          visit_type: "patient_notes",
-          notes: note.trim(),
-        }),
-      });
+        tokens,
+        setTokens,
+        logout,
+      );
 
       const payload = await res.json();
       if (!res.ok || !payload.success) {

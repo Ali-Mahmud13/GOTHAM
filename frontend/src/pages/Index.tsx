@@ -15,6 +15,7 @@ import { RiskTrendChart } from "@/components/RiskTrendChart";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
+import { apiFetch } from "@/lib/apiClient";
 
 const API_URL = "http://localhost:8000";
 
@@ -72,7 +73,7 @@ const formatApptDate = (d: string) =>
 
 const Index = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, tokens, setTokens, logout } = useAuth();
   const [showChat, setShowChat] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -95,12 +96,13 @@ const Index = () => {
 
   const fetchDashboardStats = async () => {
     try {
-      const headers: HeadersInit = {};
-      if (user?.email) {
-        headers['X-User-Email'] = user.email;
-      }
-      
-      const response = await fetch(`${API_URL}/api/dashboard/stats`, { headers });
+      const response = await apiFetch(
+        `/api/dashboard/stats`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (response.ok) {
         const data = await response.json();
         setStats(data);
@@ -114,9 +116,13 @@ const Index = () => {
 
   const fetchUpcomingAppointments = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/upcoming`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/upcoming`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: Appointment[] = await res.json();
         setAppointments(data);
@@ -130,9 +136,13 @@ const Index = () => {
 
   const fetchNewBookingNotifications = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/new-booking-notifications`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/new-booking-notifications`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data = await res.json();
         setNewBookingCount(data.count || 0);
@@ -144,10 +154,13 @@ const Index = () => {
 
   const dismissNewBookingNotifications = async () => {
     try {
-      await fetch(`${API_URL}/appointments/dismiss-new-booking-notifications`, {
-        method: 'PUT',
-        headers: { 'X-User-Email': user!.email },
-      });
+      await apiFetch(
+        `/appointments/dismiss-new-booking-notifications`,
+        { method: "PUT" },
+        tokens,
+        setTokens,
+        logout,
+      );
       setNewBookingCount(0);
     } catch {
       // ignore
@@ -156,9 +169,13 @@ const Index = () => {
 
   const fetchRegistrationRequests = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/registration-requests`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/registration-requests`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: RegistrationRequest[] = await res.json();
         setRegRequests(data);
@@ -174,10 +191,13 @@ const Index = () => {
     if (regRequestActionId) return;
     setRegRequestActionId(id);
     try {
-      const res = await fetch(`${API_URL}/appointments/registration-requests/${id}/approve`, {
-        method: 'PUT',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/registration-requests/${id}/approve`,
+        { method: "PUT" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         toast({ variant: "destructive", title: "Approve failed", description: err.detail || "Could not approve request." });
@@ -197,10 +217,13 @@ const Index = () => {
     if (regRequestActionId) return;
     setRegRequestActionId(id);
     try {
-      const res = await fetch(`${API_URL}/appointments/registration-requests/${id}/decline`, {
-        method: 'PUT',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/registration-requests/${id}/decline`,
+        { method: "PUT" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         toast({ variant: "destructive", title: "Decline failed", description: err.detail || "Could not decline request." });

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "@/lib/apiClient";
 
 const API_URL = "http://localhost:8000";
 
@@ -38,7 +39,7 @@ interface CancelNotif {
 }
 
 export const PatientNavbar = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, tokens, setTokens } = useAuth();
   const navigate = useNavigate();
   const [regResults, setRegResults] = useState<RegResult[]>([]);
   const [seenResultIds, setSeenResultIds] = useState<Set<number>>(new Set());
@@ -67,9 +68,13 @@ export const PatientNavbar = () => {
 
   const fetchRegResults = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/my-registration-requests`, {
-        headers: { "X-User-Email": user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/my-registration-requests`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: RegResult[] = await res.json();
         setRegResults(data);
@@ -81,9 +86,13 @@ export const PatientNavbar = () => {
 
   const fetchRescheduleNotifs = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/reschedule-notifications`, {
-        headers: { "X-User-Email": user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/reschedule-notifications`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data = await res.json();
         setRescheduleNotifs(data);
@@ -93,9 +102,13 @@ export const PatientNavbar = () => {
 
   const fetchCancelNotifs = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/cancel-notifications`, {
-        headers: { "X-User-Email": user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/cancel-notifications`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data = await res.json();
         setCancelNotifs(data);
@@ -118,19 +131,25 @@ export const PatientNavbar = () => {
       // Dismiss reschedule and cancel notifications server-side when closing
       if (rescheduleNotifs.length > 0) {
         try {
-          await fetch(`${API_URL}/appointments/dismiss-reschedule-notifications`, {
-            method: 'PUT',
-            headers: { "X-User-Email": user!.email },
-          });
+          await apiFetch(
+            `/appointments/dismiss-reschedule-notifications`,
+            { method: "PUT" },
+            tokens,
+            setTokens,
+            logout,
+          );
           setRescheduleNotifs([]);
         } catch { }
       }
       if (cancelNotifs.length > 0) {
         try {
-          await fetch(`${API_URL}/appointments/dismiss-cancel-notifications`, {
-            method: 'PUT',
-            headers: { "X-User-Email": user!.email },
-          });
+          await apiFetch(
+            `/appointments/dismiss-cancel-notifications`,
+            { method: "PUT" },
+            tokens,
+            setTokens,
+            logout,
+          );
           setCancelNotifs([]);
         } catch { }
       }
