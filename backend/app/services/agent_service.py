@@ -3,6 +3,7 @@
 from typing import Dict, Any, Optional
 from uuid import uuid4
 from langchain_core.messages import HumanMessage, AIMessage
+from app.core.sanitize import safe_for_prompt
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,8 @@ class AgentService:
         
         config = {"configurable": {"thread_id": session_id}}
         
-        state: Dict[str, Any] = {"messages": [HumanMessage(content=message)]}
+        safe_message = safe_for_prompt(message)
+        state: Dict[str, Any] = {"messages": [HumanMessage(content=safe_message)]}
         
         try:
             logger.info(f"Processing message: '{message[:100]}...'")
@@ -87,19 +89,12 @@ class AgentService:
         return self.graph
 
 
-# Singleton instance
-_agent_service_instance = None
-
-
 def get_agent_service() -> AgentService:
     """
-    Get the singleton agent service instance.
+    Get the agent service instance.
     
     Returns:
         AgentService instance
     """
-    global _agent_service_instance
-    if _agent_service_instance is None:
-        _agent_service_instance = AgentService()
-    return _agent_service_instance
+    return AgentService()
 

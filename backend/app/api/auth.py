@@ -5,6 +5,8 @@ from sqlmodel import Session, select
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
+from fastapi import Request
+from app.core.rate_limit import limiter
 
 from app.db import get_session
 from app.models.auth import AuthUser
@@ -114,9 +116,10 @@ def _user_payload(auth_user: AuthUser, session: Session) -> dict:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(request: LoginRequest, session: Session = Depends(get_session)):
+@limiter.limit("5/minute")
+def login(request: Request, payload: LoginRequest, session: Session = Depends(get_session)):
     """Authenticate user with email and password."""
-    statement = select(AuthUser).where(AuthUser.email == request.email.lower())
+    statement = select(AuthUser).where(AuthUser.email == payload.email.lower())
     auth_user = session.exec(statement).first()
 
     if not auth_user:
@@ -125,7 +128,7 @@ def login(request: LoginRequest, session: Session = Depends(get_session)):
             detail="Invalid email or password",
         )
 
-    if not verify_stored_password(request.password, auth_user.password_hash):
+    if not verify_stored_password(payload.password, auth_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -139,7 +142,7 @@ def login(request: LoginRequest, session: Session = Depends(get_session)):
 
     # Upgrade legacy SHA-256 hash to bcrypt on successful login
     if is_legacy_sha256_hash(auth_user.password_hash):
-        auth_user.password_hash = hash_password(request.password)
+        auth_user.password_hash = hash_password(payload.password)
         session.add(auth_user)
 
     auth_user.last_login = datetime.utcnow()
@@ -160,10 +163,11 @@ def login(request: LoginRequest, session: Session = Depends(get_session)):
 
 
 @router.post("/signup", response_model=LoginResponse)
-def signup(request: SignupRequest, session: Session = Depends(get_session)):
+@limiter.limit("5/minute")
+def signup(request: Request, payload: SignupRequest, session: Session = Depends(get_session)):
     """Register a new user account."""
     existing_user = session.exec(
-        select(AuthUser).where(AuthUser.email == request.email.lower())
+        select(AuthUser).where(AuthUser.email == payload.email.lower())
     ).first()
 
     if existing_user:
@@ -173,10 +177,10 @@ def signup(request: SignupRequest, session: Session = Depends(get_session)):
         )
 
     new_user = AuthUser(
-        email=request.email.lower(),
-        full_name=request.full_name,
-        password_hash=hash_password(request.password),
-        role=request.role,
+        email=payload.email.lower(),
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
         is_active=True,
     )
 
@@ -185,11 +189,11 @@ def signup(request: SignupRequest, session: Session = Depends(get_session)):
     session.refresh(new_user)
 
     patient_info = None
-    if request.role == "patient":
+    if payload.role == "patient":
         next_patient_id = _next_patient_identifier(session)
         new_patient = Patient(
             patient_identifier=next_patient_id,
-            name=request.full_name,
+            name=payload.full_name,
             age=0,
             contact_number="",
             risk_level="low",

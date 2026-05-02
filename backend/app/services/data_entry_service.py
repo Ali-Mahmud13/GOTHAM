@@ -113,7 +113,8 @@ class DataEntryService:
                 model=config.EXTRACTION_MODEL,
             )
             
-            prompt = self._build_extraction_prompt(notes, patient_id)
+            from app.core.sanitize import safe_for_prompt
+            prompt = self._build_extraction_prompt(safe_for_prompt(notes), patient_id)
             response = await asyncio.wait_for(
                 llm.ainvoke([HumanMessage(content=prompt)]),
                 timeout=25,
