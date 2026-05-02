@@ -35,7 +35,12 @@ python scripts/init_db.py
 
 ```bash
 cd backend
-INNGEST_DEV=1 uvicorn app.main:app --reload (for windows: $env:INNGEST_DEV=1; uvicorn app.main:app --reload)
+
+# Linux/macOS
+INNGEST_DEV=1 uvicorn app.main:app --reload --reload-exclude="*.pyc" --reload-exclude="*.pth" --reload-exclude="*.pt" --reload-exclude="__pycache__"
+
+# Windows (PowerShell)
+$env:INNGEST_DEV=1; uvicorn app.main:app --reload --reload-exclude="*.pyc" --reload-exclude="*.pth" --reload-exclude="*.pt" --reload-exclude="__pycache__"
 ```
 
 

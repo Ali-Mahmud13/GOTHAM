@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, XAxis, YAxis } from "recharts";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
-
-const API_URL = "http://localhost:8000";
+import { apiFetch } from "@/lib/apiClient";
 
 interface TrendPoint {
   day: string;
@@ -15,7 +14,7 @@ interface TrendPoint {
 const WINDOW_OPTIONS = [7, 14, 30] as const;
 
 export const RiskTrendChart = () => {
-  const { user } = useAuth();
+  const { user, tokens, setTokens, logout } = useAuth();
   const [selectedWindow, setSelectedWindow] = useState<(typeof WINDOW_OPTIONS)[number]>(30);
   const [data, setData] = useState<TrendPoint[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,12 +28,13 @@ export const RiskTrendChart = () => {
   const fetchTrendData = async (days: number) => {
     setLoading(true);
     try {
-      const headers: HeadersInit = {};
-      if (user?.email) {
-        headers["X-User-Email"] = user.email;
-      }
-
-      const response = await fetch(`${API_URL}/api/dashboard/risk-trends?days=${days}`, { headers });
+      const response = await apiFetch(
+        `/api/dashboard/risk-trends?days=${days}`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (response.ok) {
         const payload: { data?: TrendPoint[] } = await response.json();
         setData(payload.data || []);

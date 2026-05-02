@@ -14,6 +14,8 @@ import { RiskOverviewChart } from "@/components/RiskOverviewChart";
 import { RiskTrendChart } from "@/components/RiskTrendChart";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { toast } from "@/components/ui/use-toast";
+import { apiFetch } from "@/lib/apiClient";
 
 const API_URL = "http://localhost:8000";
 
@@ -71,32 +73,36 @@ const formatApptDate = (d: string) =>
 
 const Index = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, tokens, setTokens, logout } = useAuth();
   const [showChat, setShowChat] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [apptLoading, setApptLoading] = useState(true);
+  const [newBookingCount, setNewBookingCount] = useState(0);
   const [regRequests, setRegRequests] = useState<RegistrationRequest[]>([]);
   const [regRequestsLoading, setRegRequestsLoading] = useState(true);
+  const [regRequestActionId, setRegRequestActionId] = useState<number | null>(null);
 
   useEffect(() => {
     if (user?.email) {
       fetchDashboardStats();
       fetchUpcomingAppointments();
       fetchRegistrationRequests();
+      fetchNewBookingNotifications();
     }
   }, [user?.email]);
 
   const fetchDashboardStats = async () => {
     try {
-      const headers: HeadersInit = {};
-      if (user?.email) {
-        headers['X-User-Email'] = user.email;
-      }
-      
-      const response = await fetch(`${API_URL}/api/dashboard/stats`, { headers });
+      const response = await apiFetch(
+        `/api/dashboard/stats`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (response.ok) {
         const data = await response.json();
         setStats(data);
@@ -110,9 +116,13 @@ const Index = () => {
 
   const fetchUpcomingAppointments = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/upcoming`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/upcoming`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: Appointment[] = await res.json();
         setAppointments(data);
@@ -124,11 +134,48 @@ const Index = () => {
     }
   };
 
+  const fetchNewBookingNotifications = async () => {
+    try {
+      const res = await apiFetch(
+        `/appointments/new-booking-notifications`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setNewBookingCount(data.count || 0);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const dismissNewBookingNotifications = async () => {
+    try {
+      await apiFetch(
+        `/appointments/dismiss-new-booking-notifications`,
+        { method: "PUT" },
+        tokens,
+        setTokens,
+        logout,
+      );
+      setNewBookingCount(0);
+    } catch {
+      // ignore
+    }
+  };
+
   const fetchRegistrationRequests = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/registration-requests`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/registration-requests`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: RegistrationRequest[] = await res.json();
         setRegRequests(data);
@@ -141,20 +188,54 @@ const Index = () => {
   };
 
   const approveRequest = async (id: number) => {
-    await fetch(`${API_URL}/appointments/registration-requests/${id}/approve`, {
-      method: 'PUT',
-      headers: { 'X-User-Email': user!.email },
-    });
-    fetchRegistrationRequests();
-    fetchUpcomingAppointments();
+    if (regRequestActionId) return;
+    setRegRequestActionId(id);
+    try {
+      const res = await apiFetch(
+        `/appointments/registration-requests/${id}/approve`,
+        { method: "PUT" },
+        tokens,
+        setTokens,
+        logout,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ variant: "destructive", title: "Approve failed", description: err.detail || "Could not approve request." });
+        return;
+      }
+      fetchRegistrationRequests();
+      fetchUpcomingAppointments();
+      toast({ title: "Approved", description: "Registration request approved." });
+    } catch {
+      toast({ variant: "destructive", title: "Network error", description: "Could not approve request." });
+    } finally {
+      setRegRequestActionId(null);
+    }
   };
 
   const declineRequest = async (id: number) => {
-    await fetch(`${API_URL}/appointments/registration-requests/${id}/decline`, {
-      method: 'PUT',
-      headers: { 'X-User-Email': user!.email },
-    });
-    fetchRegistrationRequests();
+    if (regRequestActionId) return;
+    setRegRequestActionId(id);
+    try {
+      const res = await apiFetch(
+        `/appointments/registration-requests/${id}/decline`,
+        { method: "PUT" },
+        tokens,
+        setTokens,
+        logout,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ variant: "destructive", title: "Decline failed", description: err.detail || "Could not decline request." });
+        return;
+      }
+      fetchRegistrationRequests();
+      toast({ title: "Declined", description: "Registration request declined." });
+    } catch {
+      toast({ variant: "destructive", title: "Network error", description: "Could not decline request." });
+    } finally {
+      setRegRequestActionId(null);
+    }
   };
 
   return (
@@ -276,9 +357,21 @@ const Index = () => {
             {/* Summary Panels */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <SummaryPanel
-                title="Upcoming Appointments"
+                title={
+                  <span className="flex items-center gap-2">
+                    Upcoming Appointments
+                    {newBookingCount > 0 && (
+                      <span className="bg-medical-pink text-white text-xs px-2 py-0.5 rounded-full font-semibold">
+                        {newBookingCount}
+                      </span>
+                    )}
+                  </span>
+                }
                 gradient="blue"
-                onViewAll={() => navigate("/appointments")}
+                onViewAll={() => {
+                  dismissNewBookingNotifications();
+                  navigate("/appointments");
+                }}
               >
                 <div className="space-y-2">
                   {apptLoading ? (
@@ -390,12 +483,14 @@ const Index = () => {
                         <div className="flex gap-2">
                           <button
                             onClick={() => approveRequest(req.id)}
+                            disabled={regRequestActionId === req.id}
                             className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition-colors"
                           >
                             <UserCheck className="h-3 w-3" /> Approve
                           </button>
                           <button
                             onClick={() => declineRequest(req.id)}
+                            disabled={regRequestActionId === req.id}
                             className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-100 text-red-700 border border-red-200 text-xs font-semibold hover:bg-red-200 transition-colors"
                           >
                             <UserX className="h-3 w-3" /> Decline

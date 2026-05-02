@@ -5,9 +5,8 @@ Exact implementation matching the Colab notebook
 
 import numpy as np
 import pandas as pd
-import shap
 from pathlib import Path
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, Pool
 import asyncio
 import logging
 
@@ -45,21 +44,18 @@ class FetalHealthAgent:
         self.model = CatBoostClassifier()
         self.model.load_model(model_path)
         self.feature_names = FEATURES
-        self.explainer = shap.TreeExplainer(self.model)
         logger.info("Fetal Health Agent initialized successfully")
     
     def predict(self, input_data: dict):
         """Make prediction on input data"""
-        # Convert dict → numpy array (exact order as FEATURES)
         x = np.array([[input_data[feat] for feat in self.feature_names]])
         
-        # Get prediction and probabilities
-        prediction = self.model.predict(x)[0]
+        prediction = int(self.model.predict(x).flat[0])
         probabilities = self.model.predict_proba(x)[0]
         
         return {
-            "risk_level": int(prediction),
-            "risk_label": CLASS_LABELS[int(prediction)],
+            "risk_level": prediction,
+            "risk_label": CLASS_LABELS[prediction],
             "probabilities": {
                 "normal": float(probabilities[0]),
                 "suspect": float(probabilities[1]),
@@ -68,20 +64,24 @@ class FetalHealthAgent:
         }
     
     def explain(self, input_data: dict, top_n=10):
-        """Generate SHAP explanations for prediction"""
-        # Convert dict → numpy array
+        """Generate SHAP explanations using CatBoost's native implementation.
+
+        Uses ``get_feature_importance(type='ShapValues')`` which is computed
+        inside CatBoost's own C++ code — avoids the segfault that the external
+        ``shap.TreeExplainer`` triggers on Windows with CatBoost >=1.2.
+        """
         x = np.array([[input_data[feat] for feat in self.feature_names]])
-        
-        # Compute SHAP values
-        shap_values = self.explainer(x)
-        
-        # Get predicted class
-        predicted_class = int(self.model.predict(x)[0])
-        
-        # Extract SHAP values for the predicted class
-        values = shap_values.values[0, :, predicted_class - 1]  # -1 because CatBoost uses 0-indexed
-        
-        # Create feature importance dataframe
+        pool = Pool(x, feature_names=self.feature_names)
+
+        # shape: (n_samples, n_classes, n_features + 1)  — last col is base value
+        shap_matrix = self.model.get_feature_importance(pool, type='ShapValues')
+
+        predicted_class = int(self.model.predict(x).flat[0])
+        class_idx = predicted_class - 1  # CatBoost classes are 0-indexed internally
+
+        values = shap_matrix[0, class_idx, :-1]
+        base_value = float(shap_matrix[0, class_idx, -1])
+
         feature_imp = []
         for i, feat in enumerate(self.feature_names):
             feature_imp.append({
@@ -92,14 +92,13 @@ class FetalHealthAgent:
                 "impact_direction": "increases_risk" if values[i] > 0 else "decreases_risk" if values[i] < 0 else "neutral"
             })
         
-        # Sort by importance
         feature_imp.sort(key=lambda x: x["importance"], reverse=True)
         
         return {
             "predicted_class": predicted_class,
             "predicted_label": CLASS_LABELS[predicted_class],
             "top_features": feature_imp[:top_n],
-            "base_value": float(self.explainer.expected_value[predicted_class - 1])
+            "base_value": base_value
         }
 
 

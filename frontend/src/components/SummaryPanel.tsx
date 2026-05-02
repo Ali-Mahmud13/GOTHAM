@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 
 interface SummaryPanelProps {
-  title: string;
+  title: ReactNode;
   children: ReactNode;
   gradient?: "pink" | "blue" | "neutral";
   onViewAll?: () => void;

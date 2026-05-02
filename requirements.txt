@@ -25,6 +25,14 @@ groq==0.37.1
 openai==1.97.0
 tiktoken==0.9.0
 
+# Speech-to-Text (Voice Dictation)
+# Hybrid: Groq cloud (default, sub-second, free 7,200 audio sec/day) with
+# auto-fallback to local faster-whisper (private, unlimited, slower on CPU).
+# faster-whisper bundles PyAV (ffmpeg) so no system ffmpeg install is required.
+# Default local model `large-v3-turbo` (~1.5 GB) downloads on first use into
+# `~/.cache/huggingface`. See backend/app/core/config.py for tuning.
+faster-whisper==1.1.1
+
 # ML & Data Science
 scikit-learn==1.6.1
 pandas==2.2.3
@@ -69,6 +77,14 @@ python-multipart==0.0.26
 pydantic==2.11.7
 pydantic-settings==2.10.1
 email-validator==2.3.0
+
+# Auth & security
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+PyJWT==2.9.0
+slowapi==0.1.9
+bleach==6.1.0
+alembic==1.14.0
 
 # Image Processing
 pillow==10.4.0

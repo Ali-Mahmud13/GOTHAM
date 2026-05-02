@@ -21,7 +21,7 @@ class AgentService:
     async def process_message(
         self, 
         message: str, 
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a user message through the agent.
@@ -33,23 +33,19 @@ class AgentService:
         Returns:
             Dict containing response and session_id
         """
-        # Generate session ID if not provided
         if not session_id:
             session_id = str(uuid4())
             logger.info(f"Generated new session ID: {session_id}")
         else:
             logger.info(f"Using existing session ID: {session_id}")
         
-        # Configure graph with session
         config = {"configurable": {"thread_id": session_id}}
         
-        # Create state with user message
-        state = {"messages": [HumanMessage(content=message)]}
+        state: Dict[str, Any] = {"messages": [HumanMessage(content=message)]}
         
         try:
             logger.info(f"Processing message: '{message[:100]}...'")
             
-            # Invoke the agent graph
             result = await self.graph.ainvoke(state, config=config)
             
             # Extract assistant's response

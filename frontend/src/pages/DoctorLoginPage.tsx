@@ -49,7 +49,7 @@ export const DoctorLoginPage = () => {
         throw new Error(data.detail || 'Login failed');
       }
 
-      if (data.success && data.user) {
+      if (data.success && data.user && data.access_token && data.refresh_token) {
         // Check if user is a doctor
         if (data.user.role !== 'doctor') {
           setError('This login is for healthcare providers only. Please use the patient login.');
@@ -57,7 +57,7 @@ export const DoctorLoginPage = () => {
         }
         
         // Login successful
-        login(data.user);
+        login({ user: data.user, accessToken: data.access_token, refreshToken: data.refresh_token });
         navigate('/doctor/welcome');
       } else {
         setError(data.message || 'Login failed. Please check your credentials.');

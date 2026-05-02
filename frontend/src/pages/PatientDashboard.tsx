@@ -11,8 +11,7 @@ import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
-
-const API_URL = "http://localhost:8000";
+import { apiFetch } from "@/lib/apiClient";
 
 interface PatientProfile {
   id: number;
@@ -86,8 +85,9 @@ interface VisitStatsResponse {
 type TabType = 'overview' | 'medical' | 'notes' | 'visits' | 'vitals';
 
 export const PatientDashboard = () => {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, user, logout, tokens, setTokens } = useAuth();
   const navigate = useNavigate();
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [patient, setPatient] = useState<PatientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,11 +109,14 @@ export const PatientDashboard = () => {
   }, [isAuthenticated, user, patientIdentifier, navigate]);
 
   const fetchUpcomingAppointments = async () => {
-    if (!user?.email) return;
     try {
-      const res = await fetch(`${API_URL}/appointments/upcoming`, {
-        headers: { 'X-User-Email': user.email },
-      });
+      const res = await apiFetch(
+        `/appointments/upcoming`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data = await res.json();
         setAppointments(data);
@@ -128,18 +131,28 @@ export const PatientDashboard = () => {
 
     try {
       // Fetch patient profile
-      const profileResponse = await fetch(`${API_URL}/api/patient-portal/profile/${patientIdentifier}`);
+      const profileResponse = await apiFetch(
+        `/api/patient-portal/profile/${patientIdentifier}`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!profileResponse.ok) {
         throw new Error('Failed to fetch patient profile');
       }
       const profileData = await profileResponse.json();
       setPatient(profileData);
 
-      if (user?.email && !profileData.doctor_id) {
+      if (!profileData.doctor_id) {
         try {
-          const regRes = await fetch(`${API_URL}/appointments/my-registration-requests`, {
-            headers: { 'X-User-Email': user.email },
-          });
+          const regRes = await apiFetch(
+            `/appointments/my-registration-requests`,
+            { method: "GET" },
+            tokens,
+            setTokens,
+            logout,
+          );
           if (regRes.ok) {
             const regData: RegistrationRequestResult[] = await regRes.json();
             const pendingReq = regData.find((r) => r.status === 'pending');
@@ -155,8 +168,13 @@ export const PatientDashboard = () => {
       }
 
       // Fetch visit history with assessment metrics for trend charts and summaries
-      const visitHeaders: HeadersInit = user?.email ? { 'X-User-Email': user.email } : {};
-      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientIdentifier}/visits`, { headers: visitHeaders });
+      const visitsResponse = await apiFetch(
+        `/api/dashboard/patient/${patientIdentifier}/visits`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (visitsResponse.ok) {
         const visitsData: VisitStatsResponse = await visitsResponse.json();
         setVisits(visitsData.recent_visits || []);
@@ -174,12 +192,14 @@ export const PatientDashboard = () => {
   };
 
   const handleDeleteUltrasound = async (imageId: number) => {
-    if (!user?.email) return;
     try {
-      const res = await fetch(`${API_URL}/api/ultrasound/${imageId}`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user.email },
-      });
+      const res = await apiFetch(
+        `/api/ultrasound/${imageId}`,
+        { method: "DELETE" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!res.ok) {
         const errorPayload = await res.json();
         throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
@@ -613,6 +633,7 @@ export const PatientDashboard = () => {
                   <CalendarCheck className="w-5 h-5 text-medical-blue" />
                   Upcoming Appointments
                 </h3>
+                <span className="text-xs text-gray-500">Times in {localTz}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => navigate('/patient/appointments')}

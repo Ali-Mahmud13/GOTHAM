@@ -1,5 +1,5 @@
 from langchain_core.messages import HumanMessage
-from ..state import AgentState
+from ..state import AgentState, report_progress
 from ..system_prompt import COMPLETENESS_CHECK_PROMPT, SCOPE_CHECK_PROMPT, CLARITY_CHECK_PROMPT
 from app.core.llm import get_llm
 import logging
@@ -11,6 +11,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def check_clarity_node(state: AgentState) -> AgentState:
+    report_progress(1, "Analyzing request")
     llm = get_llm(temperature=0)
     
     user_message = state["messages"][-1].content

@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Clock, User, Loader2, CheckCircle, AlertCircle, XCircle, RefreshCw, UserX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Navbar } from '@/components/Navbar';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { useAuth } from '@/context/AuthContext';
+import { apiFetch } from '@/lib/apiClient';
 
 const API_URL = 'http://localhost:8000';
 
@@ -41,10 +42,46 @@ const STATUS_COLORS: Record<string, string> = {
 const formatDate = (d: string) =>
   new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 
+function todayLocalISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${da}`;
+}
+
+/** Parse HTML time input value (HH:MM or HH:MM:SS) → minutes since midnight */
+function timeToMinutes(t: string): number | null {
+  if (!t?.trim()) return null;
+  const m = t.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (Number.isNaN(h) || Number.isNaN(min) || h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function getRescheduleFormError(form: RescheduleForm): string | null {
+  if (!form.appointment_date) return 'Please select a date.';
+  const today = todayLocalISO();
+  if (form.appointment_date < today) return 'Date cannot be in the past.';
+  const sm = timeToMinutes(form.start_time);
+  const em = timeToMinutes(form.end_time);
+  if (sm === null || em === null) return 'Please enter valid start and end times.';
+  if (em <= sm) return 'End time must be after start time.';
+  if (form.appointment_date === today) {
+    const slotStart = new Date(`${form.appointment_date}T${form.start_time}`);
+    if (Number.isNaN(slotStart.getTime())) return 'Invalid start time.';
+    if (slotStart <= new Date()) return 'Start time must be in the future for today.';
+  }
+  return null;
+}
+
 export const AppointmentsPage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
   const navigate = useNavigate();
   const isDoctor = user?.role === 'doctor';
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,9 +107,13 @@ export const AppointmentsPage = () => {
 
   const loadRegisteredDoctor = async () => {
     try {
-      const res = await fetch(`${API_URL}/appointments/my-doctor`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/my-doctor`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) setRegisteredDoctor(await res.json());
       else setRegisteredDoctor(null);
     } catch { setRegisteredDoctor(null); }
@@ -81,10 +122,13 @@ export const AppointmentsPage = () => {
   const handleUnregister = async () => {
     setUnregistering(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/unregister`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/unregister`,
+        { method: 'DELETE' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) { setRegisteredDoctor(null); setShowUnregisterConfirm(false); }
     } catch { } finally { setUnregistering(false); }
   };
@@ -93,9 +137,13 @@ export const AppointmentsPage = () => {
     setMessage(null);
     try {
       const endpoint = filter === 'upcoming' ? '/appointments/upcoming' : '/appointments/my';
-      const res = await fetch(`${API_URL}${endpoint}`, {
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        endpoint,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         const data: Appointment[] = await res.json();
         setAppointments(data);
@@ -115,15 +163,18 @@ export const AppointmentsPage = () => {
     if (!cancelTarget) return;
     const id = cancelTarget.id;
     setActionLoading(id);
-    setCancelTarget(null);
     setMessage(null);
     try {
-      const res = await fetch(`${API_URL}/appointments/${id}/cancel`, {
-        method: 'PUT',
-        headers: { 'X-User-Email': user!.email },
-      });
+      const res = await apiFetch(
+        `/appointments/${id}/cancel`,
+        { method: 'PUT' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setMessage({ type: 'success', text: 'Appointment cancelled.' });
+        setCancelTarget(null);
         fetchAppointments();
       } else {
         const err = await res.json();
@@ -141,17 +192,26 @@ export const AppointmentsPage = () => {
     setRescheduleForm({ appointment_date: appt.appointment_date, start_time: appt.start_time, end_time: appt.end_time });
   };
 
+  const rescheduleFormError = useMemo(
+    () => (rescheduleFor ? getRescheduleFormError(rescheduleForm) : null),
+    [rescheduleFor, rescheduleForm],
+  );
+
   const submitReschedule = async () => {
     if (!rescheduleFor) return;
+    const err = getRescheduleFormError(rescheduleForm);
+    if (err) return;
     setActionLoading(rescheduleFor.id);
     setMessage(null);
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${API_URL}/appointments/${rescheduleFor.id}/reschedule`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-User-Email': user!.email },
-        body: JSON.stringify({ ...rescheduleForm, timezone: tz }),
-      });
+      const res = await apiFetch(
+        `/appointments/${rescheduleFor.id}/reschedule`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...rescheduleForm, timezone: tz }) },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setMessage({ type: 'success', text: 'Appointment rescheduled successfully.' });
         setRescheduleFor(null);
@@ -180,6 +240,9 @@ export const AppointmentsPage = () => {
             </h1>
             <p className="text-muted-foreground text-sm">
               {isDoctor ? 'Manage your patient appointments.' : 'View and manage your scheduled appointments.'}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Times shown in <strong>{localTz}</strong>
             </p>
           </div>
           {!isDoctor && (
@@ -354,10 +417,19 @@ export const AppointmentsPage = () => {
                 {formatDate(cancelTarget.appointment_date)} at {cancelTarget.start_time}
               </p>
               <div className="flex flex-col gap-3">
-                <Button onClick={confirmCancel} className="w-full bg-red-600 hover:bg-red-700 text-white">
-                  Yes, Cancel Appointment
+                <Button
+                  onClick={confirmCancel}
+                  disabled={actionLoading === cancelTarget.id}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white"
+                >
+                  {actionLoading === cancelTarget.id ? 'Cancelling...' : 'Yes, Cancel Appointment'}
                 </Button>
-                <Button variant="ghost" onClick={() => setCancelTarget(null)} className="w-full text-gray-500">
+                <Button
+                  variant="ghost"
+                  onClick={() => setCancelTarget(null)}
+                  disabled={actionLoading === cancelTarget.id}
+                  className="w-full text-gray-500"
+                >
                   Keep Appointment
                 </Button>
               </div>
@@ -380,7 +452,7 @@ export const AppointmentsPage = () => {
                   <input
                     type="date"
                     value={rescheduleForm.appointment_date}
-                    min={new Date().toISOString().split('T')[0]}
+                    min={todayLocalISO()}
                     onChange={e => setRescheduleForm(prev => ({ ...prev, appointment_date: e.target.value }))}
                     className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-medical-blue/50"
                   />
@@ -407,10 +479,14 @@ export const AppointmentsPage = () => {
                 </div>
               </div>
 
+              {rescheduleFormError && (
+                <p className="text-sm text-red-600 mt-3">{rescheduleFormError}</p>
+              )}
+
               <div className="flex gap-3 mt-6">
                 <Button
                   onClick={submitReschedule}
-                  disabled={actionLoading === rescheduleFor.id}
+                  disabled={actionLoading === rescheduleFor.id || !!rescheduleFormError}
                   className="flex-1 bg-gradient-to-r from-medical-pink to-medical-blue text-white"
                 >
                   {actionLoading === rescheduleFor.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm'}

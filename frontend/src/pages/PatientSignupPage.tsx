@@ -40,8 +40,8 @@ export const PatientSignupPage = () => {
       return;
     }
 
-    if (password.length < 3) {
-      setError('Password must be at least 3 characters');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
 
@@ -68,9 +68,9 @@ export const PatientSignupPage = () => {
         throw new Error(data.detail || 'Signup failed');
       }
 
-      if (data.success && data.user) {
+      if (data.success && data.user && data.access_token && data.refresh_token) {
         // Signup successful, log in the user
-        login(data.user);
+        login({ user: data.user, accessToken: data.access_token, refreshToken: data.refresh_token });
         navigate('/patient/dashboard');
       } else {
         setError(data.message || 'Signup failed. Please try again.');

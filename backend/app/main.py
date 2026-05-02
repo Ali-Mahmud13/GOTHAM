@@ -5,10 +5,12 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logs
 os.environ['TRANSFORMERS_OFFLINE'] = '0'
 
+import inngest
 import inngest.fast_api
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import sys
 from sqlalchemy import inspect
 
 from app.core.config import setup_logging
@@ -20,6 +22,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.patient_portal import router as patient_portal_router
 from app.api.auth import router as auth_router
 from app.api.appointments import router as appointments_router
+from app.api.transcription import router as transcription_router
 from app.db.init_db import create_db_and_tables
 from app.db.session import engine
 from sqlalchemy import text
@@ -153,8 +156,15 @@ async def ensure_local_cors_headers(request: Request, call_next):
         response.headers["Access-Control-Allow-Methods"] = "*"
     return response
 
-# Register Inngest
-inngest.fast_api.serve(app, inngest_client, ALL_FUNCTIONS)
+# Register Inngest — streaming sends keepalive bytes so long-running
+# step handlers (ML inference, LLM calls) don't hit idle-connection resets.
+if "pytest" not in sys.modules:
+    inngest.fast_api.serve(
+        app,
+        inngest_client,
+        ALL_FUNCTIONS,
+        streaming=inngest.Streaming.FORCE,
+    )
 
 # Register API routes
 app.include_router(auth_router)
@@ -164,6 +174,7 @@ app.include_router(patients_router)
 app.include_router(dashboard_router)
 app.include_router(patient_portal_router)
 app.include_router(appointments_router)
+app.include_router(transcription_router)
 
 
 @app.get("/")
@@ -171,6 +182,6 @@ async def root():
     return {"app": "GOTHAM", "docs": "/docs"}
 
 
-@app. get("/health")
+@app.get("/health")
 async def health():
     return {"status": "healthy"}

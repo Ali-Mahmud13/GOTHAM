@@ -1,4 +1,4 @@
-import { useState, useEffect, type ChangeEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type ChangeEvent } from "react";
 import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,10 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
+import { MicButton } from "@/components/MicButton";
+import { insertAtCaret } from "@/lib/text";
+import type { TranscriptionLanguage } from "@/lib/transcribe";
+import { apiFetch, ApiError } from "@/lib/apiClient";
 
 interface Patient {
     id: string;
@@ -34,7 +38,7 @@ const API_BASE = "http://localhost:8000/api";
 const DataEntry = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const { user } = useAuth();
+    const { user, tokens, setTokens, logout } = useAuth();
     const { toast } = useToast();
     const returnTo = searchParams.get("returnTo") || "/dashboard";
     const requestedPatientId = searchParams.get("patientId") || "";
@@ -54,6 +58,158 @@ const DataEntry = () => {
     const [registeredDoctor, setRegisteredDoctor] = useState<{ id: number; full_name: string } | null | undefined>(undefined);
     const [ultrasoundFiles, setUltrasoundFiles] = useState<File[]>([]);
     const isRegisteredPatient = Boolean(isPatientUser && registeredDoctor);
+    /** Live Web Speech preview under AI Extraction textarea (Chrome/Edge only). */
+    const [interimNotes, setInterimNotes] = useState("");
+    const [aiDictationLanguage, setAiDictationLanguage] = useState<TranscriptionLanguage>("en");
+    const [doctorDictationLanguage, setDoctorDictationLanguage] = useState<TranscriptionLanguage>("en");
+
+    const notesRef = useRef<HTMLTextAreaElement>(null);
+    const doctorNotesRef = useRef<HTMLTextAreaElement>(null);
+
+    const runAIExtraction = useCallback(
+        async (notesValue: string, signal?: AbortSignal) => {
+            if (notesValue.length <= 5) {
+                if (!signal?.aborted) {
+                    setExtractedFields([]);
+                    setMissingFields([]);
+                }
+                return;
+            }
+            if (isRegisteredPatient) {
+                setExtractedFields([]);
+                setMissingFields([]);
+                return;
+            }
+            setIsProcessing(true);
+            try {
+                const response = await apiFetch(
+                    `/api/notes/parse`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        signal,
+                        body: JSON.stringify({
+                            notes: notesValue,
+                            patient_id: selectedPatient?.id,
+                        }),
+                    },
+                    tokens,
+                    setTokens,
+                    logout,
+                );
+
+                if (signal?.aborted) return;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (signal?.aborted) return;
+                    if (data.success) {
+                        setExtractedFields(data.extracted_fields || []);
+                        setMissingFields(data.missing_fields || []);
+                    } else {
+                        setExtractedFields([]);
+                        setMissingFields([]);
+                        toast({
+                            title: "Parsing Failed",
+                            description: data.message || "Could not parse clinical notes.",
+                            variant: "destructive",
+                        });
+                    }
+                } else {
+                    let detail = "";
+                    try {
+                        const err = await response.json();
+                        detail =
+                            err && typeof err === "object" && err !== null && "detail" in err
+                                ? String((err as { detail?: unknown }).detail)
+                                : JSON.stringify(err);
+                    } catch {
+                        // ignore
+                    }
+
+                    const status = response.status;
+                    console.error("Failed to parse notes:", { status, detail });
+
+                    if (status === 401) {
+                        toast({
+                            title: "Not authenticated",
+                            description: "Please log in again.",
+                            variant: "destructive",
+                        });
+                    } else if (status === 403) {
+                        toast({
+                            title: "Access denied",
+                            description: "You do not have permission to run AI extraction.",
+                            variant: "destructive",
+                        });
+                    } else if (status === 413) {
+                        toast({
+                            title: "Notes too long",
+                            description: "Please shorten the notes and try again.",
+                            variant: "destructive",
+                        });
+                    } else if (status === 429) {
+                        toast({
+                            title: "AI Busy",
+                            description: "Rate limit reached. Please wait a moment.",
+                            variant: "destructive",
+                        });
+                    } else {
+                        toast({
+                            title: "Parsing Failed",
+                            description: detail || `Request failed (${status}).`,
+                            variant: "destructive",
+                        });
+                    }
+                }
+            } catch (error) {
+                if (error instanceof DOMException && error.name === "AbortError") {
+                    return;
+                }
+                if (signal?.aborted) return;
+                console.error("Error parsing notes:", error);
+                const message =
+                    error instanceof ApiError
+                        ? error.message
+                        : "Failed to parse notes. Request timed out or AI service unavailable.";
+                toast({
+                    title: "Connection Error",
+                    description: message,
+                    variant: "destructive",
+                });
+            } finally {
+                setIsProcessing(false);
+            }
+        },
+        [isRegisteredPatient, selectedPatient?.id, toast, tokens, setTokens, logout],
+    );
+
+    const dictateIntoNotes = (text: string) => {
+        const result = insertAtCaret(notes, text, notesRef.current);
+        const next = result.value;
+        setNotes(next);
+        setInterimNotes("");
+        void runAIExtraction(next);
+        requestAnimationFrame(() => {
+            const el = notesRef.current;
+            if (el) {
+                el.focus();
+                el.setSelectionRange(result.caret, result.caret);
+            }
+        });
+    };
+
+    const dictateIntoDoctorNotes = (text: string) => {
+        const result = insertAtCaret(doctorVisitNotes, text, doctorNotesRef.current);
+        setDoctorVisitNotes(result.value);
+        requestAnimationFrame(() => {
+            const el = doctorNotesRef.current;
+            if (el) {
+                el.focus();
+                el.setSelectionRange(result.caret, result.caret);
+            }
+        });
+    };
 
     // Fetch patients on mount
     useEffect(() => {
@@ -147,77 +303,17 @@ const DataEntry = () => {
         setNotes(value);
     };
 
-    // Debounced parsing effect
+    // Debounced parsing for typed/pasted notes (dictation calls runAIExtraction immediately).
     useEffect(() => {
         const controller = new AbortController();
-
-        const parseNotes = async () => {
-            if (notes.length > 5) {
-                if (isRegisteredPatient) {
-                    setExtractedFields([]);
-                    setMissingFields([]);
-                    return;
-                }
-                setIsProcessing(true);
-                try {
-                    const response = await fetch(`${API_BASE}/notes/parse`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        signal: controller.signal,
-                        body: JSON.stringify({
-                            notes: notes,
-                            patient_id: selectedPatient?.id
-                        }),
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.success) {
-                            setExtractedFields(data.extracted_fields || []);
-                            setMissingFields(data.missing_fields || []);
-                        } else {
-                            setExtractedFields([]);
-                            setMissingFields([]);
-                            toast({
-                                title: "Parsing Failed",
-                                description: data.message || "Could not parse clinical notes.",
-                                variant: "destructive",
-                            });
-                        }
-                    } else {
-                        const errorData = await response.json();
-                        console.error("Failed to parse notes:", errorData);
-                        toast({
-                            title: "AI Busy",
-                            description: "Rate limit reached. Please wait a moment.",
-                            variant: "destructive",
-                        });
-                    }
-                } catch (error) {
-                    if (error instanceof DOMException && error.name === "AbortError") {
-                        return; // Request cancelled by cleanup — not an error
-                    }
-                    console.error("Error parsing notes:", error);
-                    toast({
-                        title: "Connection Error",
-                        description: "Failed to parse notes. Request timed out or AI service unavailable.",
-                        variant: "destructive",
-                    });
-                } finally {
-                    setIsProcessing(false);
-                }
-            } else {
-                setExtractedFields([]);
-                setMissingFields([]);
-            }
-        };
-
-        const timeoutId = setTimeout(parseNotes, 1000); // 1 second debounce
+        const timeoutId = setTimeout(() => {
+            void runAIExtraction(notes, controller.signal);
+        }, 1000);
         return () => {
             clearTimeout(timeoutId);
             controller.abort();
         };
-    }, [notes, selectedPatient, isRegisteredPatient]);
+    }, [notes, runAIExtraction]);
 
     const handleFieldChange = (index: number, newValue: string) => {
         const updatedFields = [...extractedFields];
@@ -525,6 +621,49 @@ const DataEntry = () => {
                                 <h2 className="text-lg font-semibold text-foreground">
                                     AI Extraction Input
                                 </h2>
+                                <div className="ml-auto">
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex items-center rounded-full border border-border/50 bg-background/40 p-0.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setAiDictationLanguage("en")}
+                                                disabled={!selectedPatient || isRegisteredPatient}
+                                                className={cn(
+                                                    "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                                                    aiDictationLanguage === "en"
+                                                        ? "bg-white/70 text-medical-blue shadow-sm"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-white/20",
+                                                )}
+                                                title="Dictate in English"
+                                                aria-pressed={aiDictationLanguage === "en"}
+                                            >
+                                                EN
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAiDictationLanguage("ur")}
+                                                disabled={!selectedPatient || isRegisteredPatient}
+                                                className={cn(
+                                                    "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                                                    aiDictationLanguage === "ur"
+                                                        ? "bg-white/70 text-medical-blue shadow-sm"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-white/20",
+                                                )}
+                                                title="Dictate in Urdu / Minglish"
+                                                aria-pressed={aiDictationLanguage === "ur"}
+                                            >
+                                                اردو
+                                            </button>
+                                        </div>
+                                    <MicButton
+                                        onTranscript={dictateIntoNotes}
+                                        onInterimTranscript={setInterimNotes}
+                                        language={aiDictationLanguage}
+                                        disabled={!selectedPatient || isRegisteredPatient}
+                                        size="sm"
+                                    />
+                                    </div>
+                                </div>
                             </div>
 
                             {isPatientUser && !isRegisteredPatient && (
@@ -534,6 +673,7 @@ const DataEntry = () => {
                             )}
 
                             <Textarea
+                                ref={notesRef}
                                 value={notes}
                                 onChange={(e) => handleNotesChange(e.target.value)}
                                 disabled={!selectedPatient || isRegisteredPatient}
@@ -542,10 +682,16 @@ const DataEntry = () => {
                                         ? "Please select a patient first"
                                         : isRegisteredPatient
                                             ? "You are registered with a doctor. Your doctor should enter notes and vitals."
-                                            : "Type or paste clinical notes here...\n\nExample:\nBP 130/85, weight 70kg, height 160cm\nFasting glucose 105 mg/dL\nFamily history of gestational diabetes"
+                                            : "Type or paste clinical notes here, or click the mic to dictate.\n\nExample:\nBP 130/85, weight 70kg, height 160cm\nFasting glucose 105 mg/dL\nFamily history of gestational diabetes"
                                 }
                                 className="min-h-[400px] resize-none border-border/50 bg-background/50 backdrop-blur-sm focus-visible:ring-medical-blue/50 text-base disabled:opacity-50"
                             />
+
+                            {interimNotes && (
+                                <p className="mt-2 text-xs italic text-muted-foreground/70">
+                                    Listening: {interimNotes}
+                                </p>
+                            )}
 
                             {isPatientUser && (
                                 <div className="mt-4 rounded-xl border border-border/50 bg-background/50 p-3">
@@ -600,11 +746,47 @@ const DataEntry = () => {
                                 <div className="flex items-center gap-2 mb-4">
                                     <div className="h-1 w-8 rounded-full bg-gradient-to-r from-medical-blue to-medical-pink" />
                                     <h2 className="text-lg font-semibold text-foreground">Doctor Visit Notes</h2>
+                                    <div className="ml-auto">
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center rounded-full border border-border/50 bg-background/40 p-0.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setDoctorDictationLanguage("en")}
+                                                    className={cn(
+                                                        "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                                                        doctorDictationLanguage === "en"
+                                                            ? "bg-white/70 text-medical-blue shadow-sm"
+                                                            : "text-muted-foreground hover:text-foreground hover:bg-white/20",
+                                                    )}
+                                                    title="Dictate in English"
+                                                    aria-pressed={doctorDictationLanguage === "en"}
+                                                >
+                                                    EN
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setDoctorDictationLanguage("ur")}
+                                                    className={cn(
+                                                        "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                                                        doctorDictationLanguage === "ur"
+                                                            ? "bg-white/70 text-medical-blue shadow-sm"
+                                                            : "text-muted-foreground hover:text-foreground hover:bg-white/20",
+                                                    )}
+                                                    title="Dictate in Urdu / Minglish"
+                                                    aria-pressed={doctorDictationLanguage === "ur"}
+                                                >
+                                                    اردو
+                                                </button>
+                                            </div>
+                                            <MicButton onTranscript={dictateIntoDoctorNotes} language={doctorDictationLanguage} size="sm" />
+                                        </div>
+                                    </div>
                                 </div>
                                 <Textarea
+                                    ref={doctorNotesRef}
                                     value={doctorVisitNotes}
                                     onChange={(e) => setDoctorVisitNotes(e.target.value)}
-                                    placeholder="Write your clinical visit notes here. This is the normal doctor notepad for this visit."
+                                    placeholder="Write your clinical visit notes here, or click the mic to dictate."
                                     className="min-h-[160px] resize-y border-border/50 bg-background/50 backdrop-blur-sm focus-visible:ring-medical-blue/50 text-base"
                                 />
                                 <div className="mt-3 rounded-xl border border-border/50 bg-background/50 p-3">

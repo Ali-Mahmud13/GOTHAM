@@ -7,8 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '@/lib/apiClient';
 
 interface PatientProfile {
   id: number;
@@ -25,7 +24,7 @@ interface PatientProfile {
 }
 
 export const EditProfilePage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -56,7 +55,13 @@ export const EditProfilePage = () => {
     if (!patientIdentifier) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/patient-portal/profile/${patientIdentifier}`);
+      const response = await apiFetch(
+        `/api/patient-portal/profile/${patientIdentifier}`,
+        { method: 'GET' },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!response.ok) {
         throw new Error('Failed to fetch profile');
       }
@@ -117,13 +122,17 @@ export const EditProfilePage = () => {
       updateData.large_child_or_birth_default = largeChildOrBirthDefault;
       updateData.prediabetes = prediabetes;
 
-      const response = await fetch(`${API_URL}/api/patient-portal/profile/${patientIdentifier}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
+      const response = await apiFetch(
+        `/api/patient-portal/profile/${patientIdentifier}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateData),
         },
-        body: JSON.stringify(updateData),
-      });
+        tokens,
+        setTokens,
+        logout,
+      );
 
       if (!response.ok) {
         const data = await response.json();

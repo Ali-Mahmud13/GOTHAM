@@ -34,3 +34,6 @@ class AuthUser(SQLModel, table=True):
     
     # Active status
     is_active: bool = Field(default=True, description="Whether the user account is active")
+
+    # Admin flag (e.g. list /auth/users). Default false for all users.
+    is_admin: bool = Field(default=False, description="Platform admin capabilities")

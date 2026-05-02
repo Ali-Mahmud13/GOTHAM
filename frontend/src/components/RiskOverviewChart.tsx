@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
-
-const API_URL = "http://localhost:8000";
+import { apiFetch } from "@/lib/apiClient";
 
 interface RiskData {
     name: string;
@@ -12,7 +11,7 @@ interface RiskData {
 }
 
 export const RiskOverviewChart = () => {
-    const { user } = useAuth();
+    const { user, tokens, setTokens, logout } = useAuth();
     const [data, setData] = useState<RiskData[]>([
         { name: "High Risk", value: 0, color: "hsl(340, 45%, 65%)" },
         { name: "Medium Risk", value: 0, color: "hsl(270, 50%, 60%)" },
@@ -29,13 +28,13 @@ export const RiskOverviewChart = () => {
 
     const fetchRiskData = async () => {
         try {
-            // Build headers with user email for doctor filtering
-            const headers: HeadersInit = {};
-            if (user?.email) {
-                headers['X-User-Email'] = user.email;
-            }
-            
-            const response = await fetch(`${API_URL}/api/dashboard/stats`, { headers });
+            const response = await apiFetch(
+                `/api/dashboard/stats`,
+                { method: "GET" },
+                tokens,
+                setTokens,
+                logout,
+            );
             if (response.ok) {
                 const stats = await response.json();
                 setData([

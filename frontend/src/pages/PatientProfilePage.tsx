@@ -1,5 +1,5 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle,
@@ -11,10 +11,12 @@ import { VitalsChart } from "@/components/charts/VitalsChart";
 import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { BatEasterEgg } from "@/components/BatEasterEgg";
+import { MicButton } from "@/components/MicButton";
 import { cn } from "@/lib/utils";
+import { insertAtCaret } from "@/lib/text";
+import type { TranscriptionLanguage } from "@/lib/transcribe";
 import ReactMarkdown from "react-markdown";
-
-const API_URL = "http://localhost:8000";
+import { apiFetch } from "@/lib/apiClient";
 
 interface PatientProfile {
   id: number;
@@ -93,7 +95,7 @@ const PatientProfilePage = () => {
   const { patientId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, tokens, setTokens, logout } = useAuth();
   const [patient, setPatient] = useState<PatientProfile | null>(null);
   const [medicalData, setMedicalData] = useState<PatientMedical | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,6 +108,20 @@ const PatientProfilePage = () => {
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [editedNotes, setEditedNotes] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const editedNotesRef = useRef<HTMLTextAreaElement>(null);
+  const [notesDictationLanguage, setNotesDictationLanguage] = useState<TranscriptionLanguage>("en");
+
+  const dictateIntoEditedNotes = (text: string) => {
+    const result = insertAtCaret(editedNotes, text, editedNotesRef.current);
+    setEditedNotes(result.value);
+    requestAnimationFrame(() => {
+      const el = editedNotesRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(result.caret, result.caret);
+      }
+    });
+  };
   const [registeredPatientAuthId, setRegisteredPatientAuthId] = useState<number | null>(null);
   const [showUnregisterConfirm, setShowUnregisterConfirm] = useState(false);
   const [isUnregistering, setIsUnregistering] = useState(false);
@@ -123,9 +139,13 @@ const PatientProfilePage = () => {
 
   useEffect(() => {
     if (user?.email && patientId) {
-      fetch(`${API_URL}/appointments/my-registered-patients`, {
-        headers: { 'X-User-Email': user.email },
-      })
+      apiFetch(
+        `/appointments/my-registered-patients`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      )
         .then(r => r.ok ? r.json() : [])
         .then((list: { patient_auth_id: number; patient_identifier: string }[]) => {
           const match = list.find(p => p.patient_identifier === patientId);
@@ -133,16 +153,19 @@ const PatientProfilePage = () => {
         })
         .catch(() => {});
     }
-  }, [user?.email, patientId]);
+  }, [user?.email, patientId, tokens, setTokens, logout]);
 
   const handleUnregister = async () => {
-    if (!registeredPatientAuthId || !user?.email) return;
+    if (!registeredPatientAuthId) return;
     setIsUnregistering(true);
     try {
-      const res = await fetch(`${API_URL}/appointments/unregister/${registeredPatientAuthId}`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user.email },
-      });
+      const res = await apiFetch(
+        `/appointments/unregister/${registeredPatientAuthId}`,
+        { method: "DELETE" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (res.ok) {
         setRegisteredPatientAuthId(null);
         setShowUnregisterConfirm(false);
@@ -185,15 +208,17 @@ const PatientProfilePage = () => {
 
     setIsSavingNotes(true);
     try {
-      const response = await fetch(`${API_URL}/api/patients/${patientId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
+      const response = await apiFetch(
+        `/api/patients/${patientId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clinical_notes: editedNotes }),
         },
-        body: JSON.stringify({
-          clinical_notes: editedNotes,
-        }),
-      });
+        tokens,
+        setTokens,
+        logout,
+      );
 
       if (!response.ok) {
         throw new Error('Failed to save clinical notes');
@@ -218,7 +243,13 @@ const PatientProfilePage = () => {
   const fetchPatientData = async () => {
     try {
       // Fetch patient data (merged schema - single endpoint)
-      const profileResponse = await fetch(`${API_URL}/api/patients/${patientId}`);
+      const profileResponse = await apiFetch(
+        `/api/patients/${patientId}`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (profileResponse.status === 404) {
         setPatient(null);
         setError("not_found");
@@ -232,8 +263,13 @@ const PatientProfilePage = () => {
       setMedicalData(profileData);  // Medical data is in the same object now
 
       // Fetch visit statistics
-      const visitHeaders: HeadersInit = user?.email ? { 'X-User-Email': user.email } : {};
-      const visitsResponse = await fetch(`${API_URL}/api/dashboard/patient/${patientId}/visits`, { headers: visitHeaders });
+      const visitsResponse = await apiFetch(
+        `/api/dashboard/patient/${patientId}/visits`,
+        { method: "GET" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (visitsResponse.ok) {
         const visitsData: VisitStatsResponse = await visitsResponse.json();
         setVisitStats(visitsData);
@@ -261,12 +297,14 @@ const PatientProfilePage = () => {
   };
 
   const handleDeleteUltrasound = async (imageId: number) => {
-    if (!user?.email) return;
     try {
-      const res = await fetch(`${API_URL}/api/ultrasound/${imageId}`, {
-        method: 'DELETE',
-        headers: { 'X-User-Email': user.email },
-      });
+      const res = await apiFetch(
+        `/api/ultrasound/${imageId}`,
+        { method: "DELETE" },
+        tokens,
+        setTokens,
+        logout,
+      );
       if (!res.ok) {
         const errorPayload = await res.json();
         throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
@@ -892,15 +930,54 @@ const PatientProfilePage = () => {
                 {isEditingNotes ? (
                   <div>
                     <textarea
+                      ref={editedNotesRef}
                       value={editedNotes}
                       onChange={(e) => setEditedNotes(e.target.value)}
-                      placeholder="Enter clinical notes, observations, and recommendations here..."
+                      placeholder="Enter clinical notes here, or click the mic to dictate."
                       disabled={isSavingNotes}
                       className="w-full min-h-[240px] p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-medical-blue focus:border-transparent resize-y text-gray-700 leading-relaxed disabled:bg-gray-50 disabled:cursor-not-allowed"
                     />
                     <div className="mt-4 flex items-center justify-between">
                       <p className="text-xs text-gray-500">{editedNotes.length} characters</p>
                       <div className="flex items-center gap-2">
+                        <div className="flex items-center rounded-full border border-gray-300 bg-white/70 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setNotesDictationLanguage("en")}
+                            disabled={isSavingNotes}
+                            className={cn(
+                              "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                              notesDictationLanguage === "en"
+                                ? "bg-white text-medical-blue shadow-sm"
+                                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50",
+                            )}
+                            title="Dictate in English"
+                            aria-pressed={notesDictationLanguage === "en"}
+                          >
+                            EN
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNotesDictationLanguage("ur")}
+                            disabled={isSavingNotes}
+                            className={cn(
+                              "px-2 py-1 text-[11px] font-semibold rounded-full transition-colors",
+                              notesDictationLanguage === "ur"
+                                ? "bg-white text-medical-blue shadow-sm"
+                                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50",
+                            )}
+                            title="Dictate in Urdu / Minglish"
+                            aria-pressed={notesDictationLanguage === "ur"}
+                          >
+                            اردو
+                          </button>
+                        </div>
+                        <MicButton
+                          onTranscript={dictateIntoEditedNotes}
+                          language={notesDictationLanguage}
+                          disabled={isSavingNotes}
+                          size="sm"
+                        />
                         <button
                           onClick={() => setIsEditingNotes(false)}
                           disabled={isSavingNotes}

@@ -1,7 +1,7 @@
 """Patient and Visit models for GOTHAM medical risk assessment system."""
 
 from sqlmodel import SQLModel, Field, Relationship
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
 
@@ -39,7 +39,7 @@ class Patient(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationship to visits
-    visits: List["Visit"] = Relationship(back_populates="patient")
+    visits: list["Visit"] = Relationship(back_populates="patient")
 
 
 class Visit(SQLModel, table=True):
@@ -65,7 +65,7 @@ class Visit(SQLModel, table=True):
     gdm_assessment: Optional["GDMAssessment"] = Relationship(back_populates="visit")
     anemia_assessment: Optional["AnemiaAssessment"] = Relationship(back_populates="visit")
     fetal_health_assessment: Optional["FetalHealthAssessment"] = Relationship(back_populates="visit")
-    ultrasound_images: List["UltrasoundImage"] = Relationship(back_populates="visit")
+    ultrasound_images: list["UltrasoundImage"] = Relationship(back_populates="visit")
 
 
 # Import here to avoid circular imports

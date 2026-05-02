@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+
+type Tokens = { accessToken: string; refreshToken: string };
 
 interface User {
   id: number;
@@ -18,10 +20,12 @@ interface User {
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
-  login: (user: User) => void;
+  login: (payload: { user: User; accessToken: string; refreshToken: string }) => void;
   logout: () => void;
   isDoctor: boolean;
   isPatient: boolean;
+  tokens: Tokens | null;
+  setTokens: (t: Tokens | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,12 +43,39 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    const storedUser = localStorage.getItem('auth_user');
+    if (!storedUser) return null;
+    try {
+      return JSON.parse(storedUser) as User;
+    } catch {
+      localStorage.removeItem('auth_user');
+      return null;
+    }
+  });
+
+  const [tokens, setTokensState] = useState<Tokens | null>(() => {
+    const storedTokens = localStorage.getItem('auth_tokens');
+    if (!storedTokens) return null;
+    try {
+      const parsed = JSON.parse(storedTokens) as Partial<Tokens>;
+      if (parsed?.accessToken && parsed?.refreshToken) {
+        return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+      }
+      localStorage.removeItem('auth_tokens');
+      return null;
+    } catch {
+      localStorage.removeItem('auth_tokens');
+      return null;
+    }
+  });
+
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(user));
 
   // Load authentication state from localStorage on mount
   useEffect(() => {
     const storedUser = localStorage.getItem('auth_user');
+    const storedTokens = localStorage.getItem('auth_tokens');
     
     if (storedUser) {
       try {
@@ -56,23 +87,46 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         logout();
       }
     }
+
+    if (storedTokens) {
+      try {
+        const parsedTokens = JSON.parse(storedTokens);
+        if (parsedTokens?.accessToken && parsedTokens?.refreshToken) {
+          setTokensState(parsedTokens);
+        }
+      } catch (error) {
+        console.error('Failed to parse stored tokens:', error);
+        // don't force logout; user might re-login
+        localStorage.removeItem('auth_tokens');
+      }
+    }
   }, []);
 
-  const login = (userData: User) => {
-    setUser(userData);
+  const login = (payload: { user: User; accessToken: string; refreshToken: string }) => {
+    setUser(payload.user);
     setIsAuthenticated(true);
+    setTokensState({ accessToken: payload.accessToken, refreshToken: payload.refreshToken });
     
     // Persist to localStorage
-    localStorage.setItem('auth_user', JSON.stringify(userData));
+    localStorage.setItem('auth_user', JSON.stringify(payload.user));
+    localStorage.setItem('auth_tokens', JSON.stringify({ accessToken: payload.accessToken, refreshToken: payload.refreshToken }));
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
     setIsAuthenticated(false);
+    setTokensState(null);
     
     // Clear localStorage
     localStorage.removeItem('auth_user');
-  };
+    localStorage.removeItem('auth_tokens');
+  }, []);
+
+  const setTokens = useCallback((t: Tokens | null) => {
+    setTokensState(t);
+    if (t) localStorage.setItem('auth_tokens', JSON.stringify(t));
+    else localStorage.removeItem('auth_tokens');
+  }, []);
 
   const value = {
     isAuthenticated,
@@ -81,6 +135,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     logout,
     isDoctor: user?.role === 'doctor',
     isPatient: user?.role === 'patient',
+    tokens,
+    setTokens,
   };
 
   return (
