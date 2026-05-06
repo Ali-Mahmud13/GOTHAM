@@ -80,13 +80,22 @@ class PatientResponse(BaseModel):
 
 @router.get("/", response_model=List[PatientResponse])
 def get_all_patients(
-    user: AuthUser = Depends(require_role("doctor")),
+    user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """List patients for the authenticated doctor only."""
-    statement = select(Patient).where(Patient.doctor_id == user.id).order_by(Patient.id)
-    patients = session.exec(statement).all()
-    return patients
+    """List patients for the authenticated doctor (assigned) or patient (self)."""
+    if user.role == "doctor":
+        statement = select(Patient).where(Patient.doctor_id == user.id).order_by(Patient.id)
+        patients = session.exec(statement).all()
+        return patients
+    elif user.role == "patient":
+        if not user.patient_id:
+            return []
+        patient = session.get(Patient, user.patient_id)
+        return [patient] if patient else []
+    
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
 
 
 @router.get("/{patient_identifier}", response_model=PatientResponse)
@@ -140,15 +149,14 @@ def get_patient(
 
 def get_next_patient_id(session: Session) -> str:
     """Generate the next available patient ID in format P001, P002, etc."""
-    patients = session.exec(select(Patient).where(Patient.patient_identifier.like("P%"))).all()
-    max_num = 0
-    for p in patients:
-        pid = p.patient_identifier
-        if pid.startswith("P") and len(pid) > 1:
-            try:
-                max_num = max(max_num, int(pid[1:]))
-            except ValueError:
-                continue
+    from sqlalchemy import cast, Integer
+    
+    max_id = session.exec(
+        select(func.max(cast(func.substr(Patient.patient_identifier, 2), Integer)))
+        .where(Patient.patient_identifier.like("P%"))
+    ).one()
+    
+    max_num = max_id or 0
     return f"P{max_num + 1:03d}"
 
 

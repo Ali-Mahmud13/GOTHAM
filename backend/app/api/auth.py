@@ -75,16 +75,16 @@ class LoginResponse(BaseModel):
 
 
 def _next_patient_identifier(session: Session) -> str:
-    """Next P### id (Phase C will replace with a single SQL MAX)."""
-    patients = session.exec(select(Patient).where(Patient.patient_identifier.like("P%"))).all()
-    max_num = 0
-    for p in patients:
-        pid = p.patient_identifier
-        if pid.startswith("P") and len(pid) > 1:
-            try:
-                max_num = max(max_num, int(pid[1:]))
-            except ValueError:
-                continue
+    """Next P### id (Phase C replaced with a single SQL MAX)."""
+    from sqlmodel import func
+    from sqlalchemy import cast, Integer
+    
+    max_id = session.exec(
+        select(func.max(cast(func.substr(Patient.patient_identifier, 2), Integer)))
+        .where(Patient.patient_identifier.like("P%"))
+    ).one()
+    
+    max_num = max_id or 0
     return f"P{max_num + 1:03d}"
 
 

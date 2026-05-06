@@ -215,8 +215,7 @@ const DataEntry = () => {
     useEffect(() => {
         const fetchPatients = async () => {
             try {
-                const headers: HeadersInit = user?.email ? { "X-User-Email": user.email } : {};
-                const response = await fetch(`${API_BASE}/patients`, { headers });
+                const response = await apiFetch("/api/patients", {}, tokens, setTokens, logout);
                 if (response.ok) {
                     const data = await response.json();
                     setPatients(data);
@@ -261,9 +260,7 @@ const DataEntry = () => {
                 return;
             }
             try {
-                const res = await fetch("http://localhost:8000/appointments/my-doctor", {
-                    headers: { "X-User-Email": user.email },
-                });
+                const res = await apiFetch("/appointments/my-doctor", {}, tokens, setTokens, logout);
                 if (res.ok) {
                     setRegisteredDoctor(await res.json());
                 } else {
@@ -362,14 +359,17 @@ const DataEntry = () => {
                 }
             });
 
-            const response = await fetch(`${API_BASE}/visits`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...(user?.email ? { "X-User-Email": user.email } : {}),
+            const response = await apiFetch(
+                "/api/visits",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(visitData),
                 },
-                body: JSON.stringify(visitData),
-            });
+                tokens,
+                setTokens,
+                logout,
+            );
 
             const result = await response.json();
 
@@ -379,13 +379,16 @@ const DataEntry = () => {
                     const formData = new FormData();
                     ultrasoundFiles.forEach((file) => formData.append("files", file));
 
-                    const uploadResponse = await fetch(`${API_BASE}/visits/${result.visit_id}/ultrasound`, {
-                        method: "POST",
-                        headers: {
-                            ...(user?.email ? { "X-User-Email": user.email } : {}),
+                    const uploadResponse = await apiFetch(
+                        `/api/visits/${result.visit_id}/ultrasound`,
+                        {
+                            method: "POST",
+                            body: formData,
                         },
-                        body: formData,
-                    });
+                        tokens,
+                        setTokens,
+                        logout,
+                    );
 
                     if (uploadResponse.ok) {
                         const uploadResult = await uploadResponse.json();
