@@ -7,6 +7,7 @@ os.environ['TRANSFORMERS_OFFLINE'] = '0'
 
 import inngest
 import inngest.fast_api
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -35,63 +36,16 @@ logger = logging.getLogger(__name__)
 
 # Setup
 setup_logging()
-app = FastAPI(title="GOTHAM - Medical Agent System")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Database initialization on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database tables on application startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
     logger.info("Initializing database tables...")
     try:
         create_db_and_tables()
         logger.info("✓ Database tables initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {str(e)}", exc_info=True)
-    # Ensure schema drift is healed on startup for existing deployments.
-    try:
-        inspector = inspect(engine)
-        existing_columns = {
-            c["name"] for c in inspector.get_columns("appointments")
-        }
-        required_columns = {
-            "rescheduled_by": "TEXT",
-            "cancelled_by": "TEXT",
-        }
-
-        with engine.connect() as conn:
-            for col_name, col_type in required_columns.items():
-                if col_name not in existing_columns:
-                    logger.warning(
-                        "Missing appointments.%s column detected. Applying startup migration...",
-                        col_name,
-                    )
-                    conn.execute(text("ALTER TABLE appointments ADD COLUMN {} {}".format(col_name, col_type)))
-                    conn.commit()
-                    logger.info("✓ Added appointments.%s", col_name)
-
-        visit_columns = {c["name"] for c in inspector.get_columns("visits")}
-        required_visit_columns = {
-            "recorded_by_role": "TEXT",
-            "recorded_by_user_id": "INTEGER",
-        }
-        with engine.connect() as conn:
-            for col_name, col_type in required_visit_columns.items():
-                if col_name not in visit_columns:
-                    logger.warning(
-                        "Missing visits.%s column detected. Applying startup migration...",
-                        col_name,
-                    )
-                    conn.execute(text("ALTER TABLE visits ADD COLUMN {} {}".format(col_name, col_type)))
-                    conn.commit()
-                    logger.info("✓ Added visits.%s", col_name)
-    except Exception as e:
-        logger.error(
-            "Failed while ensuring appointments migration columns: %s",
-            str(e),
-            exc_info=True,
-        )
 
     # Data hygiene: unregistered patients should not retain doctor-authored notes.
     try:
@@ -130,6 +84,16 @@ async def startup_event():
             str(e),
             exc_info=True,
         )
+
+    yield
+    # Shutdown logic goes here if needed
+
+
+app = FastAPI(title="GOTHAM - Medical Agent System", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Removed legacy on_event startup logic
 
 # CORS for React frontend
 origins = [

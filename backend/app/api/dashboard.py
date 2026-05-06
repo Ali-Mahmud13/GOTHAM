@@ -92,25 +92,14 @@ def get_dashboard_stats(
                 
                 # Get assessments this week
                 week_ago = datetime.utcnow() - timedelta(days=7)
-                gdm_this_week = session.exec(
-                    select(func.count(GDMAssessment.id))
-                    .join(Visit)
-                    .where(Visit.patient_id == patient.id)
-                    .where(GDMAssessment.created_at >= week_ago)
-                ).one()
-                anemia_this_week = session.exec(
-                    select(func.count(AnemiaAssessment.id))
-                    .join(Visit)
-                    .where(Visit.patient_id == patient.id)
-                    .where(AnemiaAssessment.created_at >= week_ago)
-                ).one()
-                fetal_this_week = session.exec(
-                    select(func.count(FetalHealthAssessment.id))
-                    .join(Visit)
-                    .where(Visit.patient_id == patient.id)
-                    .where(FetalHealthAssessment.created_at >= week_ago)
-                ).one()
-                assessments_this_week = gdm_this_week + anemia_this_week + fetal_this_week
+                from sqlalchemy import union_all
+                
+                stmt_gdm = select(GDMAssessment.id).join(Visit).where(Visit.patient_id == patient.id).where(GDMAssessment.created_at >= week_ago)
+                stmt_anemia = select(AnemiaAssessment.id).join(Visit).where(Visit.patient_id == patient.id).where(AnemiaAssessment.created_at >= week_ago)
+                stmt_fetal = select(FetalHealthAssessment.id).join(Visit).where(Visit.patient_id == patient.id).where(FetalHealthAssessment.created_at >= week_ago)
+                
+                combined = union_all(stmt_gdm, stmt_anemia, stmt_fetal)
+                assessments_this_week = session.exec(select(func.count()).select_from(combined.subquery())).one()
                 
                 return {
                     "user_role": "patient",
@@ -130,31 +119,26 @@ def get_dashboard_stats(
     
     # For doctors, return statistics filtered by doctor
     if user.role == "doctor":
-        # Filter patients by this doctor's ID
-        total_patients = session.exec(
-            select(func.count(Patient.id)).where(Patient.doctor_id == user.id)
-        ).one()
-        
-        # High-risk patients for this doctor
-        high_risk_count = session.exec(
-            select(func.count(Patient.id))
+        # Single query to aggregate all risk levels
+        risk_counts = session.exec(
+            select(func.count(Patient.id), Patient.risk_level)
             .where(Patient.doctor_id == user.id)
-            .where(Patient.risk_level == "high")
-        ).one()
+            .group_by(Patient.risk_level)
+        ).all()
         
-        # Medium-risk patients for this doctor
-        medium_risk_count = session.exec(
-            select(func.count(Patient.id))
-            .where(Patient.doctor_id == user.id)
-            .where(Patient.risk_level == "medium")
-        ).one()
+        total_patients = 0
+        high_risk_count = 0
+        medium_risk_count = 0
+        low_risk_count = 0
         
-        # Low-risk patients for this doctor
-        low_risk_count = session.exec(
-            select(func.count(Patient.id))
-            .where(Patient.doctor_id == user.id)
-            .where(Patient.risk_level == "low")
-        ).one()
+        for count, risk in risk_counts:
+            total_patients += count
+            if risk == "high":
+                high_risk_count = count
+            elif risk == "medium":
+                medium_risk_count = count
+            elif risk == "low":
+                low_risk_count = count
         
         # Get patient IDs for this doctor
         doctor_patients = session.exec(
@@ -170,25 +154,14 @@ def get_dashboard_stats(
             
             # Assessments this week for this doctor's patients
             week_ago = datetime.utcnow() - timedelta(days=7)
-            gdm_this_week = session.exec(
-                select(func.count(GDMAssessment.id))
-                .join(Visit)
-                .where(Visit.patient_id.in_(doctor_patients))
-                .where(GDMAssessment.created_at >= week_ago)
-            ).one()
-            anemia_this_week = session.exec(
-                select(func.count(AnemiaAssessment.id))
-                .join(Visit)
-                .where(Visit.patient_id.in_(doctor_patients))
-                .where(AnemiaAssessment.created_at >= week_ago)
-            ).one()
-            fetal_this_week = session.exec(
-                select(func.count(FetalHealthAssessment.id))
-                .join(Visit)
-                .where(Visit.patient_id.in_(doctor_patients))
-                .where(FetalHealthAssessment.created_at >= week_ago)
-            ).one()
-            assessments_this_week = gdm_this_week + anemia_this_week + fetal_this_week
+            from sqlalchemy import union_all
+            
+            stmt_gdm = select(GDMAssessment.id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(GDMAssessment.created_at >= week_ago)
+            stmt_anemia = select(AnemiaAssessment.id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(AnemiaAssessment.created_at >= week_ago)
+            stmt_fetal = select(FetalHealthAssessment.id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(FetalHealthAssessment.created_at >= week_ago)
+            
+            combined = union_all(stmt_gdm, stmt_anemia, stmt_fetal)
+            assessments_this_week = session.exec(select(func.count()).select_from(combined.subquery())).one()
         else:
             total_visits = 0
             assessments_this_week = 0
