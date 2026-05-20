@@ -2,6 +2,31 @@
 from .anemiaxai import AnemiaXAI
 import pandas as pd
 from pathlib import Path
+import time
+from ...helper.benchmark import record
+
+# ── Singleton cache ──────────────────────────────────────────
+# AnemiaXAI is the most expensive init: pkl load + shap.TreeExplainer build (~4.85s).
+# Cached once, reused forever.
+_anemia_xai: AnemiaXAI | None = None
+
+
+def _get_anemia_xai() -> AnemiaXAI:
+    """Return the cached AnemiaXAI instance, building it on first call."""
+    global _anemia_xai
+    if _anemia_xai is None:
+        current_file = Path(__file__)
+        model_path = str(current_file.parent / "catboost_ovr_model.pkl")
+        label_encoder_path = str(current_file.parent / "label_encoder.pkl")
+        _t0 = time.perf_counter()
+        _anemia_xai = AnemiaXAI(
+            model_path=model_path,
+            label_encoder_path=label_encoder_path
+        )
+        record("Model Load: Anemia (pkl + SHAP explainers) [COLD]", time.perf_counter() - _t0)
+    else:
+        record("Model Load: Anemia (pkl + SHAP explainers) [WARM]", 0.0)
+    return _anemia_xai
 
 def generate_anemia_xai_report(WBC, RBC, HGB, HCT, MCV, MCH, MCHC, PLT):
     
@@ -12,24 +37,17 @@ def generate_anemia_xai_report(WBC, RBC, HGB, HCT, MCV, MCH, MCHC, PLT):
     
     # Build features dict internally for compatibility with AnemiaXAI
     features = {
-        'WBC': WBC,
-        'RBC': RBC,
-        'HGB': HGB,
-        'HCT': HCT,
-        'MCV': MCV,
-        'MCH': MCH,
-        'MCHC': MCHC,
-        'PLT': PLT
+        'WBC': WBC, 'RBC': RBC, 'HGB': HGB, 'HCT': HCT,
+        'MCV': MCV, 'MCH': MCH, 'MCHC': MCHC, 'PLT': PLT
     }
-    current_file = Path(__file__)
-    model_path = str(current_file.parent / "catboost_ovr_model.pkl")
-    label_encoder_path=str(current_file.parent / "label_encoder.pkl")
-    # Initialize AnemiaXAI with optional paths
-    xai = AnemiaXAI(model_path=model_path,
-                    label_encoder_path=label_encoder_path if label_encoder_path else 'label_encoder.pkl')
+
+    # Get cached AnemiaXAI (loads + builds SHAP explainers on first call only)
+    xai = _get_anemia_xai()
 
     # Generate Markdown report
+    _t1 = time.perf_counter()
     md_report = xai.generate_markdown_report(features)
+    record("Inference: Anemia predict() + SHAP", time.perf_counter() - _t1)
     return md_report
 
 

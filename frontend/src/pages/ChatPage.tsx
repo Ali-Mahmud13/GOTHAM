@@ -18,6 +18,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  suggestedQuestions?: string[];
 }
 
 export const ChatPage = () => {
@@ -122,6 +123,7 @@ export const ChatPage = () => {
                 ? {
                   ...msg,
                   content: status.response || "Assessment completed successfully!",
+                  suggestedQuestions: status.suggested_questions ?? [],
                 }
                 : msg
             )
@@ -281,6 +283,7 @@ export const ChatPage = () => {
           id: (Date.now() + 1).toString(),
           role: "assistant",
           content: response.response,
+          suggestedQuestions: response.suggested_questions ?? [],
         };
 
         setMessages((prev) => [...prev, aiResponse]);
@@ -479,6 +482,8 @@ export const ChatPage = () => {
                     )}
                   </div>
 
+
+
                   {message.role === "user" && (
                     <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-medical-blue to-medical-blue-light flex items-center justify-center text-white font-semibold shadow-glow-blue">
                       {getUserInitials()}
@@ -499,6 +504,23 @@ export const ChatPage = () => {
                 <button
                   key={prompt}
                   onClick={() => handleSuggestionClick(prompt)}
+                  className="text-[12px] px-4 py-2 rounded-full bg-medical-blue/5 border border-medical-blue-light/40 text-medical-blue hover:bg-medical-blue/10 hover:border-medical-blue/50 hover:shadow-[0_2px_16px_0_hsl(200_60%_55%/0.15)] transition-all duration-300"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
+          {!showQuickActions && !isLoading && messages.filter(m => m.role === "assistant").at(-1)?.suggestedQuestions && (messages.filter(m => m.role === "assistant").at(-1)?.suggestedQuestions?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3 animate-in fade-in duration-500">
+              {messages.filter(m => m.role === "assistant").at(-1)!.suggestedQuestions!.map((prompt, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setInput(prompt);
+                    // Auto-focus the textarea
+                    setTimeout(() => inputRef.current?.focus(), 0);
+                  }}
                   className="text-[12px] px-4 py-2 rounded-full bg-medical-blue/5 border border-medical-blue-light/40 text-medical-blue hover:bg-medical-blue/10 hover:border-medical-blue/50 hover:shadow-[0_2px_16px_0_hsl(200_60%_55%/0.15)] transition-all duration-300"
                 >
                   {prompt}

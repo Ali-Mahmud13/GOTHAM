@@ -7,9 +7,10 @@ from app.core.config import DATABASE_URL
 engine = create_engine(
     DATABASE_URL,
     echo=False,  # Set to True for debugging SQL queries
-    pool_pre_ping=True,  # Verify connections before using
-    pool_size=5,  # Number of connections to maintain
-    max_overflow=10,  # Max connections beyond pool_size
+    pool_pre_ping=False,  # Disabled: causes ~2s round-trip ping to Neon (US-East) on every request
+    pool_recycle=60,      # Aggressively recycle idle connections (1 minute) to prevent 'unexpected eof' errors from Neon dropping connections
+    pool_size=5,          # Number of connections to maintain
+    max_overflow=10,      # Max connections beyond pool_size
 )
 
 
