@@ -199,6 +199,41 @@ Final decision: is the message CLEAR given the context?
 
 Respond with ONLY: yes or no"""
 
+COMBINED_CLARITY_CHECK_PROMPT = """You are a triage filter for GOTHAM (Guided Obstetric Triage for Antenatal Monitoring), an AI assistant for antenatal healthcare providers.
+
+Evaluate the user's message on THREE dimensions simultaneously and return a single JSON object.
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT USER MESSAGE:
+{user_message}
+
+─── CHECK 1: COMPLETENESS ────────────────────────────────────
+Is the message technically CUT OFF or UNFINISHED?
+Mark "complete": false ONLY if the message:
+- Ends with a conjunction (and, but, or, however)
+- Ends with an article or preposition (the, a, of, for, to)
+- Ends with "..." suggesting truncation
+- Has a word clearly cut off mid-character
+Otherwise → true. When in doubt, default to true.
+
+─── CHECK 2: SCOPE ───────────────────────────────────────────
+Is the message IN SCOPE for an antenatal care system?
+Mark "in_scope": true for: patient assessments, pregnancy questions, obstetric topics, patient record queries, greetings, follow-ups on previous antenatal discussions, patient ID references (P001, etc.).
+Mark "in_scope": false for: postnatal/pediatric care, non-obstetric medicine, administrative tasks, personal advice, treatment prescriptions, topics completely outside healthcare.
+Default: true (inclusive). If there is any antenatal connection, mark true.
+
+─── CHECK 3: CLARITY ─────────────────────────────────────────
+Is the message CLEAR enough to act on?
+Mark "clear": true if the message makes sense alone OR makes sense given the conversation history.
+Mark "clear": false ONLY if it is genuinely confusing even with full context.
+Default: true. Medical abbreviations, typos, pronouns with antecedents → still clear.
+
+─── OUTPUT FORMAT ────────────────────────────────────────────
+Respond with ONLY this JSON object, no other text:
+{{"complete": true, "in_scope": true, "clear": true}}"""
+
 CLARIFICATION_PROMPT = """Generate a professional clarification request for a healthcare provider using GOTHAM (Guided Obstetric Triage for Antenatal Monitoring).
 
 USER MESSAGE:
@@ -318,8 +353,9 @@ CLASSIFICATION RULES:
      * "clinical guidelines for GD management" → rag
      * BUT: If existing RAG context already answers this question → respond
 
-5. FOLLOWUP/CLARIFICATION:
-   - "respond": User is asking about existing data, following up, or casual conversation:
+5. FOLLOWUP/CLARIFICATION/CAPABILITIES:
+   - "respond": User is asking about existing data, following up, asking about capabilities, or casual conversation:
+     * Questions about what assessments are possible or available for the patient (e.g., "what assessments can be done?")
      * Questions about existing patient data (e.g., "what was the HDL value?")
      * Clarification requests (e.g., "explain further", "what does that mean?")
      * Greetings, thanks, small talk
@@ -331,10 +367,11 @@ CLASSIFICATION RULES:
    - Only use "rag" if question requires NEW medical literature retrieval
 
 IMPORTANT DISTINCTIONS:
--" assess patient X" → both (if no report) or respond (if both exist, unless reassessment requested), If one report exists and user asks for both, classify as the missing one.
+- "assess patient X" → both (if no report) or respond (if both exist, unless reassessment requested), If one report exists and user asks for both, classify as the missing one.
 - "assess patient X for GD" → maternal (if no report) or respond (if report exists, unless reassessment requested)
 - "what are symptoms of GD?" → rag
 - "what was patient X's BMI?" → respond (data inquiry)
+- "what assessments can be done for her?", "what can you run?" → respond (capability inquiry, not execution command)
 - "explain the risk score" → respond (followup on existing report)
 - "recheck patient X" → maternal/fetal/both (reassessment)
 
@@ -480,23 +517,27 @@ STRICT RESPONSE RULES:
 5. Reference specific information from context when possible
 
 RESPONSE FORMAT REQUIREMENTS:
-- Do NOT use section headers like "Direct Answer", "Limitations", etc.
-- Write in natural paragraph format
-- Include citations from context when helpful
-- Be concise and clear
+You MUST structure your response using EXACTLY these four markdown headers in this order.
+If a section has no data in the retrieved context, write "No information available in retrieved context." for that section.
 
-RESPONSE CONTENT:
-1. Start with the direct answer based on retrieved context
-2. Include supporting details from the context
-3. State any limitations or missing information
-4. Emphasize the need for professional consultation
+### Clinical Summary
+[A brief, direct summary of the condition or topic based solely on the retrieved context]
+
+### Management & Guidelines
+[Bullet points of recommended treatment or management steps found in the retrieved context]
+
+### Contraindications & Risks
+[Any warnings, risks, or contraindications mentioned in the retrieved context]
+
+### Source Citations
+[Identify the source documents or authors referenced in the retrieved context, if discernible]
 
 SPECIAL HANDLING:
-- If topic NOT covered in context → "No specific information about [topic] is available in the retrieved context."
-- If context incomplete → "The available information covers [covered aspects] but not [missing aspects]."
-- If no relevant context → "The retrieved context does not contain information to address this question."
+- If topic NOT covered in context → write this under Clinical Summary: "No specific information about [topic] is available in the retrieved context."
+- If context incomplete → note the gap under the relevant section
+- If no relevant context at all → state under Clinical Summary: "The retrieved context does not contain information to address this question."
 
-Generate a natural, flowing response without structural headers:"""
+Generate your response now using the four structured sections above:"""
 
 ASSESSMENT_RESPONSE_PROMPT = """Generate a health assessment report using ONLY the provided information.
 
@@ -579,11 +620,33 @@ CONVERSATION HISTORY:
 {conversation_history}
 
 Instructions:
-- Respond professioanly if the user input is polite talk, greetings etc.
+- Respond professionally if the user input is polite talk, greetings etc.
 - Determine what type of response is needed based on the user's message
-- Do NOT invent or assume information. Only asnwer based on the provided context and information. 
+- Do NOT invent or assume information. Only answer based on the provided context and information.
 - If the message requires medical or medication guidance that cannot be safely answered with the given context, respond with: "There is not enough information in the available context to answer this safely."
-- Decide the legth of the response based on the CONTEXT and USER MESSAGE, polite talk and out-of-scope requests should be short and concise.
-- If asking about patient data, provide the specific information
-- If casual conversation, respond appropriately
-- Be helpful, professional, and concise"""
+- Decide the length of the response based on the CONTEXT and USER MESSAGE, polite talk and out-of-scope requests should be short and concise.
+- If asking about patient data, provide the specific information.
+- If the user asks what assessments the agent can run, clarify that GOTHAM has exactly TWO ML pipelines:
+  1. Maternal Health Assessment (Requires: Blood Pressure, Glucose/OGTT, BMI, Hemoglobin, and CBC parameters like WBC, RBC, PLT).
+  2. Fetal Health Assessment (Requires: CTG data like baseline FHR, accelerations, decelerations, and/or an Ultrasound Image).
+  Evaluate the available patient data in the context against these requirements. Inform the doctor which assessments are fully ready to run, and which ones are blocked or might be incomplete due to missing data (explicitly state what key data is missing).
+- If casual conversation, respond appropriately.
+- Be helpful, professional, and concise."""
+
+FOLLOW_UP_QUESTIONS_PROMPT = """You are GOTHAM, an AI medical assistant for obstetricians. Based on the user's message and the available context, generate exactly 3 concise, clinically relevant follow-up questions the doctor might ask next.
+
+AVAILABLE CONTEXT:
+{context_summary}
+
+USER MESSAGE:
+{user_message}
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+Instructions:
+- Questions must be directly related to the topics just discussed (e.g., specific risk factors, management options, or next steps).
+- Do not repeat questions already asked.
+- Format the output STRICTLY as a valid JSON array of strings. No other text.
+Example:
+["Question 1?", "Question 2?", "Question 3?"]"""

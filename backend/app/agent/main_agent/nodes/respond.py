@@ -4,11 +4,14 @@ from ..system_prompt import (
     SYSTEM_PROMPT, 
     RAG_RESPONSE_PROMPT, 
     ASSESSMENT_RESPONSE_PROMPT,
-    RESPOND_PROMPT
+    RESPOND_PROMPT,
+    FOLLOW_UP_QUESTIONS_PROMPT
 )
 from app.core.llm import get_llm
 import logging
 import re
+import json
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -247,9 +250,12 @@ async def respond_node(state: AgentState) -> AgentState:
             assessment_type=assessment
         )
         
+        # Keep only the last 4 messages to save tokens and prevent 413 Payload Too Large errors
+        recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
+        
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            *state["messages"],
+            *recent_messages,
             HumanMessage(content=response_prompt)
         ]
     
@@ -267,9 +273,12 @@ async def respond_node(state: AgentState) -> AgentState:
             user_question=user_message
         )
         
+        # Keep only the last 4 messages to save tokens and prevent 413 Payload Too Large errors
+        recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
+        
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            *state["messages"],
+            *recent_messages,
             HumanMessage(content=response_prompt)
         ]
     
@@ -294,16 +303,27 @@ async def respond_node(state: AgentState) -> AgentState:
             conversation_history=conversation_history
         )
         
+        # Keep only the last 4 messages to save tokens and prevent 413 Payload Too Large errors
+        recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
+        
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            *state["messages"],
+            *recent_messages,
             HumanMessage(content=response_prompt)
         ]
-    
+        
     logger.info("Sending to LLM for response generation...")
     response = await llm.ainvoke(messages)
+    raw_response = response.content
 
-    final_response = response.content
+    # Suggested questions feature has been disabled by user request.
+    suggested_questions: list = []
+
+    state["suggested_questions"] = suggested_questions
+    if suggested_questions:
+        logger.info(f"Suggested questions: {suggested_questions}")
+
+    final_response = raw_response
     if prediction_decision in ["maternal", "fetal", "both"]:
         final_response = _enforce_concise_assessment_output(final_response)
         confidence_footer = _build_pipeline_confidence_footer(
@@ -348,6 +368,8 @@ def reset_state(state: AgentState):
     state["clear"] = None
     state["prediction_decision"] = None
     state["patient_identifier"] = None
+    # NOTE: suggested_questions is intentionally NOT cleared here.
+    # It must survive in the returned graph state so agent_service can read it.
     if "should_retrieve_decision" in state:
         state["should_retrieve_decision"] = None
     if "rag_keywords" in state:

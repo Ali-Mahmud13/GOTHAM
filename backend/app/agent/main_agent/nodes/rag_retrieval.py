@@ -34,9 +34,9 @@ async def rag_retrieval_node(state: AgentState) -> AgentState:
         logger.info(f"Using direct user input: {user_message}")
         query = user_message
     
-    # Retrieve chunks from Pinecone
+    # Retrieve chunks from Pinecone. Limited to 2 to stay under Groq Free Tier TPM limits.
     logger.info(f"🔍 Querying Pinecone with: '{query}'")
-    chunks = retrieve_similar_chunks(query, top_k=5)
+    chunks = retrieve_similar_chunks(query, top_k=2)
     
     if not chunks:
         logger.warning("❌ No relevant chunks found in RAG database")

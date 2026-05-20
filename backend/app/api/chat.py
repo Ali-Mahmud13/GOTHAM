@@ -35,6 +35,7 @@ class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     response: str
     session_id: str
+    suggested_questions: list = []
 
 
 class AssessmentRequest(BaseModel):
@@ -85,7 +86,8 @@ async def chat(request: Request, payload: ChatRequest, user: AuthUser = Depends(
         
         return ChatResponse(
             response=result["response"],
-            session_id=result["session_id"]
+            session_id=result["session_id"],
+            suggested_questions=result.get("suggested_questions") or [],
         )
         
     except HTTPException:

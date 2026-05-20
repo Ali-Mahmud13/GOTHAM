@@ -113,6 +113,7 @@ async def _save_and_store(
             "status": "completed",
             "assessment_type": assessment_type,
             "risk_levels": assessment_risk_levels,
+            "suggested_questions": result.get("suggested_questions") or [],
         }
     except Exception as e:
         error_msg = str(e)
