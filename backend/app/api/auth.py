@@ -40,6 +40,9 @@ class SignupRequest(BaseModel):
     password: str
     full_name: str
     role: str
+    # Patient-only fields
+    age: Optional[int] = None
+    contact_number: Optional[str] = None
     # Doctor-only credential fields (ignored for patient signups)
     license_number: Optional[str] = None
     specialty: Optional[str] = None
@@ -220,8 +223,8 @@ def signup(request: Request, payload: SignupRequest, session: Session = Depends(
         new_patient = Patient(
             patient_identifier=next_patient_id,
             name=payload.full_name,
-            age=0,
-            contact_number="",
+            age=payload.age or 0,
+            contact_number=payload.contact_number or "",
             risk_level="low",
             doctor_id=None,
         )

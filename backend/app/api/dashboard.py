@@ -246,6 +246,7 @@ def get_patient_visits(
             selectinload(Visit.anemia_assessment),
             selectinload(Visit.fetal_health_assessment),
             selectinload(Visit.gdm_assessment),
+            selectinload(Visit.maternal_health_assessment),
             selectinload(Visit.ultrasound_images),
         )
         .order_by(Visit.visit_date.desc())
@@ -258,6 +259,7 @@ def get_patient_visits(
         anemia = visit.anemia_assessment
         fetal = visit.fetal_health_assessment
         gdm = visit.gdm_assessment
+        mha = visit.maternal_health_assessment
         ultrasound_images = sorted(
             visit.ultrasound_images or [],
             key=lambda im: im.created_at or datetime.min,
@@ -312,6 +314,11 @@ def get_patient_visits(
             "accelerations": fetal.accelerations if fetal else None,
             "fetal_health_status": fetal.status if fetal else None,
             
+            # Maternal Health / Preeclampsia data
+            "body_temp":          mha.body_temp    if mha else None,
+            "heart_rate":         mha.heart_rate   if mha else None,
+            "maternal_risk_level": mha.risk_level  if mha else None,
+
             # GDM Data from GDM assessment
             "glucose_level": gdm.glucose_level if gdm else None,
             "blood_pressure_systolic": gdm.blood_pressure_systolic if gdm else None,

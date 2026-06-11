@@ -1,4 +1,4 @@
-import { Clock, Droplet, Heart, ChevronDown, ChevronUp, Activity } from 'lucide-react';
+import { Clock, Droplet, Heart, ChevronDown, ChevronUp, Activity, Thermometer } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +43,11 @@ interface Visit {
 
     // Predictions
     anemia_diagnosis: string | null;
+
+    // Maternal Health / Preeclampsia
+    body_temp:           number | null;
+    heart_rate:          number | null;
+    maternal_risk_level: number | null;
 }
 
 interface VisitTimelineProps {
@@ -99,6 +104,10 @@ export const VisitTimeline = ({ visits, showPastHistoryRow = false, pastHistoryM
 
     const hasGDMData = (visit: Visit) => {
         return visit.glucose_level !== null || visit.blood_pressure_systolic !== null || visit.ogtt !== null;
+    };
+
+    const hasMaternalData = (visit: Visit) => {
+        return visit.body_temp !== null || visit.heart_rate !== null;
     };
 
 
@@ -219,6 +228,14 @@ export const VisitTimeline = ({ visits, showPastHistoryRow = false, pastHistoryM
                                                     </div>
                                                 </div>
                                             )}
+                                            {hasMaternalData(visit) && (
+                                                <div className="px-3 py-1.5 bg-violet-500/10 rounded-lg border border-violet-500/20">
+                                                    <div className="flex items-center gap-2">
+                                                        <Thermometer className="w-4 h-4 text-violet-600" />
+                                                        <span className="text-sm font-semibold text-violet-600">Maternal Screening</span>
+                                                    </div>
+                                                </div>
+                                            )}
                                             {visit.ultrasound_images && visit.ultrasound_images.length > 0 && (
                                                 <div className="px-3 py-1.5 bg-sky-50 rounded-lg border border-sky-200">
                                                     <div className="flex items-center gap-2">
@@ -250,6 +267,12 @@ export const VisitTimeline = ({ visits, showPastHistoryRow = false, pastHistoryM
                                                     <div className="flex items-center gap-2">
                                                         <span className="text-muted-foreground">Glucose:</span>
                                                         <span className="font-bold text-foreground">{visit.glucose_level} mg/dL</span>
+                                                    </div>
+                                                )}
+                                                {visit.body_temp !== null && (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-muted-foreground">Temp:</span>
+                                                        <span className="font-bold text-foreground">{visit.body_temp}°C</span>
                                                     </div>
                                                 )}
                                             </div>
@@ -484,6 +507,58 @@ export const VisitTimeline = ({ visits, showPastHistoryRow = false, pastHistoryM
                                                         )}>
                                                             {visit.gdm_risk_level === 0 ? 'Normal' :
                                                                 visit.gdm_risk_level === 1 ? 'Elevated' :
+                                                                    'High Risk'}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Maternal Health / Preeclampsia Section */}
+                                    {hasMaternalData(visit) && (
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className="p-2 rounded-lg bg-violet-500/10">
+                                                    <Thermometer className="w-5 h-5 text-violet-600" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-foreground">Maternal Health Screening</h3>
+                                                    <p className="text-xs text-muted-foreground">Preeclampsia risk indicators</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                                {visit.body_temp !== null && (
+                                                    <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                                                        <p className="text-xs font-semibold text-violet-600 mb-1">Body Temperature</p>
+                                                        <p className="text-2xl font-bold text-foreground">{visit.body_temp}</p>
+                                                        <p className="text-xs text-violet-600/70">°C</p>
+                                                    </div>
+                                                )}
+                                                {visit.heart_rate !== null && (
+                                                    <div className="p-4 rounded-lg bg-muted/30 border border-border/30">
+                                                        <p className="text-xs font-semibold text-muted-foreground mb-1">Heart Rate</p>
+                                                        <p className="text-2xl font-bold text-foreground">{visit.heart_rate}</p>
+                                                        <p className="text-xs text-muted-foreground">bpm</p>
+                                                    </div>
+                                                )}
+                                                {visit.maternal_risk_level !== null && (
+                                                    <div className={cn(
+                                                        "p-4 rounded-lg border-2",
+                                                        visit.maternal_risk_level === 0 ? "bg-medical-blue/10 border-medical-blue/30" :
+                                                            visit.maternal_risk_level === 1 ? "bg-violet-500/10 border-violet-500/30" :
+                                                                "bg-medical-pink/10 border-medical-pink/30"
+                                                    )}>
+                                                        <p className="text-xs font-semibold text-muted-foreground mb-1">Maternal Risk</p>
+                                                        <p className={cn(
+                                                            "text-xl font-bold",
+                                                            visit.maternal_risk_level === 0 ? "text-medical-blue" :
+                                                                visit.maternal_risk_level === 1 ? "text-violet-600" :
+                                                                    "text-medical-pink"
+                                                        )}>
+                                                            {visit.maternal_risk_level === 0 ? 'Normal' :
+                                                                visit.maternal_risk_level === 1 ? 'Elevated' :
                                                                     'High Risk'}
                                                         </p>
                                                     </div>
