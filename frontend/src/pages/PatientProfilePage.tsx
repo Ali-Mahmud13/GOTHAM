@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, Hash, User, Phone, Calendar, FileText, Brain, AlertCircle,
-  Activity, TrendingUp, Clock, Heart, ChevronRight,
+  Activity, TrendingUp, Clock, Heart, ChevronRight, Loader2,
   Stethoscope, Clipboard, BarChart3, CheckCircle2, XCircle, MinusCircle, X, Save, UserX, Edit, ShieldAlert
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
@@ -26,7 +26,6 @@ interface PatientProfile {
   contact_number: string;
   clinical_notes: string | null;
   latest_ai_report?: string | null;
-  latest_assessment_type?: string | null;
   risk_level: 'high' | 'medium' | 'low';
   number_of_pregnancies: number | null;
   family_history: boolean | null;
@@ -73,6 +72,9 @@ interface VisitRecord extends VisitVitalsPoint {
   fetal_health_status?: number | null;
   gdm_risk_level?: number | null;
   anemia_diagnosis?: string | null;
+  body_temp?: number | null;
+  heart_rate?: number | null;
+  maternal_risk_level?: number | null;
 }
 
 interface VisitStatsResponse {
@@ -555,12 +557,16 @@ const PatientProfilePage = () => {
 
   const activeConditionCount = medicalConditions.filter((c) => c.value).length;
   const clinicalSignals = [
-    latestVisit?.blood_pressure_systolic >= 140 ? `Elevated BP: ${latestVisit.blood_pressure_systolic}/${latestVisit.blood_pressure_diastolic ?? '?'} mmHg` : null,
-    latestVisit?.glucose_level >= 140 ? `High glucose: ${latestVisit.glucose_level} mg/dL` : null,
-    latestVisit?.hgb && latestVisit.hgb < 11 ? `Low hemoglobin: ${latestVisit.hgb} g/dL` : null,
+    latestVisit?.blood_pressure_systolic != null && latestVisit.blood_pressure_systolic >= 140 ? `Elevated BP: ${latestVisit.blood_pressure_systolic}/${latestVisit.blood_pressure_diastolic ?? '?'} mmHg` : null,
+    latestVisit?.glucose_level != null && latestVisit.glucose_level >= 140 ? `High glucose: ${latestVisit.glucose_level} mg/dL` : null,
+    latestVisit?.hgb != null && latestVisit.hgb < 11 ? `Low hemoglobin: ${latestVisit.hgb} g/dL` : null,
     latestVisit?.fetal_health_status === 2 ? 'Fetal status: suspect' : null,
     latestVisit?.fetal_health_status === 3 ? 'Fetal status: pathological' : null,
+    latestVisit?.gdm_risk_level === 1 ? 'GDM risk: Elevated' : null,
+    latestVisit?.gdm_risk_level === 2 ? 'GDM risk: High' : null,
   ].filter(Boolean) as string[];
+
+  const totalRiskIndicators = activeConditionCount + clinicalSignals.length;
 
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
@@ -620,11 +626,13 @@ const PatientProfilePage = () => {
                 <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-gray-600 text-sm">
                   <div className="flex items-center gap-1.5">
                     <User className="w-4 h-4" />
-                    <span>{patient.age} years</span>
+                    <span>{patient.age && patient.age > 0 ? `${patient.age} years` : 'Age not set'}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Phone className="w-4 h-4" />
-                    <span>{patient.contact_number}</span>
+                    {patient.contact_number
+                      ? <a href={`tel:${patient.contact_number}`} className="hover:underline">{patient.contact_number}</a>
+                      : <span className="text-gray-400">Not set</span>}
                   </div>
                 </div>
               </div>
@@ -746,9 +754,9 @@ const PatientProfilePage = () => {
                     </div>
                     <ChevronRight className="w-5 h-5 text-gray-400" />
                   </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Factors</p>
-                  <p className="text-4xl font-bold text-gray-900 mb-2">{medicalData ? [medicalData.family_history, medicalData.pcos, medicalData.prediabetes].filter(Boolean).length : 0}</p>
-                  <p className="text-xs text-gray-500 font-semibold">Active conditions</p>
+                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Indicators</p>
+                  <p className="text-4xl font-bold text-gray-900 mb-2">{totalRiskIndicators}</p>
+                  <p className="text-xs text-gray-500 font-semibold">Conditions & clinical alerts</p>
                 </div>
               </button>
             </div>
@@ -811,7 +819,9 @@ const PatientProfilePage = () => {
                   </div>
                   <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                     <span className="text-sm font-semibold text-gray-600">Contact</span>
-                    <span className="text-sm font-bold text-gray-900">{patient.contact_number}</span>
+                    {patient.contact_number
+                      ? <a href={`tel:${patient.contact_number}`} className="text-sm font-bold text-gray-900 hover:underline">{patient.contact_number}</a>
+                      : <span className="text-sm text-gray-400">Not set</span>}
                   </div>
                 </div>
               </div>
@@ -1125,31 +1135,53 @@ const PatientProfilePage = () => {
 
                   <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-gray-200">
                     <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Latest Structured Metrics</h3>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                        <span className="text-sm text-gray-600">Glucose</span>
-                        <span className="text-sm font-bold text-gray-900">{latestVisit?.glucose_level ? `${latestVisit.glucose_level} mg/dL` : 'N/A'}</span>
+                    {visits.length === 0 ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading metrics...
                       </div>
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                        <span className="text-sm text-gray-600">Blood Pressure</span>
-                        <span className="text-sm font-bold text-gray-900">
-                          {latestVisit?.blood_pressure_systolic ? `${latestVisit.blood_pressure_systolic}/${latestVisit.blood_pressure_diastolic ?? '?'} mmHg` : 'N/A'}
-                        </span>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm text-gray-600">Glucose</span>
+                          <span className="text-sm font-bold text-gray-900">{latestVisit?.glucose_level != null ? `${latestVisit.glucose_level} mg/dL` : 'N/A'}</span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm text-gray-600">Blood Pressure</span>
+                          <span className="text-sm font-bold text-gray-900">
+                            {latestVisit?.blood_pressure_systolic != null ? `${latestVisit.blood_pressure_systolic}/${latestVisit.blood_pressure_diastolic ?? '?'} mmHg` : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm text-gray-600">Hemoglobin</span>
+                          <span className="text-sm font-bold text-gray-900">{latestVisit?.hgb != null ? `${latestVisit.hgb} g/dL` : 'N/A'}</span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm text-gray-600">Fetal Status</span>
+                          <span className="text-sm font-bold text-gray-900">
+                            {latestVisit?.fetal_health_status === 1 ? 'Normal' :
+                             latestVisit?.fetal_health_status === 2 ? 'Suspect' :
+                             latestVisit?.fetal_health_status === 3 ? 'Pathological' : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm text-gray-600">GDM Risk</span>
+                          <span className={cn("text-sm font-bold",
+                            latestVisit?.gdm_risk_level === 0 ? "text-blue-600" :
+                            latestVisit?.gdm_risk_level === 1 ? "text-cyan-600" :
+                            latestVisit?.gdm_risk_level === 2 ? "text-red-600" : "text-gray-900"
+                          )}>
+                            {latestVisit?.gdm_risk_level === 0 ? 'Normal' :
+                             latestVisit?.gdm_risk_level === 1 ? 'Elevated' :
+                             latestVisit?.gdm_risk_level === 2 ? 'High Risk' : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm text-gray-600">Anemia</span>
+                          <span className="text-sm font-bold text-gray-900">{latestVisit?.anemia_diagnosis || 'N/A'}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                        <span className="text-sm text-gray-600">Hemoglobin</span>
-                        <span className="text-sm font-bold text-gray-900">{latestVisit?.hgb ? `${latestVisit.hgb} g/dL` : 'N/A'}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                        <span className="text-sm text-gray-600">Fetal Status</span>
-                        <span className="text-sm font-bold text-gray-900">
-                          {latestVisit?.fetal_health_status === 1 && 'Normal'}
-                          {latestVisit?.fetal_health_status === 2 && 'Suspect'}
-                          {latestVisit?.fetal_health_status === 3 && 'Pathological'}
-                          {!latestVisit?.fetal_health_status && 'N/A'}
-                        </span>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
