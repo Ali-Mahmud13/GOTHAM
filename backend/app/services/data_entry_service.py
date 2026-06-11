@@ -317,9 +317,9 @@ class DataEntryService:
             logger.info(f"Created visit {visit.id} for patient {patient.id}")
             
             # Create GDMAssessment if GDM data present
-            if any([request.glucose_level, request.bmi, request.sys_bp, request.dia_bp,
-                    request.hdl, request.ogtt, request.gestation_weeks, request.sedentary_lifestyle,
-                    request.insulin_level]):
+            if any(v is not None for v in [request.glucose_level, request.bmi, request.sys_bp,
+                    request.dia_bp, request.hdl, request.ogtt, request.gestation_weeks,
+                    request.sedentary_lifestyle, request.insulin_level]):
                 from app.models.assessments import GDMAssessment
                 gdm = GDMAssessment(
                     visit_id=visit.id,
@@ -337,7 +337,7 @@ class DataEntryService:
                 logger.info(f"Created GDMAssessment for visit {visit.id}")
             
             # Create AnemiaAssessment if CBC data present
-            if any([request.wbc, request.rbc, request.hgb, request.hct,
+            if any(v is not None for v in [request.wbc, request.rbc, request.hgb, request.hct,
                     request.mcv, request.mch, request.mchc, request.plt]):
                 from app.models.assessments import AnemiaAssessment
                 anemia = AnemiaAssessment(
@@ -355,8 +355,8 @@ class DataEntryService:
                 logger.info(f"Created AnemiaAssessment for visit {visit.id}")
             
             # Create FetalHealthAssessment if any CTG data present
-            if any([request.baseline_value, request.accelerations, request.fetal_movement,
-                    request.uterine_contractions, request.light_decelerations,
+            if any(v is not None for v in [request.baseline_value, request.accelerations,
+                    request.fetal_movement, request.uterine_contractions, request.light_decelerations,
                     request.severe_decelerations, request.prolongued_decelerations,
                     request.abnormal_short_term_variability,
                     request.mean_value_of_short_term_variability,
@@ -395,7 +395,7 @@ class DataEntryService:
                 logger.info(f"Created FetalHealthAssessment for visit {visit.id}")
 
             # Create MaternalHealthAssessment if preeclampsia inputs present
-            if any([request.body_temp, request.heart_rate]):
+            if any(v is not None for v in [request.body_temp, request.heart_rate]):
                 from app.models.assessments import MaternalHealthAssessment
                 mha = MaternalHealthAssessment(
                     visit_id=visit.id,
