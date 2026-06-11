@@ -6,7 +6,7 @@ import re
 from sqlmodel import Session, select
 from sqlalchemy import func
 from app.db.session import engine
-from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
+from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, MaternalHealthAssessment, UltrasoundImage
 from app.models.patient_latest_assessments import PatientLatestAssessments
 import logging
 
@@ -215,9 +215,25 @@ class PatientService:
                     .limit(5)
                 ).all()
                 
+                # Query 4: Latest MaternalHealthAssessment for Preeclampsia model inputs
+                mha = session.exec(
+                    select(MaternalHealthAssessment)
+                    .join(Visit, MaternalHealthAssessment.visit_id == Visit.id)
+                    .where(Visit.patient_id == patient.id)
+                    .order_by(MaternalHealthAssessment.created_at.desc())
+                ).first()
+
                 # Build response
                 patient_data = self._build_patient_response_optimized(patient, latest, latest_visit, ultrasound_refs)
-                logger.info(f"[OPTIMIZED] Successfully built patient response with {len(patient_data)} fields (3 queries)")
+
+                # Add Preeclampsia model inputs from latest MaternalHealthAssessment
+                if mha:
+                    if mha.body_temp is not None:
+                        patient_data["body_temp"] = mha.body_temp
+                    if mha.heart_rate is not None:
+                        patient_data["heart_rate"] = mha.heart_rate
+
+                logger.info(f"[OPTIMIZED] Successfully built patient response with {len(patient_data)} fields (4 queries)")
                 
                 return patient_data
                 

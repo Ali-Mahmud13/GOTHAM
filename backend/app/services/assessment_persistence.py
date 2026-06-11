@@ -9,7 +9,7 @@ from sqlalchemy import func
 import difflib
 
 from app.db.session import engine
-from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, MaternalHealthAssessment
 import re
 
 def _compact_assessment_report(report: str) -> str:
@@ -149,6 +149,16 @@ def save_assessment_report(
             anemia.created_at = now
             session.add(anemia)
 
+            mha = session.exec(select(MaternalHealthAssessment).where(MaternalHealthAssessment.visit_id == latest_visit.id)).first()
+            if not mha:
+                mha = MaternalHealthAssessment(visit_id=latest_visit.id)
+            mha.ai_report = assessment_report
+            mha.created_at = now
+            preec_risk = _to_gdm_risk_value(risk_levels.get("preeclampsia"))
+            if preec_risk is not None:
+                mha.risk_level = preec_risk
+            session.add(mha)
+
         if assessment_type in {"fetal", "both"}:
             fetal = session.exec(select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == latest_visit.id)).first()
             if not fetal:
@@ -162,7 +172,7 @@ def save_assessment_report(
 
         overall_risk = None
         if assessment_type in {"maternal", "both"}:
-            overall_risk = risk_levels.get("gdm") or risk_levels.get("anemia")
+            overall_risk = risk_levels.get("gdm") or risk_levels.get("anemia") or risk_levels.get("preeclampsia")
         if assessment_type in {"fetal", "both"}:
             fetal_risk = risk_levels.get("fetal")
             if fetal_risk == "high":

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_maternal_risk_levels(maternal_report: str) -> dict:
-    risks = {"gdm": "unknown", "anemia": "unknown"}
+    risks = {"gdm": "unknown", "anemia": "unknown", "preeclampsia": "unknown"}
 
     report_lower = maternal_report.lower()
 
@@ -41,6 +41,17 @@ def _extract_maternal_risk_levels(maternal_report: str) -> dict:
             risks["anemia"] = "medium"
     elif "no anemia" in report_lower or "normal hemoglobin" in report_lower:
         risks["anemia"] = "low"
+
+    # Preeclampsia section — mmxai.py emits "Low Risk", "Mid Risk", or "High Risk"
+    if "preeclampsia risk assessment" in report_lower:
+        section_start = report_lower.find("preeclampsia risk assessment")
+        section = report_lower[section_start:section_start + 600]
+        if "high risk" in section:
+            risks["preeclampsia"] = "high"
+        elif "mid risk" in section:
+            risks["preeclampsia"] = "medium"
+        elif "low risk" in section:
+            risks["preeclampsia"] = "low"
 
     return risks
 
@@ -234,10 +245,12 @@ async def respond_node(state: AgentState) -> AgentState:
         
         patient_data_str = "\n".join([f"{k}: {v}" for k, v in patient_data.items()]) if patient_data else "Not available"
 
+        _maternal_risks = _extract_maternal_risk_levels(maternal_report)
         risk_levels = {
-            "gdm": _extract_maternal_risk_levels(maternal_report)["gdm"],
-            "anemia": _extract_maternal_risk_levels(maternal_report)["anemia"],
-            "fetal": _extract_fetal_risk_level(fetal_report),
+            "gdm":          _maternal_risks["gdm"],
+            "anemia":       _maternal_risks["anemia"],
+            "preeclampsia": _maternal_risks["preeclampsia"],
+            "fetal":        _extract_fetal_risk_level(fetal_report),
         }
         state["assessment_type_to_save"] = prediction_decision
         state["assessment_risk_levels"] = risk_levels
