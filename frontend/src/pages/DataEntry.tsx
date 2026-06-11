@@ -415,7 +415,7 @@ const DataEntry = () => {
 
             // Map extracted fields to visit data
             extractedFields.forEach(field => {
-                if (field.dbField) {
+                if (field.dbField && field.value.trim() !== "") {
                     visitData[field.dbField] = field.value;
                 }
             });
@@ -424,7 +424,8 @@ const DataEntry = () => {
             const intCtgFields = new Set(["histogram_number_of_peaks", "histogram_number_of_zeroes", "histogram_tendency"]);
             Object.entries(ctgData).forEach(([key, val]) => {
                 if (val.trim() !== "") {
-                    visitData[key] = intCtgFields.has(key) ? parseInt(val, 10) : parseFloat(val);
+                    const parsed = Number(val);
+                    visitData[key] = intCtgFields.has(key) ? Math.trunc(parsed) : parsed;
                 }
             });
 
