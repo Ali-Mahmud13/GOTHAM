@@ -361,6 +361,13 @@ const DataEntry = () => {
                 errors.push(`${key.replace(/_/g, " ")}: expected ${bounds[0]}–${bounds[1]}, got ${val}`);
             }
         });
+        const intCTGFields = new Set(["histogram_number_of_peaks","histogram_number_of_zeroes","histogram_tendency"]);
+        Object.entries(ctgData).forEach(([key, val]) => {
+            if (val.trim() === "") return;
+            if (intCTGFields.has(key) && !Number.isInteger(parseFloat(val))) {
+                errors.push(`${key.replace(/_/g, " ")}: must be a whole number, got ${val}`);
+            }
+        });
         if (errors.length > 0) {
             toast({
                 variant: "destructive",
@@ -413,9 +420,9 @@ const DataEntry = () => {
                 notes: visitNoteText,
             };
 
-            // Map extracted fields to visit data
+            // Map extracted fields to visit data, skipping blank manually-added rows
             extractedFields.forEach(field => {
-                if (field.dbField) {
+                if (field.dbField && String(field.value).trim() !== "") {
                     visitData[field.dbField] = field.value;
                 }
             });
@@ -424,7 +431,7 @@ const DataEntry = () => {
             const intCtgFields = new Set(["histogram_number_of_peaks", "histogram_number_of_zeroes", "histogram_tendency"]);
             Object.entries(ctgData).forEach(([key, val]) => {
                 if (val.trim() !== "") {
-                    visitData[key] = intCtgFields.has(key) ? parseInt(val, 10) : parseFloat(val);
+                    visitData[key] = intCtgFields.has(key) ? Math.round(parseFloat(val)) : parseFloat(val);
                 }
             });
 
@@ -1122,16 +1129,16 @@ const DataEntry = () => {
                                     { key: "histogram_width",           label: "Width",    unit: "", placeholder: "e.g. 64" },
                                     { key: "histogram_min",             label: "Min",      unit: "", placeholder: "e.g. 62" },
                                     { key: "histogram_max",             label: "Max",      unit: "", placeholder: "e.g. 126" },
-                                    { key: "histogram_number_of_peaks", label: "Peaks",    unit: "", placeholder: "e.g. 2" },
-                                    { key: "histogram_number_of_zeroes",label: "Zeroes",   unit: "", placeholder: "e.g. 0" },
+                                    { key: "histogram_number_of_peaks", label: "Peaks",    unit: "", placeholder: "e.g. 2",   integer: true },
+                                    { key: "histogram_number_of_zeroes",label: "Zeroes",   unit: "", placeholder: "e.g. 0",   integer: true },
                                     { key: "histogram_mode",            label: "Mode",     unit: "", placeholder: "e.g. 140" },
                                     { key: "histogram_mean",            label: "Mean",     unit: "", placeholder: "e.g. 137" },
                                     { key: "histogram_median",          label: "Median",   unit: "", placeholder: "e.g. 139" },
                                     { key: "histogram_variance",        label: "Variance", unit: "", placeholder: "e.g. 3" },
-                                    { key: "histogram_tendency",        label: "Tendency", unit: "−1/0/1", placeholder: "−1, 0 or 1" },
+                                    { key: "histogram_tendency",        label: "Tendency", unit: "−1/0/1", placeholder: "−1, 0 or 1", integer: true },
                                 ],
                             },
-                        ] as { label: string; cols: number; fields: { key: string; label: string; unit: string; placeholder: string }[] }[]).map((section, si, arr) => (
+                        ] as { label: string; cols: number; fields: { key: string; label: string; unit: string; placeholder: string; integer?: boolean }[] }[]).map((section, si, arr) => (
                             <div key={section.label}>
                                 <div className="flex items-center gap-2 mb-3">
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-medical-blue/10 text-medical-blue text-xs font-semibold">
@@ -1139,7 +1146,7 @@ const DataEntry = () => {
                                     </span>
                                 </div>
                                 <div className={cn("grid gap-3", section.cols === 3 ? "grid-cols-3" : "grid-cols-2")}>
-                                    {section.fields.map(({ key, label, unit, placeholder }) => (
+                                    {section.fields.map(({ key, label, unit, placeholder, integer }) => (
                                         <div key={key} className="space-y-1">
                                             <label className="flex items-center justify-between text-[11px] font-medium text-foreground/70">
                                                 {label}
@@ -1147,7 +1154,7 @@ const DataEntry = () => {
                                             </label>
                                             <Input
                                                 type="number"
-                                                step="any"
+                                                step={integer ? "1" : "any"}
                                                 min={CTG_BOUNDS[key]?.[0]}
                                                 max={CTG_BOUNDS[key]?.[1]}
                                                 value={ctgData[key] ?? ""}
