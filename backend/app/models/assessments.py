@@ -113,6 +113,26 @@ class FetalHealthAssessment(SQLModel, table=True):
     visit: "Visit" = Relationship(back_populates="fetal_health_assessment")
 
 
+class MaternalHealthAssessment(SQLModel, table=True):
+    """Maternal health / preeclampsia risk assessment."""
+
+    __tablename__ = "maternal_health_assessments"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    visit_id: int = Field(foreign_key="visits.id", index=True)
+
+    body_temp: Optional[float] = Field(default=None, description="Body temperature (°C)")
+    heart_rate: Optional[int] = Field(default=None, description="Heart rate (bpm)")
+
+    risk_level: Optional[int] = Field(default=None, description="Risk level: 0=Low, 1=Mid, 2=High")
+    confidence: Optional[float] = Field(default=None, description="Model confidence score (0-1)")
+    ai_report: Optional[str] = Field(default=None, description="AI-generated assessment report")
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    visit: "Visit" = Relationship(back_populates="maternal_health_assessment")
+
+
 class UltrasoundImage(SQLModel, table=True):
     """Ultrasound image metadata linked to a visit and patient."""
 
