@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { motion, useScroll, useTransform } from "framer-motion";
-import { useRef } from "react";
+import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
+import { useRef, useState } from "react";
 import {
     Brain,
     Users,
@@ -9,70 +9,73 @@ import {
     ArrowRight,
     CheckCircle2,
     Sparkles,
-    LineChart,
+    BrainCircuit,
     Clock
 } from "lucide-react";
 
 const features = [
     {
         icon: Brain,
-        title: "AI-Powered Risk Assessment",
-        description: "Machine learning models trained on maternal health data to predict preeclampsia, anemia, and mortality risks.",
+        title: "Five-Model Risk Suite",
+        description: "Assesses Gestational Diabetes, Preeclampsia, Anemia, Fetal CTG health, and Fetal Ultrasound anomalies — each with a confidence score and AI-generated clinical report.",
         gradient: "from-medical-pink to-medical-pink-light",
     },
     {
-        icon: Users,
-        title: "Multi-Agent RAG System",
-        description: "LangGraph-orchestrated agents with retrieval-augmented generation for evidence-based medical recommendations.",
+        icon: Activity,
+        title: "Multi-Agent AI Pipeline",
+        description: "An 11-node LangGraph graph routes queries, runs maternal and fetal models in parallel, retrieves evidence from a Pinecone medical knowledge base, and generates structured clinical responses.",
         gradient: "from-medical-blue to-medical-blue-light",
     },
     {
-        icon: Sparkles,
-        title: "Clinical Notes Extraction",
-        description: "AI-powered extraction of structured data from free-text clinical notes using large language models.",
+        icon: Users,
+        title: "Patient Portal",
+        description: "Patients find and register with a doctor, book or reschedule appointments, view clinical notes, and track their risk history — all from a dedicated self-service portal.",
         gradient: "from-medical-pink to-medical-blue",
     },
     {
-        icon: LineChart,
-        title: "Explainable AI",
-        description: "Transparent risk predictions with feature importance analysis and natural language explanations.",
+        icon: Sparkles,
+        title: "Voice-Enabled Data Entry",
+        description: "Clinical dictation via Groq Whisper (English + Urdu/Minglish) lets clinicians capture vitals and notes hands-free, with an automatic local fallback.",
         gradient: "from-medical-blue to-medical-pink",
     },
 ];
 
 const stats = [
+    { value: "5", label: "ML Models" },
     { value: "98%", label: "Model Accuracy" },
-    { value: "3", label: "Risk Models" },
-    { value: "RAG", label: "Knowledge Base" },
-    { value: "LangGraph", label: "Multi-Agent" },
+    { value: "11", label: "Agent Nodes" },
+    { value: "2", label: "Languages" },
 ];
 
 const steps = [
     {
         number: "01",
-        title: "Patient Data Entry",
-        description: "Enter patient information manually or extract from clinical notes using AI.",
+        title: "Doctor Onboarding",
+        description: "Create a verified account, configure your weekly availability, and start accepting patient registration requests.",
     },
     {
         number: "02",
-        title: "Multi-Agent Analysis",
-        description: "LangGraph orchestrator coordinates specialized agents for data processing and RAG retrieval.",
+        title: "Patient Registration",
+        description: "Patients find a doctor, request registration, and book appointments directly through the patient portal.",
     },
     {
         number: "03",
-        title: "Risk Prediction",
-        description: "ML models predict preeclampsia, anemia, and mortality risk levels.",
+        title: "AI-Driven Assessment",
+        description: "Enter or dictate clinical data. The AI pipeline automatically selects and runs the relevant models in parallel.",
     },
     {
         number: "04",
-        title: "Explainable Results",
-        description: "View risk classifications with AI-generated explanations and management recommendations.",
+        title: "Insights & Action",
+        description: "Receive risk classifications, confidence scores, evidence-backed recommendations, and a full risk-trend dashboard.",
     },
 ];
 
 export const LandingPage = () => {
     const navigate = useNavigate();
     const heroRef = useRef(null);
+    const [showPrivacy, setShowPrivacy] = useState(false);
+    const [showTerms, setShowTerms] = useState(false);
+    const [showContact, setShowContact] = useState(false);
     const { scrollYProgress } = useScroll({
         target: heroRef,
         offset: ["start start", "end start"]
@@ -219,8 +222,8 @@ export const LandingPage = () => {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.6, delay: 0.3 }}
                         >
-                            A research prototype combining multi-agent systems, RAG, and machine learning to predict
-                            maternal health risks with explainable AI insights.
+                            A research prototype combining multi-agent systems, RAG, and machine learning to predict                                                  
+                              maternal health risks with explainable AI insights
                         </motion.p>
 
                         <motion.div
@@ -448,25 +451,26 @@ export const LandingPage = () => {
                                 className="inline-block px-4 py-1.5 rounded-full bg-medical-pink/10 text-medical-pink text-sm font-medium mb-4"
                                 whileHover={{ scale: 1.05 }}
                             >
-                                Research
+                                Platform
                             </motion.span>
                             <h2 className="text-3xl sm:text-4xl font-bold text-foreground mb-6">
-                                Research{" "}
+                                Platform{" "}
                                 <span className="bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
-                                    Contributions
+                                    at a Glance
                                 </span>
                             </h2>
                             <p className="text-muted-foreground mb-8">
-                                GOTHAM demonstrates the integration of multiple AI technologies for improved maternal health outcomes
-                                through intelligent risk prediction and explainable recommendations.
+                                GOTHAM integrates clinical decision support, intelligent scheduling, and a patient-facing
+                                portal into a single coherent system — built for OB/GYN clinics managing high-risk antenatal cases.
                             </p>
                             <ul className="space-y-4">
                                 {[
-                                    "Multi-agent system architecture using LangGraph",
-                                    "RAG-based medical knowledge retrieval",
-                                    "Three specialized ML models for maternal health",
-                                    "Explainable AI with feature importance analysis",
-                                    "Automated clinical notes extraction using LLMs",
+                                    "Parallel model execution for faster clinical turnaround",
+                                    "RAG over curated medical literature (Pinecone, 768-dim)",
+                                    "Doctor verification and admin approval workflow",
+                                    "Risk trend charts and weekly assessment history",
+                                    "Patient risk stratification: Low / Medium / High",
+                                    "Structured result persistence with per-visit ML snapshots",
                                 ].map((item, index) => (
                                     <motion.li
                                         key={index}
@@ -505,18 +509,18 @@ export const LandingPage = () => {
                                             className="p-3 rounded-xl bg-gradient-to-r from-medical-pink to-medical-blue"
                                             whileHover={{ rotate: 10, scale: 1.1 }}
                                         >
-                                            <Users className="h-6 w-6 text-white" />
+                                            <BrainCircuit className="h-6 w-6 text-white" />
                                         </motion.div>
                                         <div>
-                                            <h3 className="font-semibold text-foreground">Technical Innovation</h3>
-                                            <p className="text-sm text-muted-foreground">Multi-agent AI architecture</p>
+                                            <h3 className="font-semibold text-foreground">Clinical Intelligence</h3>
+                                            <p className="text-sm text-muted-foreground">Built for OB/GYN clinics</p>
                                         </div>
                                     </div>
                                     <div className="space-y-4">
                                         {[
+                                            { label: "ML Models", value: "5" },
                                             { label: "Model Accuracy", value: "98%" },
-                                            { label: "Agents in System", value: "4" },
-                                            { label: "Risk Models", value: "3" },
+                                            { label: "Agent Nodes", value: "11" },
                                         ].map((item, i) => (
                                             <motion.div
                                                 key={i}
@@ -593,41 +597,225 @@ export const LandingPage = () => {
             </section>
 
             {/* Footer */}
-            <footer className="py-12 px-4 sm:px-6 lg:px-8 border-t border-border/50">
+            <footer className="bg-gradient-to-b from-[hsl(200,45%,14%)] to-[hsl(200,45%,9%)] px-4 sm:px-6 lg:px-8 pt-8 pb-6">
                 <div className="max-w-7xl mx-auto">
-                    <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                        <motion.div
-                            className="flex items-center gap-3"
-                            whileHover={{ scale: 1.02 }}
-                        >
-                            <div className="relative">
-                                <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-lg blur-md opacity-20 animate-glow-pulse" />
-                                <div className="relative p-1 rounded-lg">
-                                    <img src="/logo.png" alt="GOTHAM Logo" className="h-6 w-6 object-contain" />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-6">
+                        {/* Brand */}
+                        <div>
+                            <motion.div className="flex items-center gap-3 mb-3" whileHover={{ scale: 1.02 }}>
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-gradient-to-br from-medical-pink to-medical-blue rounded-lg blur-md opacity-20 animate-glow-pulse" />
+                                    <div className="relative p-1 rounded-lg">
+                                        <img src="/logo.png" alt="GOTHAM Logo" className="h-7 w-7 object-contain" />
+                                    </div>
                                 </div>
-                            </div>
-                            <span className="font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
-                                GOTHAM
-                            </span>
-                        </motion.div>
-                        <div className="flex items-center gap-8 text-sm text-muted-foreground">
-                            {["Privacy Policy", "Terms of Service", "Contact"].map((item) => (
-                                <motion.a
-                                    key={item}
-                                    href="#"
-                                    className="hover:text-foreground transition-colors"
-                                    whileHover={{ y: -2 }}
-                                >
-                                    {item}
-                                </motion.a>
-                            ))}
+                                <span className="text-lg font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
+                                    GOTHAM
+                                </span>
+                            </motion.div>
+                            <p className="text-sm text-white/50 leading-relaxed">
+                                AI-Powered Antenatal Care.<br />
+                                A research prototype for OB/GYN clinics.
+                            </p>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                            © 2024 GOTHAM. All rights reserved.
-                        </p>
+
+                        {/* Quick Links */}
+                        <div>
+                            <h4 className="text-xs font-semibold text-white/70 mb-4 uppercase tracking-wider">Quick Links</h4>
+                            <ul className="space-y-2">
+                                {[
+                                    { label: "Doctor Login", action: () => navigate("/doctor/login") },
+                                    { label: "Patient Portal", action: () => navigate("/patient/login") },
+                                    { label: "Get Started", action: () => navigate("/doctor/signup") },
+                                ].map((item) => (
+                                    <li key={item.label}>
+                                        <motion.button
+                                            onClick={item.action}
+                                            className="text-sm text-white/50 hover:text-white transition-colors"
+                                            whileHover={{ x: 4 }}
+                                        >
+                                            {item.label}
+                                        </motion.button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+
+                        {/* Legal */}
+                        <div>
+                            <h4 className="text-xs font-semibold text-white/70 mb-4 uppercase tracking-wider">Legal</h4>
+                            <ul className="space-y-2">
+                                <li>
+                                    <motion.button onClick={() => setShowPrivacy(true)}
+                                        className="text-sm text-white/50 hover:text-white transition-colors"
+                                        whileHover={{ x: 4 }}>
+                                        Privacy Policy
+                                    </motion.button>
+                                </li>
+                                <li>
+                                    <motion.button onClick={() => setShowTerms(true)}
+                                        className="text-sm text-white/50 hover:text-white transition-colors"
+                                        whileHover={{ x: 4 }}>
+                                        Terms of Service
+                                    </motion.button>
+                                </li>
+                                <li>
+                                    <motion.button onClick={() => setShowContact(true)}
+                                        className="text-sm text-white/50 hover:text-white transition-colors"
+                                        whileHover={{ x: 4 }}>
+                                        Contact
+                                    </motion.button>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div className="border-t border-white/10 pt-6 text-center">
+                        <p className="text-xs text-white/30">© 2026 GOTHAM. All rights reserved.</p>
                     </div>
                 </div>
             </footer>
+
+            {/* Privacy Policy Modal */}
+            <AnimatePresence>
+                {showPrivacy && (
+                    <motion.div
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setShowPrivacy(false)}
+                    >
+                        <motion.div
+                            className="relative bg-card rounded-2xl border border-border/50 shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-8"
+                            initial={{ opacity: 0, y: 20, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.97 }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h2 className="text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-1">Privacy Policy</h2>
+                            <p className="text-xs text-muted-foreground mb-6">Last updated: June 2026</p>
+
+                            <div className="space-y-5 text-sm text-muted-foreground leading-relaxed">
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Data We Collect</h3>
+                                    <p>We collect account information (name, email, professional credentials), patient health records entered by clinicians (vitals, CBC, CTG readings, ultrasound images), and appointment data. Patients' personal identifiers are stored only to support their assigned doctor's workflow.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">How We Use Your Data</h3>
+                                    <p>Data is used exclusively to power clinical assessments, generate risk predictions, and facilitate appointment scheduling. We do not use patient data for advertising, profiling, or any purpose outside direct clinical support.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Storage & Security</h3>
+                                    <p>Health records are stored in an encrypted Neon PostgreSQL database. Ultrasound images are stored via Cloudinary with access-controlled URLs. All API traffic is authenticated via short-lived JWT tokens.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Third Parties</h3>
+                                    <p>We do not sell or share personal data with third parties. AI inference uses OpenAI/Groq APIs; only de-identified query text is transmitted — no patient identifiers are sent to external LLM providers.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Data Deletion</h3>
+                                    <p>To request deletion of your account or patient records, contact the team at the addresses listed on this page. Requests are processed within 14 days.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowPrivacy(false)}
+                                className="mt-8 w-full py-2.5 rounded-xl bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold hover:opacity-90 transition-opacity">
+                                Close
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Terms of Service Modal */}
+            <AnimatePresence>
+                {showTerms && (
+                    <motion.div
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setShowTerms(false)}
+                    >
+                        <motion.div
+                            className="relative bg-card rounded-2xl border border-border/50 shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-8"
+                            initial={{ opacity: 0, y: 20, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.97 }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h2 className="text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-1">Terms of Service</h2>
+                            <p className="text-xs text-muted-foreground mb-6">Last updated: June 2026</p>
+
+                            <div className="space-y-5 text-sm text-muted-foreground leading-relaxed">
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Research Prototype Disclaimer</h3>
+                                    <p>GOTHAM is a research prototype developed for academic and investigational purposes. It is not a certified medical device. Clinical outputs must be reviewed and validated by a qualified healthcare professional before influencing patient care decisions.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">No Medical Advice</h3>
+                                    <p>Risk scores, predictions, and AI-generated reports produced by GOTHAM are decision-support tools only. They do not constitute a medical diagnosis or treatment recommendation. Always defer to the judgment of a licensed clinician.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Account Responsibilities</h3>
+                                    <p>You are responsible for maintaining the confidentiality of your credentials and for all activity under your account. Doctor accounts require verification; providing false credentials may result in immediate account termination.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Acceptable Use</h3>
+                                    <p>This platform may only be used for lawful clinical or research purposes. You may not attempt to reverse-engineer ML models, extract patient data belonging to other providers, or use the system in any way that violates applicable healthcare data regulations.</p>
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-foreground mb-1">Limitation of Liability</h3>
+                                    <p>GOTHAM is provided "as is" without warranty of any kind. The development team is not liable for clinical outcomes arising from use of this prototype.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowTerms(false)}
+                                className="mt-8 w-full py-2.5 rounded-xl bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold hover:opacity-90 transition-opacity">
+                                Close
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Contact Modal */}
+            <AnimatePresence>
+                {showContact && (
+                    <motion.div
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setShowContact(false)}
+                    >
+                        <motion.div
+                            className="relative bg-card rounded-2xl border border-border/50 shadow-2xl w-full max-w-sm p-8"
+                            initial={{ opacity: 0, y: 20, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.97 }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h2 className="text-xl font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent mb-2">Contact Us</h2>
+                            <p className="text-sm text-muted-foreground mb-6">Reach out to the GOTHAM development team.</p>
+                            <div className="space-y-3">
+                                {[
+                                    "alimahmud13032@gmail.com",
+                                    "eamueed@gmail.com",
+                                    "zaiinabsanaullah@gmail.com",
+                                ].map((email) => (
+                                    <motion.a
+                                        key={email}
+                                        href={`mailto:${email}`}
+                                        className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 hover:bg-muted/70 border border-border/30 hover:border-medical-pink/30 transition-all text-sm text-foreground"
+                                        whileHover={{ x: 4 }}
+                                    >
+                                        <span className="w-2 h-2 rounded-full bg-gradient-to-r from-medical-pink to-medical-blue flex-shrink-0" />
+                                        {email}
+                                    </motion.a>
+                                ))}
+                            </div>
+                            <button onClick={() => setShowContact(false)}
+                                className="mt-6 w-full py-2.5 rounded-xl bg-gradient-to-r from-medical-pink to-medical-blue text-white text-sm font-semibold hover:opacity-90 transition-opacity">
+                                Close
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };
