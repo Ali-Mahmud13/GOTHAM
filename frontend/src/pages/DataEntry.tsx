@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent } from "react";
-import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2, Activity } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -31,6 +32,7 @@ interface ExtractedField {
 interface MissingField {
     name: string;
     category: string;
+    db_field: string;
 }
 
 const API_BASE = "http://localhost:8000/api";
@@ -62,6 +64,10 @@ const DataEntry = () => {
     const [interimNotes, setInterimNotes] = useState("");
     const [aiDictationLanguage, setAiDictationLanguage] = useState<TranscriptionLanguage>("en");
     const [doctorDictationLanguage, setDoctorDictationLanguage] = useState<TranscriptionLanguage>("en");
+
+    const [ctgData, setCtgData] = useState<Record<string, string>>({});
+    const [showCtgModal, setShowCtgModal] = useState(false);
+    const ctgFilled = Object.values(ctgData).some(v => v.trim() !== "");
 
     const notesRef = useRef<HTMLTextAreaElement>(null);
     const doctorNotesRef = useRef<HTMLTextAreaElement>(null);
@@ -321,6 +327,61 @@ const DataEntry = () => {
         setExtractedFields(updatedFields);
     };
 
+    const CTG_BOUNDS: Record<string, [number, number]> = {
+        baseline_value:                                         [50,  210],
+        accelerations:                                          [0,   1],
+        fetal_movement:                                         [0,   1],
+        uterine_contractions:                                   [0,   1],
+        light_decelerations:                                    [0,   1],
+        severe_decelerations:                                   [0,   1],
+        prolongued_decelerations:                               [0,   1],
+        abnormal_short_term_variability:                        [0,   100],
+        mean_value_of_short_term_variability:                   [0,   10],
+        percentage_of_time_with_abnormal_long_term_variability: [0,   100],
+        mean_value_of_long_term_variability:                    [0,   50],
+        histogram_width:                                        [0,   300],
+        histogram_min:                                          [50,  210],
+        histogram_max:                                          [50,  210],
+        histogram_number_of_peaks:                              [0,   18],
+        histogram_number_of_zeroes:                             [0,   10],
+        histogram_mode:                                         [50,  210],
+        histogram_mean:                                         [50,  210],
+        histogram_median:                                       [50,  210],
+        histogram_variance:                                     [0,   100],
+        histogram_tendency:                                     [-1,  1],
+    };
+
+    const handleSaveCtg = () => {
+        const errors: string[] = [];
+        Object.entries(ctgData).forEach(([key, val]) => {
+            if (val.trim() === "") return;
+            const num = parseFloat(val);
+            const bounds = CTG_BOUNDS[key];
+            if (bounds && (isNaN(num) || num < bounds[0] || num > bounds[1])) {
+                errors.push(`${key.replace(/_/g, " ")}: expected ${bounds[0]}–${bounds[1]}, got ${val}`);
+            }
+        });
+        if (errors.length > 0) {
+            toast({
+                variant: "destructive",
+                title: "Invalid CTG values",
+                description: errors.slice(0, 3).join(" · ") + (errors.length > 3 ? ` +${errors.length - 3} more` : ""),
+            });
+            return;
+        }
+        setShowCtgModal(false);
+    };
+
+    const handleAddMissingField = (field: MissingField) => {
+        setExtractedFields(prev => [...prev, {
+            name: field.name,
+            value: "",
+            confidence: "low" as const,
+            dbField: field.db_field,
+        }]);
+        setMissingFields(prev => prev.filter(f => f.db_field !== field.db_field));
+    };
+
     const handleUltrasoundSelection = (event: ChangeEvent<HTMLInputElement>) => {
         const picked = Array.from(event.target.files || []);
         setUltrasoundFiles(picked);
@@ -356,6 +417,14 @@ const DataEntry = () => {
             extractedFields.forEach(field => {
                 if (field.dbField) {
                     visitData[field.dbField] = field.value;
+                }
+            });
+
+            // Merge CTG modal data (overrides AI-extracted values for same field)
+            const intCtgFields = new Set(["histogram_number_of_peaks", "histogram_number_of_zeroes", "histogram_tendency"]);
+            Object.entries(ctgData).forEach(([key, val]) => {
+                if (val.trim() !== "") {
+                    visitData[key] = intCtgFields.has(key) ? parseInt(val, 10) : parseFloat(val);
                 }
             });
 
@@ -439,6 +508,18 @@ const DataEntry = () => {
         }
     };
 
+    // Field categorisation for grouping extracted fields
+    const GDM_FIELDS   = new Set(["glucose_level","bmi","sys_bp","dia_bp","hdl","ogtt","insulin_level","gestation_weeks","sedentary_lifestyle","family_history","pcos","prediabetes","unexplained_prenatal_loss","large_child_or_birth_default","no_of_pregnancy","gestation_in_previous_pregnancy"]);
+    const CBC_FIELDS   = new Set(["wbc","rbc","hgb","hct","mcv","mch","mchc","plt"]);
+    const PREEC_FIELDS = new Set(["body_temp","heart_rate"]);
+
+    const groupedFields = {
+        "Maternal Vitals (GDM)":     extractedFields.filter(f => f.dbField && GDM_FIELDS.has(f.dbField)),
+        "CBC / Anemia":              extractedFields.filter(f => f.dbField && CBC_FIELDS.has(f.dbField)),
+        "Preeclampsia":              extractedFields.filter(f => f.dbField && PREEC_FIELDS.has(f.dbField)),
+        "Other":                     extractedFields.filter(f => !f.dbField || (!GDM_FIELDS.has(f.dbField) && !CBC_FIELDS.has(f.dbField) && !PREEC_FIELDS.has(f.dbField))),
+    } as Record<string, typeof extractedFields>;
+
     const getRiskColor = (level: string) => {
         switch (level) {
             case "high": return "text-red-600 bg-red-50/80";
@@ -454,7 +535,7 @@ const DataEntry = () => {
         (
             isPatientUser
                 ? notes.trim() && (extractedFields.length > 0 || ultrasoundFiles.length > 0)
-                : doctorVisitNotes.trim() || extractedFields.length > 0 || ultrasoundFiles.length > 0
+                : doctorVisitNotes.trim() || extractedFields.length > 0 || ultrasoundFiles.length > 0 || ctgFilled
         )
     );
 
@@ -806,6 +887,28 @@ const DataEntry = () => {
                                         <p className="text-[11px] text-medical-blue mt-1">{ultrasoundFiles.length} file(s) selected</p>
                                     )}
                                 </div>
+                                {/* CTG Data Entry */}
+                                <div className="mt-3 flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setShowCtgModal(true)}
+                                        className="flex items-center gap-2 border-medical-blue/40 text-medical-blue hover:bg-medical-blue/10 hover:border-medical-blue/60 transition-colors"
+                                    >
+                                        <Activity className="h-3.5 w-3.5" />
+                                        CTG Data
+                                        {ctgFilled && (
+                                            <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                                        )}
+                                    </Button>
+                                    {ctgFilled && (
+                                        <span className="text-xs text-muted-foreground">
+                                            {Object.values(ctgData).filter(v => v.trim() !== "").length} / 21 fields
+                                        </span>
+                                    )}
+                                </div>
+
                                 <p className="mt-2 text-xs text-muted-foreground">
                                     This note is saved with the visit record. AI extraction remains optional.
                                 </p>
@@ -873,34 +976,49 @@ const DataEntry = () => {
                                         </div>
                                     </div>
                                     <p className="text-sm text-muted-foreground">
-                                        {selectedPatient ? "Start typing clinical notes to see\nAI-extracted data appear here" : "Select a patient and start typing notes"}
+                                        {selectedPatient ? "Start typing clinical notes to see AI-extracted data appear here" : "Select a patient and start typing notes"}
                                     </p>
                                 </div>
                             ) : (
-                                // ... (keeping existing JSX structure)
-                                <div className="space-y-3">
-                                    {extractedFields.map((field, idx) => (
-                                        <div
-                                            key={idx}
-                                            className="group relative bg-background/50 backdrop-blur-sm rounded-xl p-3 border border-border/50 hover:border-border transition-all duration-300 hover:shadow-md"
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <CheckCircle2 className="h-4 w-4 text-medical-blue" />
-                                                        <label className="text-xs font-medium text-muted-foreground">
-                                                            {field.name}
-                                                        </label>
-                                                    </div>
-                                                    <Input
-                                                        value={field.value}
-                                                        onChange={(e) => handleFieldChange(idx, e.target.value)}
-                                                        className="h-8 text-sm border-border/50 bg-white/50 focus-visible:ring-medical-blue/50"
-                                                    />
+                                <div className="space-y-5">
+                                    {Object.entries(groupedFields).map(([groupName, fields]) => {
+                                        if (fields.length === 0) return null;
+                                        const startIdx = extractedFields.indexOf(fields[0]);
+                                        return (
+                                            <div key={groupName}>
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-medical-blue/10 text-medical-blue text-xs font-semibold mb-2">
+                                                    {groupName}
+                                                </span>
+                                                <div className="space-y-2">
+                                                    {fields.map((field) => {
+                                                        const idx = extractedFields.indexOf(field);
+                                                        return (
+                                                            <div
+                                                                key={idx}
+                                                                className="group relative bg-background/50 backdrop-blur-sm rounded-xl p-3 border border-border/50 hover:border-border transition-all duration-300 hover:shadow-md"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-3">
+                                                                    <div className="flex-1">
+                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                            <CheckCircle2 className={cn("h-4 w-4", field.confidence === "low" ? "text-amber-400" : "text-medical-blue")} />
+                                                                            <label className="text-xs font-medium text-muted-foreground">
+                                                                                {field.name}
+                                                                            </label>
+                                                                        </div>
+                                                                        <Input
+                                                                            value={field.value}
+                                                                            onChange={(e) => handleFieldChange(idx, e.target.value)}
+                                                                            className="h-8 text-sm border-border/50 bg-white/50 focus-visible:ring-medical-blue/50"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -918,7 +1036,7 @@ const DataEntry = () => {
                                     </span>
                                 </div>
 
-                                <div className="space-y-2">
+                                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                                     {missingFields.map((field, idx) => (
                                         <div
                                             key={idx}
@@ -935,6 +1053,7 @@ const DataEntry = () => {
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
+                                                onClick={() => handleAddMissingField(field)}
                                                 className="h-7 text-xs text-medical-pink hover:text-medical-pink hover:bg-medical-pink/10"
                                             >
                                                 Add
@@ -946,8 +1065,123 @@ const DataEntry = () => {
                         )}
                     </div>
                 </div>
-            </main >
-        </div >
+            </main>
+
+            {/* CTG Data Entry Modal */}
+            <Dialog open={showCtgModal} onOpenChange={setShowCtgModal}>
+                <DialogContent className="max-w-2xl bg-card/95 backdrop-blur-xl border border-border/50 flex flex-col max-h-[90vh]">
+                    <DialogHeader className="pb-3 flex-shrink-0">
+                        <DialogTitle className="flex items-center gap-2.5 text-lg font-bold">
+                            <div className="p-1.5 rounded-lg bg-gradient-to-r from-medical-pink to-medical-blue">
+                                <Activity className="h-4 w-4 text-white" />
+                            </div>
+                            <span className="bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
+                                Fetal CTG Data Entry
+                            </span>
+                        </DialogTitle>
+                        <p className="text-xs text-muted-foreground">
+                            Transcribe values directly from your CTG machine printout. All fields are optional.
+                        </p>
+                    </DialogHeader>
+
+                    <div className="overflow-y-auto flex-1 pr-1 space-y-5">
+                        {([
+                            {
+                                label: "Basic CTG",
+                                cols: 2,
+                                fields: [
+                                    { key: "baseline_value",       label: "Baseline FHR",         unit: "bpm",  placeholder: "e.g. 140" },
+                                    { key: "accelerations",        label: "Accelerations",         unit: "/sec", placeholder: "e.g. 0.003" },
+                                    { key: "fetal_movement",       label: "Fetal Movement",        unit: "/sec", placeholder: "e.g. 0.003" },
+                                    { key: "uterine_contractions", label: "Uterine Contractions",  unit: "/sec", placeholder: "e.g. 0.004" },
+                                ],
+                            },
+                            {
+                                label: "Decelerations",
+                                cols: 3,
+                                fields: [
+                                    { key: "light_decelerations",     label: "Light",     unit: "/sec", placeholder: "e.g. 0.001" },
+                                    { key: "severe_decelerations",    label: "Severe",    unit: "/sec", placeholder: "e.g. 0" },
+                                    { key: "prolongued_decelerations",label: "Prolonged", unit: "/sec", placeholder: "e.g. 0" },
+                                ],
+                            },
+                            {
+                                label: "Variability",
+                                cols: 2,
+                                fields: [
+                                    { key: "abnormal_short_term_variability",                       label: "Abnormal STV",  unit: "%",  placeholder: "e.g. 20" },
+                                    { key: "mean_value_of_short_term_variability",                  label: "Mean STV",      unit: "",   placeholder: "e.g. 0.8" },
+                                    { key: "percentage_of_time_with_abnormal_long_term_variability",label: "Abnormal LTV",  unit: "%",  placeholder: "e.g. 0" },
+                                    { key: "mean_value_of_long_term_variability",                   label: "Mean LTV",      unit: "",   placeholder: "e.g. 10" },
+                                ],
+                            },
+                            {
+                                label: "Histogram",
+                                cols: 3,
+                                fields: [
+                                    { key: "histogram_width",           label: "Width",    unit: "", placeholder: "e.g. 64" },
+                                    { key: "histogram_min",             label: "Min",      unit: "", placeholder: "e.g. 62" },
+                                    { key: "histogram_max",             label: "Max",      unit: "", placeholder: "e.g. 126" },
+                                    { key: "histogram_number_of_peaks", label: "Peaks",    unit: "", placeholder: "e.g. 2" },
+                                    { key: "histogram_number_of_zeroes",label: "Zeroes",   unit: "", placeholder: "e.g. 0" },
+                                    { key: "histogram_mode",            label: "Mode",     unit: "", placeholder: "e.g. 140" },
+                                    { key: "histogram_mean",            label: "Mean",     unit: "", placeholder: "e.g. 137" },
+                                    { key: "histogram_median",          label: "Median",   unit: "", placeholder: "e.g. 139" },
+                                    { key: "histogram_variance",        label: "Variance", unit: "", placeholder: "e.g. 3" },
+                                    { key: "histogram_tendency",        label: "Tendency", unit: "−1/0/1", placeholder: "−1, 0 or 1" },
+                                ],
+                            },
+                        ] as { label: string; cols: number; fields: { key: string; label: string; unit: string; placeholder: string }[] }[]).map((section, si, arr) => (
+                            <div key={section.label}>
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-medical-blue/10 text-medical-blue text-xs font-semibold">
+                                        {section.label}
+                                    </span>
+                                </div>
+                                <div className={cn("grid gap-3", section.cols === 3 ? "grid-cols-3" : "grid-cols-2")}>
+                                    {section.fields.map(({ key, label, unit, placeholder }) => (
+                                        <div key={key} className="space-y-1">
+                                            <label className="flex items-center justify-between text-[11px] font-medium text-foreground/70">
+                                                {label}
+                                                {unit && <span className="text-[10px] text-muted-foreground/60 font-normal">{unit}</span>}
+                                            </label>
+                                            <Input
+                                                type="number"
+                                                step="any"
+                                                min={CTG_BOUNDS[key]?.[0]}
+                                                max={CTG_BOUNDS[key]?.[1]}
+                                                value={ctgData[key] ?? ""}
+                                                onChange={(e) => setCtgData(prev => ({ ...prev, [key]: e.target.value }))}
+                                                className="h-10 bg-background text-sm border-border/60 focus-visible:ring-medical-blue/40"
+                                                placeholder={placeholder}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                {si < arr.length - 1 && <div className="h-px bg-border/40 mt-5" />}
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="flex gap-3 pt-4 flex-shrink-0 border-t border-border/40 mt-4">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setCtgData({})}
+                            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        >
+                            Clear All
+                        </Button>
+                        <Button
+                            onClick={handleSaveCtg}
+                            className="flex-1 bg-gradient-to-r from-medical-pink to-medical-blue hover:opacity-90 text-white shadow-md"
+                        >
+                            Save CTG Data
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </div>
     );
 };
 

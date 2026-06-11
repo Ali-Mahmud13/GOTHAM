@@ -65,8 +65,9 @@ class Visit(SQLModel, table=True):
     gdm_assessment: Optional["GDMAssessment"] = Relationship(back_populates="visit")
     anemia_assessment: Optional["AnemiaAssessment"] = Relationship(back_populates="visit")
     fetal_health_assessment: Optional["FetalHealthAssessment"] = Relationship(back_populates="visit")
+    maternal_health_assessment: Optional["MaternalHealthAssessment"] = Relationship(back_populates="visit")
     ultrasound_images: list["UltrasoundImage"] = Relationship(back_populates="visit")
 
 
 # Import here to avoid circular imports
-from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
+from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment, MaternalHealthAssessment, UltrasoundImage

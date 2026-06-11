@@ -90,11 +90,36 @@ class CreateVisitRequest(BaseModel):
     mchc: Optional[float] = None  # Mean Corpuscular Hemoglobin Concentration (g/dL)
     plt: Optional[float] = None  # Platelet count (10⁹/L)
     
-    # Fetal Health/CTG Assessment fields (Basic)
+    # GDM additional
+    insulin_level: Optional[float] = None  # Insulin level (μU/mL)
+
+    # Preeclampsia / Maternal Health model
+    body_temp: Optional[float] = None   # Body temperature (°C)
+    heart_rate: Optional[int] = None    # Heart rate (bpm)
+
+    # Fetal Health/CTG Assessment fields (all 21)
     baseline_value: Optional[float] = None  # Baseline Fetal Heart Rate (bpm)
     accelerations: Optional[float] = None  # Accelerations per second
     fetal_movement: Optional[float] = None  # Fetal movements per second
-    
+    uterine_contractions: Optional[float] = None  # Uterine contractions per second
+    light_decelerations: Optional[float] = None
+    severe_decelerations: Optional[float] = None
+    prolongued_decelerations: Optional[float] = None
+    abnormal_short_term_variability: Optional[float] = None  # % time
+    mean_value_of_short_term_variability: Optional[float] = None
+    percentage_of_time_with_abnormal_long_term_variability: Optional[float] = None  # %
+    mean_value_of_long_term_variability: Optional[float] = None
+    histogram_width: Optional[float] = None
+    histogram_min: Optional[float] = None
+    histogram_max: Optional[float] = None
+    histogram_number_of_peaks: Optional[int] = None
+    histogram_number_of_zeroes: Optional[int] = None
+    histogram_mode: Optional[float] = None
+    histogram_mean: Optional[float] = None
+    histogram_median: Optional[float] = None
+    histogram_variance: Optional[float] = None
+    histogram_tendency: Optional[int] = None
+
     # Pregnancy history
     no_of_pregnancy: Optional[int] = None
     gestation_in_previous_pregnancy: Optional[int] = None

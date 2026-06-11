@@ -164,13 +164,17 @@ class DataEntryService:
                 "dia_bp",
                 "hdl",
                 "ogtt",
+                "insulin_level",
                 "sedentary_lifestyle",
                 "family_history",
                 "pcos",
                 "prediabetes",
                 "unexplained_prenatal_loss",
                 "large_child_or_birth_default",
-                # CBC
+                # Preeclampsia / Maternal Health
+                "body_temp",
+                "heart_rate",
+                # CBC / Anemia
                 "wbc",
                 "rbc",
                 "hgb",
@@ -179,10 +183,6 @@ class DataEntryService:
                 "mch",
                 "mchc",
                 "plt",
-                # Fetal
-                "baseline_value",
-                "accelerations",
-                "fetal_movement",
                 # Pregnancy history
                 "no_of_pregnancy",
                 "gestation_in_previous_pregnancy",
@@ -318,7 +318,8 @@ class DataEntryService:
             
             # Create GDMAssessment if GDM data present
             if any([request.glucose_level, request.bmi, request.sys_bp, request.dia_bp,
-                    request.hdl, request.ogtt, request.gestation_weeks, request.sedentary_lifestyle]):
+                    request.hdl, request.ogtt, request.gestation_weeks, request.sedentary_lifestyle,
+                    request.insulin_level]):
                 from app.models.assessments import GDMAssessment
                 gdm = GDMAssessment(
                     visit_id=visit.id,
@@ -328,8 +329,9 @@ class DataEntryService:
                     bmi=request.bmi,
                     hdl=request.hdl,
                     ogtt=request.ogtt,
+                    insulin_level=request.insulin_level,
                     gestation_weeks=request.gestation_weeks,
-                    sedentary_lifestyle=request.sedentary_lifestyle
+                    sedentary_lifestyle=request.sedentary_lifestyle,
                 )
                 self.session.add(gdm)
                 logger.info(f"Created GDMAssessment for visit {visit.id}")
@@ -352,17 +354,56 @@ class DataEntryService:
                 self.session.add(anemia)
                 logger.info(f"Created AnemiaAssessment for visit {visit.id}")
             
-            # Create FetalHealthAssessment if CTG data present
-            if any([request.baseline_value, request.accelerations, request.fetal_movement]):
+            # Create FetalHealthAssessment if any CTG data present
+            if any([request.baseline_value, request.accelerations, request.fetal_movement,
+                    request.uterine_contractions, request.light_decelerations,
+                    request.severe_decelerations, request.prolongued_decelerations,
+                    request.abnormal_short_term_variability,
+                    request.mean_value_of_short_term_variability,
+                    request.percentage_of_time_with_abnormal_long_term_variability,
+                    request.mean_value_of_long_term_variability,
+                    request.histogram_width, request.histogram_min, request.histogram_max,
+                    request.histogram_number_of_peaks, request.histogram_number_of_zeroes,
+                    request.histogram_mode, request.histogram_mean, request.histogram_median,
+                    request.histogram_variance, request.histogram_tendency]):
                 from app.models.assessments import FetalHealthAssessment
                 fhp = FetalHealthAssessment(
                     visit_id=visit.id,
                     baseline_value=request.baseline_value,
                     accelerations=request.accelerations,
-                    fetal_movement=request.fetal_movement
+                    fetal_movement=request.fetal_movement,
+                    uterine_contractions=request.uterine_contractions,
+                    light_decelerations=request.light_decelerations,
+                    severe_decelerations=request.severe_decelerations,
+                    prolongued_decelerations=request.prolongued_decelerations,
+                    abnormal_short_term_variability=request.abnormal_short_term_variability,
+                    mean_value_of_short_term_variability=request.mean_value_of_short_term_variability,
+                    percentage_of_time_with_abnormal_long_term_variability=request.percentage_of_time_with_abnormal_long_term_variability,
+                    mean_value_of_long_term_variability=request.mean_value_of_long_term_variability,
+                    histogram_width=request.histogram_width,
+                    histogram_min=request.histogram_min,
+                    histogram_max=request.histogram_max,
+                    histogram_number_of_peaks=request.histogram_number_of_peaks,
+                    histogram_number_of_zeroes=request.histogram_number_of_zeroes,
+                    histogram_mode=request.histogram_mode,
+                    histogram_mean=request.histogram_mean,
+                    histogram_median=request.histogram_median,
+                    histogram_variance=request.histogram_variance,
+                    histogram_tendency=request.histogram_tendency,
                 )
                 self.session.add(fhp)
                 logger.info(f"Created FetalHealthAssessment for visit {visit.id}")
+
+            # Create MaternalHealthAssessment if preeclampsia inputs present
+            if any([request.body_temp, request.heart_rate]):
+                from app.models.assessments import MaternalHealthAssessment
+                mha = MaternalHealthAssessment(
+                    visit_id=visit.id,
+                    body_temp=request.body_temp,
+                    heart_rate=request.heart_rate,
+                )
+                self.session.add(mha)
+                logger.info(f"Created MaternalHealthAssessment for visit {visit.id}")
             
             # Commit all changes
             self.session.commit()
@@ -519,7 +560,7 @@ Extract the following fields if present in the notes. Return JSON format with tw
 
 CRITICAL: Keep the output SHORT and VALID JSON.
 - Only include fields that appear in the notes.
-- For \"missing\", include AT MOST 12 items (prioritize core vitals/labs: glucose_level, gestation_weeks, bmi, sys_bp, dia_bp, hgb, wbc, rbc, baseline_value).
+- For \"missing\", include AT MOST 15 items (prioritize core vitals/labs: glucose_level, gestation_weeks, bmi, sys_bp, dia_bp, hgb, wbc, rbc, body_temp, heart_rate).
 - Do NOT include any fields outside the allowed db_field list below.
 
 IMPORTANT: Use these EXACT database field names in db_field:
@@ -532,6 +573,7 @@ GDM ASSESSMENT:
 - dia_bp: Diastolic Blood Pressure in mmHg (number)
 - hdl: HDL cholesterol in mg/dL (number)
 - ogtt: Oral Glucose Tolerance Test in mg/dL (number)
+- insulin_level: Insulin level in μU/mL (number)
 - sedentary_lifestyle: Sedentary lifestyle (boolean: true/false)
 - family_history: Family history of diabetes (boolean: true/false)
 - pcos: PCOS diagnosis (boolean: true/false)
@@ -549,10 +591,9 @@ ANEMIA/CBC ASSESSMENT:
 - mchc: MCHC in g/dL (number)
 - plt: Platelet count in 10⁹/L (number)
 
-FETAL HEALTH/CTG ASSESSMENT:
-- baseline_value: Baseline fetal heart rate in bpm (number)
-- accelerations: FHR accelerations per second (number)
-- fetal_movement: Fetal movements per second (number)
+PREECLAMPSIA / MATERNAL HEALTH ASSESSMENT:
+- body_temp: Body temperature in °C (number, e.g. 37.2)
+- heart_rate: Heart rate in bpm (integer, e.g. 88)
 
 PREGNANCY HISTORY:
 - no_of_pregnancy: Number of pregnancies (integer)
@@ -568,8 +609,7 @@ Response format:
     {{"name": "Diastolic BP", "value": 85, "confidence": "medium", "db_field": "dia_bp"}},
     {{"name": "WBC", "value": 8.5, "confidence": "high", "db_field": "wbc"}},
     {{"name": "RBC", "value": 4.2, "confidence": "high", "db_field": "rbc"}},
-    {{"name": "Hemoglobin", "value": 11.5, "confidence": "high", "db_field": "hgb"}},
-    {{"name": "Baseline FHR", "value": 140, "confidence": "high", "db_field": "baseline_value"}}
+    {{"name": "Hemoglobin", "value": 11.5, "confidence": "high", "db_field": "hgb"}}
   ],
   "missing": [
     {{"name": "HDL Cholesterol", "category": "Lab Results", "db_field": "hdl"}}
@@ -582,7 +622,6 @@ IMPORTANT NOTES:
 - Return numbers without units
 - Confidence levels: high (explicitly stated), medium (inferred), low (ambiguous)
 - For CBC, extract all 8 parameters if complete blood count is mentioned
-- For CTG/fetal monitoring, look for baseline heart rate, accelerations, and fetal movement
 - Gestation weeks is different from gestation_in_previous_pregnancy
 
 Return ONLY the JSON object, no additional text."""
