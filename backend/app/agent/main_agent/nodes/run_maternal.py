@@ -3,6 +3,7 @@ from ..state import AgentState, report_progress
 from ..tools.helper.clean_data import clean_data_for_model
 from ..tools.maternal_health_pipeline.gdp.gdp_predictor_function import predict_gdp
 from ..tools.maternal_health_pipeline.anemia.anemia import generate_anemia_xai_report as predict_anemia
+from ..tools.maternal_health_pipeline.preeclampsia_predictor import predict_preeclampsia
 from ..tools.helper.benchmark import record, summary
 import inspect
 import asyncio
@@ -92,6 +93,11 @@ async def run_maternal_node(state: AgentState) -> AgentState:
             "name": "Maternal Anemia",
             "contract_path": tools_path / "anemia" / "anemia_contract.yml",
             "predictor_function": predict_anemia
+        },
+        {
+            "name": "Preeclampsia Risk Assessment",
+            "contract_path": tools_path / "maternal health" / "mm-contract.yml",
+            "predictor_function": predict_preeclampsia,
         },
     ]
 
