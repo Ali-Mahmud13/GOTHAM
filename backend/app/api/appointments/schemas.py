@@ -38,6 +38,23 @@ class DoctorOut(BaseModel):
     id: int
     full_name: str
     email: str
+    specialty: Optional[str] = None
+    clinic_name: Optional[str] = None
+    bio: Optional[str] = None
+
+
+class PatientRegistrationRequestOut(BaseModel):
+    """Registration request as seen by the patient — names refer to the doctor."""
+    id: int
+    patient_id: int
+    doctor_id: int
+    doctor_name: str
+    doctor_email: str
+    appointment_id: Optional[int]
+    appointment_date: Optional[str]
+    appointment_start_time: Optional[str]
+    status: str
+    created_at: datetime
 
 
 class TimeSlotOut(BaseModel):
@@ -94,6 +111,11 @@ class RegistrationRequestOut(BaseModel):
     created_at: datetime
 
 
+class StandaloneRegistrationRequest(BaseModel):
+    """Body for POST /appointments/register — no appointment needed."""
+    doctor_id: int
+
+
 class ScheduleExceptionIn(BaseModel):
     exception_date: str  # YYYY-MM-DD
     kind: str  # blocked | custom
@@ -117,8 +139,15 @@ class ScheduleExceptionOut(BaseModel):
     created_at: datetime
 
 
+class ScheduleExceptionCreatedOut(BaseModel):
+    """Response for POST /exceptions — includes impacted bookings when blocking a date."""
+    exception: ScheduleExceptionOut
+    impacted_appointments: List[AvailabilityConflictOut] = []
+
+
 class BookingConfigOut(BaseModel):
     booking_horizon_days: int
+    min_booking_lead_hours: int = 2
 
 
 class NewBookingNotificationsOut(BaseModel):

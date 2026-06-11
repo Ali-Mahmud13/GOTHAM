@@ -9,6 +9,7 @@ interface MetricsCardProps {
     trend?: "up" | "down" | "neutral";
     trendValue?: string;
     color?: "pink" | "blue" | "purple";
+    onClick?: () => void;
 }
 
 export const MetricsCard = ({
@@ -18,7 +19,8 @@ export const MetricsCard = ({
     icon: Icon,
     trend,
     trendValue,
-    color = "blue"
+    color = "blue",
+    onClick,
 }: MetricsCardProps) => {
     const colorStyles = {
         pink: "from-medical-pink/10 to-medical-pink/5 text-medical-pink",
@@ -33,7 +35,7 @@ export const MetricsCard = ({
     };
 
     return (
-        <div className="relative overflow-hidden rounded-2xl bg-card border border-border/50 shadow-soft p-6 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
+        <div className={cn("relative overflow-hidden rounded-2xl bg-card border border-border/50 shadow-soft p-6 transition-all duration-300 hover:shadow-lg hover:-translate-y-1", onClick && "cursor-pointer")} onClick={onClick}>
             <div className="flex items-start justify-between">
                 <div>
                     <p className="text-sm font-medium text-muted-foreground mb-1">{title}</p>

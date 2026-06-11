@@ -46,7 +46,7 @@ interface Appointment {
 
 interface RegistrationRequestResult {
   id: number;
-  patient_name: string;
+  doctor_name: string;
   status: string;
 }
 
@@ -156,7 +156,7 @@ export const PatientDashboard = () => {
           if (regRes.ok) {
             const regData: RegistrationRequestResult[] = await regRes.json();
             const pendingReq = regData.find((r) => r.status === 'pending');
-            setPendingRegistrationDoctor(pendingReq?.patient_name || null);
+            setPendingRegistrationDoctor(pendingReq?.doctor_name || null);
           } else {
             setPendingRegistrationDoctor(null);
           }
@@ -384,13 +384,6 @@ export const PatientDashboard = () => {
               <div>
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="text-xs font-semibold text-gray-500 tracking-wide">{patient.patient_identifier}</span>
-                  <div className={cn(
-                    "px-3 py-1 rounded-full text-xs font-bold text-white",
-                    `bg-gradient-to-r ${riskConfig.bgColor}`,
-                    patient.risk_level === 'high' && "animate-pulse"
-                  )}>
-                    {riskConfig.label}
-                  </div>
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
@@ -500,23 +493,7 @@ export const PatientDashboard = () => {
         {activeTab === 'overview' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-              {/* Risk Level */}
-              <div className="group relative bg-gradient-to-br from-medical-pink/5 to-rose-50/50 p-6 rounded-2xl border border-medical-pink/20 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-medical-pink/10 rounded-full blur-2xl" />
-                <div className="relative">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-medical-pink to-rose-400 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                      <ShieldAlert className="w-6 h-6 text-white" />
-                    </div>
-                    <TrendingUp className="w-5 h-5 text-medical-pink" />
-                  </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Level</p>
-                  <p className={cn("text-3xl font-bold mb-2", riskConfig.textColor)}>{riskConfig.label}</p>
-                  <p className="text-xs text-gray-500 font-semibold">Based on latest assessment</p>
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               {/* Total Visits */}
               <button
                 onClick={() => setActiveTab('visits')}
@@ -615,10 +592,6 @@ export const PatientDashboard = () => {
                     <span className="text-sm font-bold text-gray-900">{patient.patient_identifier}</span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                    <span className="text-sm font-semibold text-gray-600">Risk Level</span>
-                    <span className={cn("text-sm font-bold", riskConfig.textColor)}>{riskConfig.label}</span>
-                  </div>
-                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                     <span className="text-sm font-semibold text-gray-600">Contact</span>
                     <span className="text-sm font-bold text-gray-900">{patient.contact_number}</span>
                   </div>
@@ -663,21 +636,30 @@ export const PatientDashboard = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {appointments.slice(0, 3).map((appt) => (
-                    <div key={appt.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-medical-blue/10 rounded-lg flex items-center justify-center">
+                  {appointments.slice(0, 3).map((appt, idx) => (
+                    <div key={appt.id} className={`flex items-center justify-between p-3 rounded-xl relative ${
+                      idx === 0
+                        ? 'bg-gradient-to-r from-medical-pink/10 to-medical-blue/10 border border-medical-blue/20'
+                        : 'bg-blue-50'
+                    }`}>
+                      {idx === 0 && (
+                        <span className="absolute top-2 right-2 text-[9px] font-bold uppercase bg-gradient-to-r from-medical-pink to-medical-blue text-white px-1.5 py-0.5 rounded-full leading-none">
+                          Next
+                        </span>
+                      )}
+                      <div className="flex items-center gap-3 pr-10">
+                        <div className="w-10 h-10 bg-medical-blue/10 rounded-lg flex items-center justify-center flex-shrink-0">
                           <Stethoscope className="w-5 h-5 text-medical-blue" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{appt.doctor_name}</p>
+                          <p className="text-sm font-semibold text-gray-900">Dr. {appt.doctor_name}</p>
                           <p className="text-xs text-gray-500">
-                            {new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            {new Date(appt.appointment_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             {' · '}{appt.start_time} – {appt.end_time}
                           </p>
                         </div>
                       </div>
-                      <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${
+                      <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize flex-shrink-0 ${
                         appt.status === 'booked' ? 'bg-emerald-100 text-emerald-700' :
                         appt.status === 'pending_approval' ? 'bg-amber-100 text-amber-700' :
                         appt.status === 'cancelled' ? 'bg-red-100 text-red-700' :
