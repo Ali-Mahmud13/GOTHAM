@@ -129,11 +129,14 @@ def save_assessment_report(
         if not latest_visit:
             return False
 
+        now = datetime.utcnow()
+
         if assessment_type in {"maternal", "both"}:
             gdm = session.exec(select(GDMAssessment).where(GDMAssessment.visit_id == latest_visit.id)).first()
             if not gdm:
                 gdm = GDMAssessment(visit_id=latest_visit.id)
             gdm.ai_report = assessment_report
+            gdm.created_at = now
             gdm_risk = _to_gdm_risk_value(risk_levels.get("gdm"))
             if gdm_risk is not None:
                 gdm.risk_level = gdm_risk
@@ -143,6 +146,7 @@ def save_assessment_report(
             if not anemia:
                 anemia = AnemiaAssessment(visit_id=latest_visit.id)
             anemia.ai_report = assessment_report
+            anemia.created_at = now
             session.add(anemia)
 
         if assessment_type in {"fetal", "both"}:
@@ -150,6 +154,7 @@ def save_assessment_report(
             if not fetal:
                 fetal = FetalHealthAssessment(visit_id=latest_visit.id)
             fetal.ai_report = assessment_report
+            fetal.created_at = now
             fetal_status = _to_fetal_status_value(risk_levels.get("fetal"))
             if fetal_status is not None:
                 fetal.status = fetal_status

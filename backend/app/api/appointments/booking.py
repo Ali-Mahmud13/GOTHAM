@@ -14,8 +14,10 @@ from .schemas import (
     AppointmentOut, BookingRequest, TimeSlotOut, RescheduleRequest
 )
 from .utils import (
-    _require_patient, _parse_hhmm, _is_past, _validate_slot_against_availability,
-    _appointment_out, _effective_windows_for_date, _generate_slots, BOOKING_HORIZON_DAYS
+    _require_patient, _parse_hhmm, _is_past, _is_within_lead_time,
+    _validate_slot_against_availability,
+    _appointment_out, _effective_windows_for_date, _generate_slots,
+    BOOKING_HORIZON_DAYS, MIN_BOOKING_LEAD_HOURS
 )
 
 router = APIRouter()
@@ -67,6 +69,11 @@ def book_appointment(
     """Book an appointment for the authenticated patient."""
     _require_patient(user)
 
+    # Verify the target doctor exists and is verified
+    doctor = session.get(AuthUser, request.doctor_id)
+    if not doctor or doctor.role != "doctor" or not doctor.is_active or doctor.verification_status != "verified":
+        raise HTTPException(status_code=404, detail="Doctor not found or not accepting appointments.")
+
     # Validate slot
     _validate_slot_against_availability(
         session, request.doctor_id, request.appointment_date, request.start_time, request.end_time
@@ -74,6 +81,12 @@ def book_appointment(
 
     if _is_past(request.appointment_date, request.start_time, request.timezone):
         raise HTTPException(status_code=400, detail="Cannot book an appointment in the past.")
+
+    if _is_within_lead_time(request.appointment_date, request.start_time, request.timezone):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Appointments must be booked at least {MIN_BOOKING_LEAD_HOURS} hour(s) in advance.",
+        )
 
     # Pre-check for conflicts
     existing = session.exec(
@@ -185,12 +198,33 @@ def reschedule_appointment(
     if not appt or (appt.doctor_id != user.id and appt.patient_id != user.id):
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    if appt.status != "booked":
+    if appt.status not in ("booked", "pending_approval"):
         raise HTTPException(status_code=400, detail="Cannot reschedule.")
 
     _validate_slot_against_availability(
         session, appt.doctor_id, request.appointment_date, request.start_time, request.end_time
     )
+
+    if _is_past(request.appointment_date, request.start_time, request.timezone):
+        raise HTTPException(status_code=400, detail="Cannot reschedule to a past time.")
+
+    if _is_within_lead_time(request.appointment_date, request.start_time, request.timezone):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Rescheduled slot must be at least {MIN_BOOKING_LEAD_HOURS} hour(s) from now.",
+        )
+
+    # Prevent double-booking the new slot
+    conflict = session.exec(
+        select(Appointment)
+        .where(Appointment.doctor_id == appt.doctor_id)
+        .where(Appointment.appointment_date == request.appointment_date)
+        .where(Appointment.start_time == request.start_time)
+        .where(Appointment.status.in_(["booked", "pending_approval"]))
+        .where(Appointment.id != appt.id)
+    ).first()
+    if conflict:
+        raise HTTPException(status_code=409, detail="That slot is already booked.")
 
     appt.appointment_date = request.appointment_date
     appt.start_time = request.start_time

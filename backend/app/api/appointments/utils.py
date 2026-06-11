@@ -10,6 +10,23 @@ from app.models.patient import Patient
 from .schemas import AvailabilitySlotIn, AvailabilityConflictOut, AppointmentOut
 
 BOOKING_HORIZON_DAYS = 14
+# Minimum notice a patient must give before a slot is bookable (in hours).
+MIN_BOOKING_LEAD_HOURS = 2
+
+
+def _is_within_lead_time(appointment_date: str, start_time: str, tz_name: str) -> bool:
+    """Return True if the slot starts sooner than MIN_BOOKING_LEAD_HOURS from now."""
+    zone = _safe_tz(tz_name)
+    try:
+        slot_dt = datetime.strptime(
+            f"{appointment_date} {start_time}", "%Y-%m-%d %H:%M"
+        ).replace(tzinfo=zone)
+    except ValueError:
+        return True
+    from datetime import timedelta
+    earliest_bookable = datetime.now(tz=zone) + timedelta(hours=MIN_BOOKING_LEAD_HOURS)
+    return slot_dt < earliest_bookable
+
 
 def _require_doctor(user: AuthUser) -> None:
     if user.role != "doctor":
@@ -66,6 +83,40 @@ def _hhmm_to_mins(hhmm: str) -> int:
     return h * 60 + m
 
 
+def _subtract_blocked_times(wins: List[tuple[str, str, int]], block_exceptions: List[DoctorScheduleException]) -> List[tuple[str, str, int]]:
+    result = []
+    blocks = []
+    for b in block_exceptions:
+        try:
+            blocks.append((_hhmm_to_mins(b.start_time), _hhmm_to_mins(b.end_time)))
+        except (ValueError, TypeError):
+            pass
+            
+    for w_start_str, w_end_str, dur in wins:
+        w_start = _hhmm_to_mins(w_start_str)
+        w_end = _hhmm_to_mins(w_end_str)
+        
+        current_intervals = [(w_start, w_end)]
+        for b_start, b_end in blocks:
+            next_intervals = []
+            for c_start, c_end in current_intervals:
+                if b_end <= c_start or b_start >= c_end:
+                    next_intervals.append((c_start, c_end))
+                else:
+                    if c_start < b_start:
+                        next_intervals.append((c_start, b_start))
+                    if b_end < c_end:
+                        next_intervals.append((b_end, c_end))
+            current_intervals = next_intervals
+            
+        for c_start, c_end in current_intervals:
+            if c_end - c_start >= dur:
+                def to_hhmm(m: int) -> str:
+                    return f"{m//60:02d}:{m%60:02d}"
+                result.append((to_hhmm(c_start), to_hhmm(c_end), dur))
+    return result
+
+
 def _effective_windows_for_date(
     session: Session,
     doctor_id: int,
@@ -86,22 +137,6 @@ def _effective_windows_for_date(
     if blocked:
         return None
 
-    customs = session.exec(
-        select(DoctorScheduleException)
-        .where(DoctorScheduleException.doctor_id == doctor_id)
-        .where(DoctorScheduleException.exception_date == target_date_str)
-        .where(DoctorScheduleException.kind == "custom")
-        .order_by(DoctorScheduleException.id)
-    ).all()
-    if customs:
-        out: List[tuple[str, str, int]] = []
-        for c in customs:
-            if not c.start_time or not c.end_time:
-                continue
-            dur = c.slot_duration_minutes or 30
-            out.append((c.start_time, c.end_time, dur))
-        return out
-
     try:
         d = datetime.strptime(target_date_str, "%Y-%m-%d").date()
     except ValueError:
@@ -111,8 +146,20 @@ def _effective_windows_for_date(
     if recurring_slots_override is not None:
         rows = [s for s in recurring_slots_override if s.day_of_week == dow]
         if not rows:
-            return []
-        return [(s.start_time, s.end_time, s.slot_duration_minutes) for s in rows]
+            wins = []
+        else:
+            wins = [(s.start_time, s.end_time, s.slot_duration_minutes) for s in rows]
+            
+        block_times = session.exec(
+            select(DoctorScheduleException)
+            .where(DoctorScheduleException.doctor_id == doctor_id)
+            .where(DoctorScheduleException.exception_date == target_date_str)
+            .where(DoctorScheduleException.kind == "custom")
+        ).all()
+        if block_times and wins:
+            wins = _subtract_blocked_times(wins, block_times)
+            
+        return wins
 
     availability = session.exec(
         select(DoctorAvailability)
@@ -121,8 +168,21 @@ def _effective_windows_for_date(
         .where(DoctorAvailability.is_active == True)
     ).all()
     if not availability:
-        return []
-    return [(av.start_time, av.end_time, av.slot_duration_minutes) for av in availability]
+        wins = []
+    else:
+        wins = [(av.start_time, av.end_time, av.slot_duration_minutes) for av in availability]
+
+    block_times = session.exec(
+        select(DoctorScheduleException)
+        .where(DoctorScheduleException.doctor_id == doctor_id)
+        .where(DoctorScheduleException.exception_date == target_date_str)
+        .where(DoctorScheduleException.kind == "custom")
+    ).all()
+    
+    if block_times and wins:
+        wins = _subtract_blocked_times(wins, block_times)
+        
+    return wins
 
 
 def _slot_times_fit_windows(start_mins: int, end_mins: int, windows: List[tuple[str, str, int]]) -> bool:

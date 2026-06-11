@@ -19,6 +19,7 @@ from app.core.security import (
     is_legacy_sha256_hash,
     verify_stored_password,
     require_admin,
+    get_current_user_compat,
 )
 
 
@@ -39,6 +40,11 @@ class SignupRequest(BaseModel):
     password: str
     full_name: str
     role: str
+    # Doctor-only credential fields (ignored for patient signups)
+    license_number: Optional[str] = None
+    specialty: Optional[str] = None
+    clinic_name: Optional[str] = None
+    bio: Optional[str] = None
 
     @field_validator("role")
     @classmethod
@@ -101,6 +107,7 @@ def _user_payload(auth_user: AuthUser, session: Session) -> dict:
         "full_name": auth_user.full_name,
         "role": auth_user.role,
         "patient_id": auth_user.patient_id,
+        "is_admin": auth_user.is_admin,
     }
     if auth_user.role == "patient" and auth_user.patient_id:
         patient = session.get(Patient, auth_user.patient_id)
@@ -135,6 +142,17 @@ def login(request: Request, payload: LoginRequest, session: Session = Depends(ge
         )
 
     if not auth_user.is_active:
+        # Give a more descriptive error for doctors awaiting verification
+        if auth_user.role == "doctor" and auth_user.verification_status == "pending_verification":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your doctor account is pending admin verification. You will be notified once approved.",
+            )
+        if auth_user.role == "doctor" and auth_user.verification_status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your doctor account application was rejected. Please contact support.",
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
@@ -176,12 +194,20 @@ def signup(request: Request, payload: SignupRequest, session: Session = Depends(
             detail="Email already registered",
         )
 
+    is_doctor = payload.role == "doctor"
+
     new_user = AuthUser(
         email=payload.email.lower(),
         full_name=payload.full_name,
         password_hash=hash_password(payload.password),
         role=payload.role,
-        is_active=True,
+        # Doctors start inactive and pending verification; patients are active immediately.
+        is_active=not is_doctor,
+        verification_status="pending_verification" if is_doctor else None,
+        license_number=payload.license_number if is_doctor else None,
+        specialty=payload.specialty if is_doctor else None,
+        clinic_name=payload.clinic_name if is_doctor else None,
+        bio=payload.bio if is_doctor else None,
     )
 
     session.add(new_user)
@@ -223,10 +249,24 @@ def signup(request: Request, payload: SignupRequest, session: Session = Depends(
         "full_name": new_user.full_name,
         "role": new_user.role,
         "patient_id": new_user.patient_id,
+        "verification_status": new_user.verification_status,
+        "is_admin": new_user.is_admin,
     }
 
     if patient_info:
         user_data["patient_info"] = patient_info
+
+    if is_doctor:
+        # Doctor accounts are not active yet — do NOT issue tokens or log them in.
+        return LoginResponse(
+            success=True,
+            message=(
+                f"Application submitted, {new_user.full_name}! "
+                "Your account is pending admin verification. You will be able to log in once approved."
+            ),
+            user=user_data,
+            token_type="bearer",
+        )
 
     access, refresh = _issue_tokens(new_user)
 
@@ -238,6 +278,109 @@ def signup(request: Request, payload: SignupRequest, session: Session = Depends(
         refresh_token=refresh,
         token_type="bearer",
     )
+
+
+# ---------------------------------------------------------------------------
+# Self-profile
+# ---------------------------------------------------------------------------
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    specialty: Optional[str] = None
+    clinic_name: Optional[str] = None
+    bio: Optional[str] = None
+
+
+@router.get("/me")
+def get_me(
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Return the authenticated user's own profile."""
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "specialty": user.specialty if user.role == "doctor" else None,
+        "clinic_name": user.clinic_name if user.role == "doctor" else None,
+        "bio": user.bio if user.role == "doctor" else None,
+    }
+
+
+@router.put("/me")
+def update_me(
+    body: UpdateProfileRequest,
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Update the authenticated user's own profile."""
+    if body.full_name is not None:
+        user.full_name = body.full_name
+    if user.role == "doctor":
+        if body.specialty is not None:
+            user.specialty = body.specialty
+        if body.clinic_name is not None:
+            user.clinic_name = body.clinic_name
+        if body.bio is not None:
+            user.bio = body.bio
+    session.add(user)
+    session.commit()
+    return {"message": "Profile updated successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Admin: Doctor Verification
+# ---------------------------------------------------------------------------
+
+@router.get("/doctors/pending", tags=["Authentication"])
+def list_pending_doctors(_: AuthUser = Depends(require_admin), session: Session = Depends(get_session)):
+    """List all doctor accounts awaiting verification (admin only)."""
+    doctors = session.exec(
+        select(AuthUser)
+        .where(AuthUser.role == "doctor")
+        .where(AuthUser.verification_status == "pending_verification")
+        .order_by(AuthUser.created_at)
+    ).all()
+    return [
+        {
+            "id": d.id,
+            "email": d.email,
+            "full_name": d.full_name,
+            "license_number": d.license_number,
+            "specialty": d.specialty,
+            "clinic_name": d.clinic_name,
+            "bio": d.bio,
+            "created_at": d.created_at,
+        }
+        for d in doctors
+    ]
+
+
+@router.put("/doctors/{doctor_id}/approve", tags=["Authentication"])
+def approve_doctor(doctor_id: int, _: AuthUser = Depends(require_admin), session: Session = Depends(get_session)):
+    """Approve a pending doctor account (admin only)."""
+    doctor = session.get(AuthUser, doctor_id)
+    if not doctor or doctor.role != "doctor":
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    doctor.is_active = True
+    doctor.verification_status = "verified"
+    session.add(doctor)
+    session.commit()
+    return {"detail": f"Doctor {doctor.full_name} approved and activated."}
+
+
+@router.put("/doctors/{doctor_id}/reject", tags=["Authentication"])
+def reject_doctor(doctor_id: int, _: AuthUser = Depends(require_admin), session: Session = Depends(get_session)):
+    """Reject a pending doctor account (admin only)."""
+    doctor = session.get(AuthUser, doctor_id)
+    if not doctor or doctor.role != "doctor":
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    doctor.is_active = False
+    doctor.verification_status = "rejected"
+    session.add(doctor)
+    session.commit()
+    return {"detail": f"Doctor {doctor.full_name} application rejected."}
 
 
 @router.post("/refresh", response_model=LoginResponse)

@@ -10,12 +10,12 @@ from app.models.auth import AuthUser
 from app.models.appointments import DoctorAvailability, DoctorScheduleException, Appointment
 
 from .schemas import (
-    AvailabilitySlotOut, SetAvailabilityRequest, ScheduleExceptionIn, ScheduleExceptionOut,
-    BookingConfigOut
+    AvailabilitySlotOut, SetAvailabilityRequest, ScheduleExceptionIn,
+    ScheduleExceptionOut, ScheduleExceptionCreatedOut, BookingConfigOut
 )
 from .utils import (
     _require_doctor, _parse_hhmm, _hhmm_to_mins, _collect_future_appointment_conflicts_for_recurring_change,
-    _validate_custom_windows_no_overlap, BOOKING_HORIZON_DAYS
+    _validate_custom_windows_no_overlap, BOOKING_HORIZON_DAYS, MIN_BOOKING_LEAD_HOURS
 )
 
 router = APIRouter()
@@ -37,8 +37,11 @@ def _schedule_exception_to_out(row: DoctorScheduleException) -> ScheduleExceptio
 
 @router.get("/booking-config", response_model=BookingConfigOut)
 def get_booking_config():
-    """Public: patient booking horizon (days from today)."""
-    return BookingConfigOut(booking_horizon_days=BOOKING_HORIZON_DAYS)
+    """Public: patient booking horizon and minimum lead time."""
+    return BookingConfigOut(
+        booking_horizon_days=BOOKING_HORIZON_DAYS,
+        min_booking_lead_hours=MIN_BOOKING_LEAD_HOURS,
+    )
 
 
 @router.get("/availability/my", response_model=List[AvailabilitySlotOut])
@@ -152,13 +155,13 @@ def delete_availability_slot(
     session.commit()
 
 
-@router.post("/exceptions", response_model=ScheduleExceptionOut, status_code=201)
+@router.post("/exceptions", response_model=ScheduleExceptionCreatedOut, status_code=201)
 def create_schedule_exception(
     body: ScheduleExceptionIn,
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Create a per-date schedule exception."""
+    """Create a per-date schedule exception. Returns any impacted appointments on blocked dates."""
     _require_doctor(user)
     kind = body.kind.strip().lower()
     if kind not in ("blocked", "custom"):
@@ -175,12 +178,40 @@ def create_schedule_exception(
         session.add(row)
         session.commit()
         session.refresh(row)
-        return _schedule_exception_to_out(row)
+
+        # Find existing booked/pending appointments on this date so the doctor is warned.
+        from app.models.appointments import Appointment
+        from sqlmodel import select as sq_select
+        from app.models.auth import AuthUser as _AuthUser
+        impacted = session.exec(
+            sq_select(Appointment)
+            .where(Appointment.doctor_id == user.id)
+            .where(Appointment.appointment_date == body.exception_date)
+            .where(Appointment.status.in_(["booked", "pending_approval"]))
+        ).all()
+        from .schemas import AvailabilityConflictOut
+        impacted_out = [
+            AvailabilityConflictOut(
+                appointment_id=a.id,
+                appointment_date=a.appointment_date,
+                start_time=a.start_time,
+                end_time=a.end_time,
+                patient_id=a.patient_id,
+                patient_name=(
+                    (session.get(_AuthUser, a.patient_id) or _AuthUser()).full_name or "Unknown"
+                ),
+            )
+            for a in impacted
+        ]
+        return ScheduleExceptionCreatedOut(
+            exception=_schedule_exception_to_out(row),
+            impacted_appointments=impacted_out,
+        )
 
     # custom logic
     if not body.start_time or not body.end_time:
         raise HTTPException(status_code=400, detail="start/end required for custom")
-    
+
     row = DoctorScheduleException(
         doctor_id=user.id,
         exception_date=body.exception_date,
@@ -194,7 +225,10 @@ def create_schedule_exception(
     session.add(row)
     session.commit()
     session.refresh(row)
-    return _schedule_exception_to_out(row)
+    return ScheduleExceptionCreatedOut(
+        exception=_schedule_exception_to_out(row),
+        impacted_appointments=[],
+    )
 
 
 @router.get("/exceptions/my", response_model=List[ScheduleExceptionOut])

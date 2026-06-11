@@ -37,3 +37,17 @@ class AuthUser(SQLModel, table=True):
 
     # Admin flag (e.g. list /auth/users). Default false for all users.
     is_admin: bool = Field(default=False, description="Platform admin capabilities")
+
+    # Doctor verification fields (only relevant when role == 'doctor')
+    # pending_verification | verified | rejected
+    verification_status: Optional[str] = Field(
+        default=None,
+        description="Doctor account verification state: pending_verification, verified, or rejected",
+    )
+    license_number: Optional[str] = Field(default=None, description="Medical license number")
+    specialty: Optional[str] = Field(default=None, description="OB/GYN subspecialty")
+    clinic_name: Optional[str] = Field(default=None, description="Name of the clinic or hospital")
+    bio: Optional[str] = Field(
+        default=None,
+        description="Doctor's professional biography / description of experience",
+    )

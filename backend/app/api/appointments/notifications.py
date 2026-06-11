@@ -8,7 +8,7 @@ from app.core.security import get_current_user_compat
 from app.models.auth import AuthUser
 from app.models.appointments import Appointment, DoctorNotificationState
 
-from .schemas import AppointmentOut, NewBookingNotificationsOut
+from .schemas import AppointmentOut
 from .utils import _appointment_out, _require_doctor
 
 router = APIRouter()
@@ -107,23 +107,22 @@ def dismiss_cancel_notifications(
     session.commit()
 
 
-@router.get("/new-booking-notifications", response_model=NewBookingNotificationsOut)
+@router.get("/new-booking-notifications", response_model=List[AppointmentOut])
 def get_new_booking_notifications(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Return count of new bookings since doctor last cleared them."""
+    """Return new bookings since doctor last cleared them (full appointment detail)."""
     _require_doctor(user)
     state = session.exec(
         select(DoctorNotificationState).where(DoctorNotificationState.doctor_id == user.id)
     ).first()
-    
+
     since = state.last_seen_new_bookings_at if state else datetime(2000, 1, 1)
 
-    # We count:
-    # 1. Any appointment in 'pending_approval' status (these ALWAYS need attention until processed)
+    # 1. Any appointment in 'pending_approval' (always needs attention until processed)
     # 2. Any 'booked' appointment created after the last check
-    query = (
+    appointments = session.exec(
         select(Appointment)
         .where(Appointment.doctor_id == user.id)
         .where(
@@ -132,9 +131,9 @@ def get_new_booking_notifications(
                 (Appointment.status == "booked") & (Appointment.created_at > since)
             )
         )
-    )
-    count = session.exec(query).all()
-    return NewBookingNotificationsOut(count=len(count))
+        .order_by(Appointment.created_at.desc())
+    ).all()
+    return [_appointment_out(a, session) for a in appointments]
 
 
 @router.put("/dismiss-new-booking-notifications", status_code=204)

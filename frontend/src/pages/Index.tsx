@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, Bot, FileInput, AlertTriangle, BrainCircuit, Calendar, CalendarPlus, UserCheck, UserX, Clock } from "lucide-react";
+import { Users, Bot, FileInput, AlertTriangle, BrainCircuit, Calendar, CalendarPlus, UserCheck, UserX, Clock, X, ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { DashboardCard } from "@/components/DashboardCard";
@@ -55,6 +55,17 @@ interface Appointment {
   notes: string | null;
 }
 
+interface WeeklyAssessmentRun {
+  visit_id: number;
+  patient_name: string;
+  patient_identifier: string;
+  run_at: string;
+  assessment_type: 'Complete' | 'Maternal' | 'Fetal';
+  gdm: { risk_level: number | null; confidence: number | null; ai_report: string | null } | null;
+  anemia: { diagnosis: string | null; confidence: number | null; ai_report: string | null } | null;
+  fetal: { status: number | null; confidence: number | null; ai_report: string | null } | null;
+}
+
 interface RegistrationRequest {
   id: number;
   patient_id: number;
@@ -81,6 +92,10 @@ const Index = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [apptLoading, setApptLoading] = useState(true);
   const [newBookingCount, setNewBookingCount] = useState(0);
+  const [showAssessmentModal, setShowAssessmentModal] = useState(false);
+  const [weeklyAssessments, setWeeklyAssessments] = useState<WeeklyAssessmentRun[]>([]);
+  const [assessmentModalLoading, setAssessmentModalLoading] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<WeeklyAssessmentRun | null>(null);
   const [regRequests, setRegRequests] = useState<RegistrationRequest[]>([]);
   const [regRequestsLoading, setRegRequestsLoading] = useState(true);
   const [regRequestActionId, setRegRequestActionId] = useState<number | null>(null);
@@ -145,10 +160,20 @@ const Index = () => {
       );
       if (res.ok) {
         const data = await res.json();
-        setNewBookingCount(data.count || 0);
+        setNewBookingCount(Array.isArray(data) ? data.length : (data.count || 0));
       }
     } catch {
       // ignore
+    }
+  };
+
+  const fetchWeeklyAssessments = async () => {
+    setAssessmentModalLoading(true);
+    try {
+      const res = await apiFetch('/api/dashboard/assessments/week', { method: 'GET' }, tokens, setTokens, logout);
+      if (res.ok) setWeeklyAssessments(await res.json());
+    } catch { } finally {
+      setAssessmentModalLoading(false);
     }
   };
 
@@ -292,6 +317,7 @@ const Index = () => {
                 trend="up"
                 trendValue=""
                 color="purple"
+                onClick={() => { setShowAssessmentModal(true); fetchWeeklyAssessments(); }}
               />
             </div>
 
@@ -536,6 +562,113 @@ const Index = () => {
               <RiskReportPanel onClose={() => setShowReport(false)} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* AI Assessments Modal */}
+      {showAssessmentModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card/95 backdrop-blur-xl rounded-2xl border border-border/50 shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
+              {selectedRun ? (
+                <button onClick={() => setSelectedRun(null)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </button>
+              ) : (
+                <h2 className="text-lg font-bold bg-gradient-to-r from-medical-pink to-medical-blue bg-clip-text text-transparent">
+                  AI Assessments This Week
+                </h2>
+              )}
+              <button onClick={() => { setShowAssessmentModal(false); setSelectedRun(null); }}
+                className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors">
+                <X className="h-5 w-5 text-muted-foreground" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {!selectedRun && (
+                assessmentModalLoading ? (
+                  <div className="flex justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-medical-blue" />
+                  </div>
+                ) : weeklyAssessments.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-12 text-sm">No assessments run this week.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {weeklyAssessments.map(run => (
+                      <button key={run.visit_id} onClick={() => setSelectedRun(run)}
+                        className="w-full text-left p-4 rounded-xl bg-background/50 border border-border/50 hover:border-medical-blue/40 hover:bg-muted/30 transition-all group">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-foreground">{run.patient_name}</p>
+                            <p className="text-xs text-muted-foreground">{run.patient_identifier} · {new Date(run.run_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                              run.assessment_type === 'Complete' ? 'bg-purple-100 text-purple-700' :
+                              run.assessment_type === 'Maternal' ? 'bg-pink-100 text-pink-700' :
+                              'bg-blue-100 text-blue-700'
+                            }`}>{run.assessment_type}</span>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {selectedRun && (
+                <div className="space-y-4">
+                  <div className="mb-2">
+                    <h3 className="text-base font-bold text-foreground">{selectedRun.patient_name}</h3>
+                    <p className="text-xs text-muted-foreground">{selectedRun.patient_identifier} · {new Date(selectedRun.run_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                  </div>
+
+                  {selectedRun.gdm && (
+                    <div className="p-4 rounded-xl border border-medical-pink/20 bg-medical-pink/5">
+                      <p className="text-xs font-bold uppercase tracking-wide text-medical-pink mb-2">GDM Assessment</p>
+                      <p className="text-sm font-semibold">Result: {['Normal', 'Elevated', 'High'][selectedRun.gdm.risk_level ?? 0]}</p>
+                      {selectedRun.gdm.confidence != null && (
+                        <p className="text-xs text-muted-foreground">Confidence: {(selectedRun.gdm.confidence * 100).toFixed(1)}%</p>
+                      )}
+                      {selectedRun.gdm.ai_report && (
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{selectedRun.gdm.ai_report}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedRun.anemia && (
+                    <div className="p-4 rounded-xl border border-violet-200 bg-violet-50/50">
+                      <p className="text-xs font-bold uppercase tracking-wide text-violet-700 mb-2">Anemia Assessment</p>
+                      <p className="text-sm font-semibold">Result: {selectedRun.anemia.diagnosis ?? '—'}</p>
+                      {selectedRun.anemia.confidence != null && (
+                        <p className="text-xs text-muted-foreground">Confidence: {(selectedRun.anemia.confidence * 100).toFixed(1)}%</p>
+                      )}
+                      {selectedRun.anemia.ai_report && (
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{selectedRun.anemia.ai_report}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedRun.fetal && (
+                    <div className="p-4 rounded-xl border border-medical-blue/20 bg-medical-blue/5">
+                      <p className="text-xs font-bold uppercase tracking-wide text-medical-blue mb-2">Fetal Health Assessment</p>
+                      <p className="text-sm font-semibold">Result: {['', 'Normal', 'Suspect', 'Pathological'][selectedRun.fetal.status ?? 0] ?? '—'}</p>
+                      {selectedRun.fetal.confidence != null && (
+                        <p className="text-xs text-muted-foreground">Confidence: {(selectedRun.fetal.confidence * 100).toFixed(1)}%</p>
+                      )}
+                      {selectedRun.fetal.ai_report && (
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{selectedRun.fetal.ai_report}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

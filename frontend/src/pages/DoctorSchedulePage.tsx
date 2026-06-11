@@ -53,6 +53,15 @@ function todayLocalISO(): string {
   return `${y}-${mo}-${da}`;
 }
 
+function tomorrowLocalISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${da}`;
+}
+
 function addDaysISO(base: string, days: number): string {
   const d = new Date(base + 'T12:00:00');
   d.setDate(d.getDate() + days);
@@ -75,6 +84,14 @@ export const DoctorSchedulePage = () => {
   const [exceptions, setExceptions] = useState<ScheduleException[]>([]);
   const [excLoading, setExcLoading] = useState(false);
   const [excSaving, setExcSaving] = useState(false);
+  const [impactedAppointments, setImpactedAppointments] = useState<Array<{
+    appointment_id: number;
+    appointment_date: string;
+    start_time: string;
+    end_time: string;
+    patient_id: number;
+    patient_name: string;
+  }>>([]);
   const [excForm, setExcForm] = useState({
     exception_date: '',
     kind: 'blocked' as 'blocked' | 'custom',
@@ -212,6 +229,7 @@ export const DoctorSchedulePage = () => {
     setExcSaving(true);
     setMessage(null);
     setConflicts(null);
+    setImpactedAppointments([]);
     try {
       const body: Record<string, unknown> = {
         exception_date: excForm.exception_date,
@@ -235,7 +253,18 @@ export const DoctorSchedulePage = () => {
         logout,
       );
       if (res.ok) {
-        setMessage({ type: 'success', text: 'Exception saved.' });
+        const data = await res.json();
+        // data is now { exception: {...}, impacted_appointments: [...] }
+        const impacted = data.impacted_appointments ?? [];
+        if (impacted.length > 0) {
+          setImpactedAppointments(impacted);
+          setMessage({
+            type: 'error',
+            text: `Date blocked, but ${impacted.length} existing appointment${impacted.length === 1 ? '' : 's'} will be affected. Please cancel or reschedule them.`,
+          });
+        } else {
+          setMessage({ type: 'success', text: 'Exception saved.' });
+        }
         setExcForm(prev => ({ ...prev, exception_date: '' }));
         fetchExceptions();
       } else {
@@ -328,6 +357,30 @@ export const DoctorSchedulePage = () => {
                   </div>
                   <div className="text-xs text-gray-600">
                     Patient: {c.patient_name} (#{c.patient_id}) · Appointment #{c.appointment_id}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {impactedAppointments.length > 0 && (
+          <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-6 mb-6">
+            <h3 className="font-semibold text-amber-900 mb-1 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Affected Appointments on Blocked Date
+            </h3>
+            <p className="text-sm text-amber-700 mb-4">
+              The date was blocked, but the following existing appointments are still active. Please cancel or reschedule them from the Appointments page.
+            </p>
+            <ul className="space-y-2">
+              {impactedAppointments.map(a => (
+                <li key={a.appointment_id} className="p-3 rounded-lg bg-amber-50 border border-amber-100">
+                  <div className="text-sm font-semibold text-gray-900">
+                    {a.appointment_date} · {a.start_time}–{a.end_time}
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    Patient: {a.patient_name} · Appointment #{a.appointment_id}
                   </div>
                 </li>
               ))}
@@ -479,7 +532,7 @@ export const DoctorSchedulePage = () => {
                   <input
                     type="date"
                     value={excForm.exception_date}
-                    min={todayLocalISO()}
+                    min={tomorrowLocalISO()}
                     onChange={e => setExcForm(prev => ({ ...prev, exception_date: e.target.value }))}
                     className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm"
                   />
@@ -492,7 +545,7 @@ export const DoctorSchedulePage = () => {
                     className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm"
                   >
                     <option value="blocked">Block entire day</option>
-                    <option value="custom">Custom hours (this date only)</option>
+                    <option value="custom">Block specific hours</option>
                   </select>
                 </div>
               </div>
@@ -516,16 +569,6 @@ export const DoctorSchedulePage = () => {
                       onChange={e => setExcForm(prev => ({ ...prev, end_time: e.target.value }))}
                       className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Slot (min)</label>
-                    <select
-                      value={excForm.slot_duration_minutes}
-                      onChange={e => setExcForm(prev => ({ ...prev, slot_duration_minutes: Number(e.target.value) }))}
-                      className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm"
-                    >
-                      {[15, 20, 30, 45, 60].map(d => <option key={d} value={d}>{d} min</option>)}
-                    </select>
                   </div>
                 </div>
               )}
@@ -552,7 +595,10 @@ export const DoctorSchedulePage = () => {
                       <div className="text-sm">
                         <span className="font-medium">{ex.exception_date}</span>
                         {' — '}
-                        <span className="text-gray-600">{ex.kind === 'blocked' ? 'Blocked' : `${ex.start_time}–${ex.end_time} (${ex.slot_duration_minutes}m)`}</span>
+                        <span className="text-gray-600">
+                          {ex.kind === 'blocked' ? 'Blocked (Full Day)' 
+                           : `Blocked Hours: ${ex.start_time}–${ex.end_time}`}
+                        </span>
                       </div>
                       <Button variant="outline" size="sm" onClick={() => deleteException(ex.id)} className="h-8 text-red-600 border-red-200">
                         Remove

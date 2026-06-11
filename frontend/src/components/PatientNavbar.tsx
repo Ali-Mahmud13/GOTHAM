@@ -1,4 +1,4 @@
-import { User, LogOut, Edit, CalendarDays, LayoutDashboard, Bell, CheckCircle, XCircle, Clock } from "lucide-react";
+import { User, LogOut, Edit, CalendarDays, LayoutDashboard, Bell, CheckCircle, XCircle, Clock, UserSearch } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,8 +17,8 @@ const API_URL = "http://localhost:8000";
 
 interface RegResult {
   id: number;
-  patient_name: string; // reused for doctor name from our endpoint
-  patient_email: string;
+  doctor_name: string;
+  doctor_email: string;
   appointment_date: string | null;
   appointment_start_time: string | null;
   status: string;
@@ -193,6 +193,13 @@ export const PatientNavbar = () => {
               Dashboard
             </button>
             <button
+              onClick={() => navigate('/patient/find-doctor')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            >
+              <UserSearch className="w-4 h-4" />
+              Find Doctor
+            </button>
+            <button
               onClick={() => navigate('/patient/book-appointment')}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
             >
@@ -276,7 +283,7 @@ export const PatientNavbar = () => {
                               Registration {req.status === "approved" ? "Approved" : req.status === "declined" ? "Declined" : "Pending"}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              Dr. {req.patient_name}
+                              Dr. {req.doctor_name}
                               {req.appointment_date
                                 ? ` · ${new Date(req.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${req.appointment_start_time}`
                                 : ""}
@@ -324,13 +331,20 @@ export const PatientNavbar = () => {
         </div>
 
         {/* Mobile Quick Nav */}
-        <div className="md:hidden mt-2 grid grid-cols-3 gap-2">
+        <div className="md:hidden mt-2 grid grid-cols-4 gap-2">
           <button
             onClick={() => navigate('/patient/dashboard')}
             className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
           >
             <LayoutDashboard className="w-3.5 h-3.5" />
             Dashboard
+          </button>
+          <button
+            onClick={() => navigate('/patient/find-doctor')}
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+          >
+            <UserSearch className="w-3.5 h-3.5" />
+            Find Dr
           </button>
           <button
             onClick={() => navigate('/patient/book-appointment')}
@@ -344,7 +358,7 @@ export const PatientNavbar = () => {
             className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
           >
             <CalendarDays className="w-3.5 h-3.5" />
-            Appointments
+            Appts
           </button>
         </div>
       </div>

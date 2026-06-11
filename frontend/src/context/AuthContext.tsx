@@ -7,6 +7,7 @@ interface User {
   email: string;
   full_name?: string;
   role: 'doctor' | 'patient';
+  is_admin?: boolean;
   patient_id?: number;
   patient_info?: {
     patient_identifier: string;
@@ -24,6 +25,7 @@ interface AuthContextType {
   logout: () => void;
   isDoctor: boolean;
   isPatient: boolean;
+  isAdmin: boolean;
   tokens: Tokens | null;
   setTokens: (t: Tokens | null) => void;
 }
@@ -135,6 +137,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     logout,
     isDoctor: user?.role === 'doctor',
     isPatient: user?.role === 'patient',
+    isAdmin: !!user?.is_admin,
     tokens,
     setTokens,
   };

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\micky\\\\My_Work\\\\GOTHAM\" -Recurse -Directory -Name)",
+      "Bash(xargs grep -l \"appointment\" -i)",
+      "Bash(npx tsc *)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast, pathlib; src = pathlib.Path\\('app/api/auth.py'\\).read_text\\(\\); tree = ast.parse\\(src\\); funcs = [n.name for n in ast.walk\\(tree\\) if isinstance\\(n, ast.FunctionDef\\)]; print\\('\\\\n'.join\\(funcs\\)\\)\")"
+    ]
+  }
+}
