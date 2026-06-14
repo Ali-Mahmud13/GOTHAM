@@ -93,6 +93,7 @@ class AgentService:
             assessment_type = result.get("assessment_type_to_save")
             assessment_report = result.get("assessment_report_to_save")
             assessment_risk_levels = result.get("assessment_risk_levels")
+            assessment_model_results = result.get("assessment_model_results")
             resolved_patient_id = result.get("current_patient_id") or current_patient_id
             suggested_questions = result.get("suggested_questions") or []
 
@@ -114,6 +115,7 @@ class AgentService:
                 "assessment_type": assessment_type,
                 "assessment_report": assessment_report,
                 "assessment_risk_levels": assessment_risk_levels,
+                "assessment_model_results": assessment_model_results,
                 "patient_id": resolved_patient_id,
                 "suggested_questions": suggested_questions,
             }

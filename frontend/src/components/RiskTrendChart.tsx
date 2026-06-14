@@ -89,7 +89,7 @@ export const RiskTrendChart = () => {
           </div>
         ) : data.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-            No recent visit activity
+            No assessment outcomes in this period
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

@@ -7,7 +7,7 @@ interface PatientCardProps {
   name: string;
   age: string;
   contactNumber: string;
-  riskLevel: 'high' | 'medium' | 'low';
+  riskLevel: 'unassessed' | 'high' | 'medium' | 'low';
 }
 
 export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: PatientCardProps) => {
@@ -44,13 +44,14 @@ export const PatientCard = ({ id, name, age, contactNumber, riskLevel }: Patient
           label: 'Low Risk',
           pulseAnimation: false,
         };
+      case 'unassessed':
       default:
         return {
           color: 'from-gray-400 to-gray-500',
           bgColor: 'bg-gray-400',
           textColor: 'text-gray-600',
           glowColor: 'shadow-gray-500/50',
-          label: 'Unknown',
+          label: 'Not Assessed',
           pulseAnimation: false,
         };
     }

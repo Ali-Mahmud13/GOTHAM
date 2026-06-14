@@ -1,7 +1,0 @@
-required_features:
-  - Age
-  - sys_bp
-  - dia_bp
-  - glucose_level
-  - body_temp
-  - heart_rate

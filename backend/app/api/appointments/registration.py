@@ -83,6 +83,64 @@ def patient_unregister(
     return {"detail": "Successfully unregistered"}
 
 
+@router.delete("/unregister/patient/{patient_identifier}", status_code=200)
+def doctor_unregister_patient(
+    patient_identifier: str,
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Allow a doctor to unregister one of their assigned patients."""
+    _require_doctor(user)
+
+    patient = session.exec(
+        select(Patient).where(Patient.patient_identifier == patient_identifier)
+    ).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    if patient.doctor_id != user.id:
+        raise HTTPException(status_code=403, detail="You may only unregister patients assigned to you.")
+
+    patient_user = session.exec(
+        select(AuthUser).where(AuthUser.patient_id == patient.id)
+    ).first()
+    patient.doctor_id = None
+    patient.clinical_notes = None
+    patient.updated_at = datetime.utcnow()
+    session.add(patient)
+
+    visits = session.exec(select(Visit).where(Visit.patient_id == patient.id)).all()
+    for visit in visits:
+        if (
+            visit.visit_type == "doctor_notes"
+            and visit.recorded_by_user_id in {None, user.id}
+        ):
+            visit.notes = None
+            session.add(visit)
+
+    pending_requests = []
+    if patient_user:
+        pending_requests = session.exec(
+            select(RegistrationRequest)
+            .where(RegistrationRequest.patient_id == patient_user.id)
+            .where(RegistrationRequest.doctor_id == user.id)
+            .where(RegistrationRequest.status == "pending")
+        ).all()
+    for request in pending_requests:
+        request.status = "declined"
+        request.updated_at = datetime.utcnow()
+        session.add(request)
+        if request.appointment_id:
+            appointment = session.get(Appointment, request.appointment_id)
+            if appointment and appointment.status == "pending_approval":
+                appointment.status = "cancelled"
+                appointment.cancelled_by = "doctor"
+                appointment.updated_at = datetime.utcnow()
+                session.add(appointment)
+
+    session.commit()
+    return {"detail": "Patient unregistered successfully"}
+
+
 @router.post("/register", response_model=RegistrationRequestOut, status_code=201)
 def standalone_register_with_doctor(
     body: StandaloneRegistrationRequest,

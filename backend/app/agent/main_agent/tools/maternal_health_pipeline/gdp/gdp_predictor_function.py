@@ -401,7 +401,7 @@ async def predict_gdp(
     sedentary_lifestyle,
     prediabetes
 ):
-    """Wrapper that calls predict_gdm and formats the result for LLM consumption."""
+    """Return the model outcome and its human-readable report."""
 
     result = await predict_gdm(
         age=age,
@@ -422,4 +422,14 @@ async def predict_gdp(
     )
 
     formatted_report = await format_result_for_llm(result)
-    return formatted_report
+    probabilities = result["confidence_scores"]
+    predicted_class = result["prediction"]
+    return {
+        "status": "completed",
+        "outcome": result["prediction_label"],
+        "severity": "high" if predicted_class == "positive" else "low",
+        "predicted_class": predicted_class,
+        "confidence": max(probabilities.values()),
+        "probabilities": probabilities,
+        "report": formatted_report,
+    }

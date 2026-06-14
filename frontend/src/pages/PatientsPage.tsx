@@ -13,7 +13,7 @@ interface PatientProfile {
   age: number;
   contact_number: string;
   clinical_notes: string | null;
-  risk_level: 'high' | 'medium' | 'low';
+  risk_level: 'unassessed' | 'high' | 'medium' | 'low';
   number_of_pregnancies: number | null;
   bmi_category: number | null;
   family_history: boolean | null;
@@ -78,7 +78,6 @@ const PatientsPage = () => {
             age: parseInt(newPatient.age),
             contact_number: newPatient.phone,
             clinical_notes: null,
-            risk_level: "low",
             number_of_pregnancies: null,
             bmi_category: null,
             family_history: null,

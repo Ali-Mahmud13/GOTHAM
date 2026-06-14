@@ -1,7 +1,8 @@
 """Assessment models for GDM, Anemia, and Fetal Health predictions."""
 
+from sqlalchemy import Column, JSON
 from sqlmodel import SQLModel, Field, Relationship
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 
@@ -30,6 +31,14 @@ class GDMAssessment(SQLModel, table=True):
     risk_level: Optional[int] = Field(default=None, description="Risk level: 0=Normal, 1=Elevated, 2=High")
     confidence: Optional[float] = Field(default=None, description="Model confidence score (0-1)")
     ai_report: Optional[str] = Field(default=None, description="AI-generated risk assessment report")
+    prediction_status: Optional[str] = Field(default=None, description="completed, incomplete, or failed")
+    severity: Optional[str] = Field(default=None, description="Normalized severity: low, medium, high")
+    predicted_class: Optional[str] = Field(default=None)
+    probabilities: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_provenance: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    oldest_input_age_days: Optional[int] = Field(default=None)
+    has_stale_inputs: bool = Field(default=False)
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -60,6 +69,14 @@ class AnemiaAssessment(SQLModel, table=True):
     diagnosis: Optional[str] = Field(default=None, description="Anemia diagnosis type (e.g., 'Iron deficiency anemia')")
     confidence: Optional[float] = Field(default=None, description="Model confidence score (0-1)")
     ai_report: Optional[str] = Field(default=None, description="AI-generated anemia assessment report")
+    prediction_status: Optional[str] = Field(default=None, description="completed, incomplete, or failed")
+    severity: Optional[str] = Field(default=None, description="Normalized severity: low, medium, high")
+    predicted_class: Optional[str] = Field(default=None)
+    probabilities: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_provenance: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    oldest_input_age_days: Optional[int] = Field(default=None)
+    has_stale_inputs: bool = Field(default=False)
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -105,6 +122,14 @@ class FetalHealthAssessment(SQLModel, table=True):
     status: Optional[int] = Field(default=None, description="Fetal health status: 1=Normal, 2=Suspect, 3=Pathological")
     confidence: Optional[float] = Field(default=None, description="Model confidence score (0-1)")
     ai_report: Optional[str] = Field(default=None, description="AI-generated fetal health assessment report")
+    prediction_status: Optional[str] = Field(default=None, description="completed, incomplete, or failed")
+    severity: Optional[str] = Field(default=None, description="Normalized severity: low, medium, high")
+    predicted_class: Optional[str] = Field(default=None)
+    probabilities: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_provenance: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    oldest_input_age_days: Optional[int] = Field(default=None)
+    has_stale_inputs: bool = Field(default=False)
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -127,6 +152,14 @@ class MaternalHealthAssessment(SQLModel, table=True):
     risk_level: Optional[int] = Field(default=None, description="Risk level: 0=Low, 1=Mid, 2=High")
     confidence: Optional[float] = Field(default=None, description="Model confidence score (0-1)")
     ai_report: Optional[str] = Field(default=None, description="AI-generated assessment report")
+    prediction_status: Optional[str] = Field(default=None, description="completed, incomplete, or failed")
+    severity: Optional[str] = Field(default=None, description="Normalized severity: low, medium, high")
+    predicted_class: Optional[str] = Field(default=None)
+    probabilities: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    input_provenance: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    oldest_input_age_days: Optional[int] = Field(default=None)
+    has_stale_inputs: bool = Field(default=False)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -157,3 +190,20 @@ class UltrasoundImage(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     visit: "Visit" = Relationship(back_populates="ultrasound_images")
+
+
+class PatientRiskHistory(SQLModel, table=True):
+    """Historical overall risk recorded after a completed assessment run."""
+
+    __tablename__ = "patient_risk_history"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: int = Field(foreign_key="patients.id", index=True)
+    visit_id: Optional[int] = Field(default=None, foreign_key="visits.id", index=True)
+    risk_level: str = Field(index=True)
+    assessment_type: Optional[str] = Field(default=None)
+    model_severities: Optional[dict[str, str]] = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    assessed_at: datetime = Field(default_factory=datetime.utcnow, index=True)

@@ -1,5 +1,9 @@
-from mmxai import MaternalHealthXAI
+from pathlib import Path
+
 import pandas as pd
+
+from .mmxai import MaternalHealthXAI
+
 
 def generate_xai_report(model_path, Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate,
                         patient_id="Patient_001"):
@@ -17,11 +21,26 @@ def generate_xai_report(model_path, Age, SystolicBP, DiastolicBP, BS, BodyTemp, 
     }
     
     xai = MaternalHealthXAI(model_path)
-    return xai.generate_markdown_report(features, patient_id)
+    label, probabilities, _ = xai.predict_risk(features)
+    report = xai.generate_markdown_report(features, patient_id)
+    severity = {
+        "Low Risk": "low",
+        "Mid Risk": "medium",
+        "High Risk": "high",
+    }[label]
+    return {
+        "status": "completed",
+        "outcome": label,
+        "severity": severity,
+        "predicted_class": label,
+        "confidence": float(max(probabilities.values())),
+        "probabilities": {key: float(value) for key, value in probabilities.items()},
+        "report": report,
+    }
 
 # Example usage
 if __name__ == "__main__":
-    model_path = "maternal_health_model.pkl"
+    model_path = Path(__file__).resolve().parent / "maternal_health_model.pkl"
     
     report = generate_xai_report(
         model_path,

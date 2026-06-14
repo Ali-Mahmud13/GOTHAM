@@ -8,9 +8,15 @@ from pydantic import BaseModel
 
 from app.db.session import get_session
 from app.models.patient import Patient, Visit
-from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment
+from app.models.assessments import (
+    GDMAssessment,
+    AnemiaAssessment,
+    FetalHealthAssessment,
+    MaternalHealthAssessment,
+)
 from app.models.auth import AuthUser
 from app.core.security import get_current_user_compat, assert_patient_access
+from app.api.patients import _latest_assessment_summary
 
 router = APIRouter(prefix="/api/patient-portal", tags=["patient-portal"])
 
@@ -28,6 +34,7 @@ class PatientProfileResponse(BaseModel):
     is_registered_with_doctor: bool = False
     risk_level: str
     number_of_pregnancies: int | None
+    gestation_in_previous_pregnancy: int | None
     bmi_category: int | None
     family_history: bool | None
     pcos: bool | None
@@ -36,6 +43,10 @@ class PatientProfileResponse(BaseModel):
     prediabetes: bool | None
     created_at: datetime
     updated_at: datetime
+    latest_assessment_type: str | None = None
+    latest_assessment_at: datetime | None = None
+    latest_assessment_outcomes: dict[str, str | int | float | None] | None = None
+    latest_assessment_freshness: dict[str, dict] | None = None
 
     class Config:
         from_attributes = True
@@ -61,6 +72,7 @@ class PatientProfileUpdateRequest(BaseModel):
     age: int | None = None
     contact_number: str | None = None
     number_of_pregnancies: int | None = None
+    gestation_in_previous_pregnancy: int | None = None
     bmi_category: int | None = None
     family_history: bool | None = None
     pcos: bool | None = None
@@ -87,6 +99,29 @@ def get_patient_profile(
     assert_patient_access(user, patient)
 
     clinical_notes = patient.clinical_notes if patient.doctor_id else None
+    assessment = _latest_assessment_summary(session, patient.id)
+    outcomes = assessment["outcomes"] or None
+    patient_safe_outcomes = (
+        {
+            key: value
+            for key, value in outcomes.items()
+            if not key.endswith("_confidence")
+        }
+        if outcomes
+        else None
+    )
+    freshness = assessment["freshness"] or None
+    patient_safe_freshness = (
+        {
+            model: {
+                "oldest_input_age_days": details.get("oldest_input_age_days"),
+                "has_stale_inputs": bool(details.get("has_stale_inputs")),
+            }
+            for model, details in freshness.items()
+        }
+        if freshness
+        else None
+    )
 
     return PatientProfileResponse(
         id=patient.id,
@@ -99,6 +134,7 @@ def get_patient_profile(
         is_registered_with_doctor=bool(patient.doctor_id),
         risk_level=patient.risk_level,
         number_of_pregnancies=patient.number_of_pregnancies,
+        gestation_in_previous_pregnancy=patient.gestation_in_previous_pregnancy,
         bmi_category=patient.bmi_category,
         family_history=patient.family_history,
         pcos=patient.pcos,
@@ -107,6 +143,10 @@ def get_patient_profile(
         prediabetes=patient.prediabetes,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
+        latest_assessment_type=assessment["type"],
+        latest_assessment_at=assessment["created_at"],
+        latest_assessment_outcomes=patient_safe_outcomes,
+        latest_assessment_freshness=patient_safe_freshness,
     )
 
 
@@ -156,57 +196,46 @@ def get_patient_assessments(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Get all assessments for a specific patient."""
+    """Get structured assessments for a patient without exposing raw model inputs."""
     patient = _get_patient_or_404(session, patient_identifier)
     assert_patient_access(user, patient)
 
-    gdm_statement = (
-        select(GDMAssessment)
-        .where(GDMAssessment.patient_identifier == patient_identifier)
-        .order_by(GDMAssessment.timestamp.desc())
-    )
-    gdm_assessments = session.exec(gdm_statement).all()
+    def get_rows(model):
+        return session.exec(
+            select(model)
+            .join(Visit, model.visit_id == Visit.id)
+            .where(Visit.patient_id == patient.id)
+            .order_by(model.created_at.desc())
+        ).all()
 
-    anemia_statement = (
-        select(AnemiaAssessment)
-        .where(AnemiaAssessment.patient_identifier == patient_identifier)
-        .order_by(AnemiaAssessment.timestamp.desc())
-    )
-    anemia_assessments = session.exec(anemia_statement).all()
-
-    fetal_statement = (
-        select(FetalHealthAssessment)
-        .where(FetalHealthAssessment.patient_identifier == patient_identifier)
-        .order_by(FetalHealthAssessment.timestamp.desc())
-    )
-    fetal_assessments = session.exec(fetal_statement).all()
+    def serialize(model_name: str, assessment) -> dict:
+        payload = {
+            "id": assessment.id,
+            "visit_id": assessment.visit_id,
+            "model": model_name,
+            "created_at": assessment.created_at,
+            "prediction_status": assessment.prediction_status,
+            "severity": assessment.severity,
+            "predicted_class": assessment.predicted_class,
+            "oldest_input_age_days": assessment.oldest_input_age_days,
+            "has_stale_inputs": bool(assessment.has_stale_inputs),
+        }
+        if user.role == "doctor":
+            payload["confidence"] = assessment.confidence
+        return payload
 
     return {
         "gdm_assessments": [
-            {
-                "id": a.id,
-                "timestamp": a.timestamp,
-                "risk_prediction": a.risk_prediction,
-                "input_features": a.input_features,
-            }
-            for a in gdm_assessments
+            serialize("gdm", assessment) for assessment in get_rows(GDMAssessment)
         ],
         "anemia_assessments": [
-            {
-                "id": a.id,
-                "timestamp": a.timestamp,
-                "risk_prediction": a.risk_prediction,
-                "input_features": a.input_features,
-            }
-            for a in anemia_assessments
+            serialize("anemia", assessment) for assessment in get_rows(AnemiaAssessment)
         ],
         "fetal_assessments": [
-            {
-                "id": a.id,
-                "timestamp": a.timestamp,
-                "risk_prediction": a.risk_prediction,
-                "input_features": a.input_features,
-            }
-            for a in fetal_assessments
+            serialize("fetal", assessment) for assessment in get_rows(FetalHealthAssessment)
+        ],
+        "preeclampsia_assessments": [
+            serialize("preeclampsia", assessment)
+            for assessment in get_rows(MaternalHealthAssessment)
         ],
     }

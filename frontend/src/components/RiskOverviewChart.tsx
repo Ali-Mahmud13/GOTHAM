@@ -16,6 +16,7 @@ export const RiskOverviewChart = () => {
         { name: "High Risk", value: 0, color: "hsl(340, 45%, 65%)" },
         { name: "Medium Risk", value: 0, color: "hsl(270, 50%, 60%)" },
         { name: "Low Risk", value: 0, color: "hsl(200, 60%, 55%)" },
+        { name: "Not Assessed", value: 0, color: "hsl(215, 16%, 65%)" },
     ]);
     const [totalPatients, setTotalPatients] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -41,6 +42,7 @@ export const RiskOverviewChart = () => {
                     { name: "High Risk", value: stats.high_risk_count || 0, color: "hsl(340, 45%, 65%)" },
                     { name: "Medium Risk", value: stats.medium_risk_count || 0, color: "hsl(270, 50%, 60%)" },
                     { name: "Low Risk", value: stats.low_risk_count || 0, color: "hsl(200, 60%, 55%)" },
+                    { name: "Not Assessed", value: stats.unassessed_count || 0, color: "hsl(215, 16%, 65%)" },
                 ]);
                 setTotalPatients(stats.total_patients || 0);
             }
@@ -94,7 +96,7 @@ export const RiskOverviewChart = () => {
                                     verticalAlign="bottom"
                                     height={36}
                                     iconType="circle"
-                                    formatter={(value, entry: any) => (
+                                    formatter={(value) => (
                                         <span className="text-sm text-muted-foreground font-medium ml-1">{value}</span>
                                     )}
                                 />

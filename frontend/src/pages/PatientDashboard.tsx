@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   User, Phone, Calendar, Heart, Activity, Clock, Stethoscope, BarChart3,
-  AlertCircle, TrendingUp, ChevronRight, FileText, Clipboard,
+  AlertCircle, ChevronRight, Clipboard,
   CalendarCheck, PlusCircle, ShieldAlert
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -22,7 +22,7 @@ interface PatientProfile {
   clinical_notes: string | null;
   doctor_id: number | null;
   is_registered_with_doctor: boolean;
-  risk_level: 'high' | 'medium' | 'low';
+  risk_level: 'unassessed' | 'high' | 'medium' | 'low';
   number_of_pregnancies: number | null;
   bmi_category: number | null;
   family_history: boolean | null;
@@ -32,6 +32,18 @@ interface PatientProfile {
   prediabetes: boolean | null;
   created_at: string;
   updated_at: string;
+  latest_assessment_type: 'maternal' | 'fetal' | 'both' | null;
+  latest_assessment_at: string | null;
+  latest_assessment_outcomes: {
+    gdm_risk_level?: number | null;
+    anemia_diagnosis?: string | null;
+    fetal_health_status?: number | null;
+    preeclampsia_risk_level?: number | null;
+  } | null;
+  latest_assessment_freshness: Record<string, {
+    oldest_input_age_days?: number | null;
+    has_stale_inputs?: boolean;
+  }> | null;
 }
 
 interface Appointment {
@@ -61,6 +73,7 @@ interface VisitRecord extends VisitVitalsPoint {
     thumbnail_url?: string | null;
     file_name?: string | null;
     uploaded_by_role?: string | null;
+    uploaded_by_user_id?: number | null;
     created_at?: string | null;
   }>;
   wbc?: number | null;
@@ -72,9 +85,38 @@ interface VisitRecord extends VisitVitalsPoint {
   mchc?: number | null;
   plt?: number | null;
   accelerations?: number | null;
+  fetal_movement?: number | null;
+  uterine_contractions?: number | null;
+  light_decelerations?: number | null;
+  severe_decelerations?: number | null;
+  prolongued_decelerations?: number | null;
+  abnormal_short_term_variability?: number | null;
+  mean_value_of_short_term_variability?: number | null;
+  percentage_of_time_with_abnormal_long_term_variability?: number | null;
+  mean_value_of_long_term_variability?: number | null;
+  histogram_width?: number | null;
+  histogram_min?: number | null;
+  histogram_max?: number | null;
+  histogram_number_of_peaks?: number | null;
+  histogram_number_of_zeroes?: number | null;
+  histogram_mode?: number | null;
+  histogram_mean?: number | null;
+  histogram_median?: number | null;
+  histogram_variance?: number | null;
+  histogram_tendency?: number | null;
   fetal_health_status?: number | null;
   gdm_risk_level?: number | null;
   anemia_diagnosis?: string | null;
+  body_temp?: number | null;
+  heart_rate?: number | null;
+  maternal_risk_level?: number | null;
+  assessment_results?: Record<string, {
+    status?: 'completed' | 'incomplete' | 'failed' | null;
+    severity?: 'low' | 'medium' | 'high' | null;
+    outcome?: string | null;
+    oldest_input_age_days?: number | null;
+    has_stale_inputs?: boolean;
+  } | null>;
 }
 
 interface VisitStatsResponse {
@@ -239,12 +281,13 @@ export const PatientDashboard = () => {
           ringColor: 'stroke-cyan-500',
           label: 'Low Risk',
         };
+      case 'unassessed':
       default:
         return {
           bgColor: 'from-gray-400 to-gray-500',
           textColor: 'text-gray-600',
           ringColor: 'stroke-gray-400',
-          label: 'Unknown',
+          label: 'Not Assessed',
         };
     }
   };
@@ -257,20 +300,6 @@ export const PatientDashboard = () => {
       day: 'numeric',
     });
   };
-
-  const averageMetric = (selector: (visit: VisitVitalsPoint) => number | null | undefined) => {
-    const values = visits
-      .map(selector)
-      .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
-    if (values.length === 0) return null;
-    return values.reduce((sum, value) => sum + value, 0) / values.length;
-  };
-
-  const avgGlucose = averageMetric((visit) => visit.glucose_level ?? visit.ogtt);
-  const avgSystolic = averageMetric((visit) => visit.blood_pressure_systolic);
-  const avgDiastolic = averageMetric((visit) => visit.blood_pressure_diastolic);
-  const avgBmi = averageMetric((visit) => visit.bmi);
-  const avgHemoglobin = averageMetric((visit) => visit.hgb);
 
   const timelineVisits = visits.map((visit) => ({
     id: visit.id,
@@ -290,6 +319,25 @@ export const PatientDashboard = () => {
     plt: visit.plt ?? null,
     baseline_value: visit.baseline_value ?? null,
     accelerations: visit.accelerations ?? null,
+    fetal_movement: visit.fetal_movement ?? null,
+    uterine_contractions: visit.uterine_contractions ?? null,
+    light_decelerations: visit.light_decelerations ?? null,
+    severe_decelerations: visit.severe_decelerations ?? null,
+    prolongued_decelerations: visit.prolongued_decelerations ?? null,
+    abnormal_short_term_variability: visit.abnormal_short_term_variability ?? null,
+    mean_value_of_short_term_variability: visit.mean_value_of_short_term_variability ?? null,
+    percentage_of_time_with_abnormal_long_term_variability: visit.percentage_of_time_with_abnormal_long_term_variability ?? null,
+    mean_value_of_long_term_variability: visit.mean_value_of_long_term_variability ?? null,
+    histogram_width: visit.histogram_width ?? null,
+    histogram_min: visit.histogram_min ?? null,
+    histogram_max: visit.histogram_max ?? null,
+    histogram_number_of_peaks: visit.histogram_number_of_peaks ?? null,
+    histogram_number_of_zeroes: visit.histogram_number_of_zeroes ?? null,
+    histogram_mode: visit.histogram_mode ?? null,
+    histogram_mean: visit.histogram_mean ?? null,
+    histogram_median: visit.histogram_median ?? null,
+    histogram_variance: visit.histogram_variance ?? null,
+    histogram_tendency: visit.histogram_tendency ?? null,
     fetal_health_status: visit.fetal_health_status ?? null,
     glucose_level: visit.glucose_level ?? null,
     blood_pressure_systolic: visit.blood_pressure_systolic ?? null,
@@ -298,6 +346,10 @@ export const PatientDashboard = () => {
     ogtt: visit.ogtt ?? null,
     gdm_risk_level: visit.gdm_risk_level ?? null,
     anemia_diagnosis: visit.anemia_diagnosis ?? null,
+    body_temp: visit.body_temp ?? null,
+    heart_rate: visit.heart_rate ?? null,
+    maternal_risk_level: visit.maternal_risk_level ?? null,
+    assessment_results: visit.assessment_results || {},
   }));
 
   const visitHistoryVisits = timelineVisits.filter((visit) => {
@@ -352,6 +404,50 @@ export const PatientDashboard = () => {
 
   const riskConfig = getRiskConfig(patient.risk_level);
   const isRegisteredWithDoctor = Boolean(patient.is_registered_with_doctor || patient.doctor_id);
+  const assessmentOutcomes = [
+    {
+      label: 'GDM',
+      value: patient.latest_assessment_outcomes?.gdm_risk_level === 0
+        ? 'Negative'
+        : patient.latest_assessment_outcomes?.gdm_risk_level != null
+          ? 'Positive'
+          : null,
+    },
+    {
+      label: 'Anemia',
+      value: patient.latest_assessment_outcomes?.anemia_diagnosis || null,
+    },
+    {
+      label: 'Fetal CTG',
+      value: patient.latest_assessment_outcomes?.fetal_health_status === 1
+        ? 'Normal'
+        : patient.latest_assessment_outcomes?.fetal_health_status === 2
+          ? 'Suspect'
+          : patient.latest_assessment_outcomes?.fetal_health_status === 3
+            ? 'Pathological'
+            : null,
+    },
+    {
+      label: 'Preeclampsia',
+      value: patient.latest_assessment_outcomes?.preeclampsia_risk_level === 0
+        ? 'Low'
+        : patient.latest_assessment_outcomes?.preeclampsia_risk_level === 1
+          ? 'Medium'
+          : patient.latest_assessment_outcomes?.preeclampsia_risk_level === 2
+            ? 'High'
+            : null,
+    },
+  ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+  const agingModels = Object.entries(patient.latest_assessment_freshness || {})
+    .filter(([, details]) => (
+      details.has_stale_inputs
+      || (details.oldest_input_age_days != null && details.oldest_input_age_days > 30)
+    ));
+  const historyStatus = (value: boolean | null, yesLabel: string) => {
+    if (value === true) return yesLabel;
+    if (value === false) return 'No';
+    return 'Not provided';
+  };
 
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
@@ -517,26 +613,45 @@ export const PatientDashboard = () => {
                 </div>
               </button>
 
-              {/* Risk Factors */}
-              <button
-                onClick={() => setActiveTab('medical')}
-                className="group relative bg-gradient-to-br from-purple-50 to-violet-50 p-6 rounded-2xl border border-purple-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden text-left w-full"
-              >
+              {/* Assessment Status */}
+              <div className="relative bg-gradient-to-br from-purple-50 to-violet-50 p-6 rounded-2xl border border-purple-200/50 shadow-sm overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/10 to-violet-500/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-violet-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                      <AlertCircle className="w-6 h-6 text-white" />
+                      <ShieldAlert className="w-6 h-6 text-white" />
                     </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                    <span className={cn(
+                      "rounded-full bg-white/80 px-3 py-1 text-xs font-bold shadow-sm",
+                      riskConfig.textColor,
+                    )}>
+                      {riskConfig.label}
+                    </span>
                   </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Factors</p>
-                  <p className="text-4xl font-bold text-gray-900 mb-2">
-                    {[patient.family_history, patient.pcos, patient.prediabetes, patient.unexplained_prenatal_loss].filter(Boolean).length}
+                  <p className="text-sm font-semibold text-gray-600 mb-1">Assessment Status</p>
+                  <p className="text-xl font-bold text-gray-900 mb-2">{riskConfig.label}</p>
+                  <p className="text-xs text-gray-500 font-semibold">
+                    {patient.latest_assessment_at
+                      ? `Last assessed ${formatDate(patient.latest_assessment_at)}`
+                      : 'No completed model assessment yet'}
                   </p>
-                  <p className="text-xs text-gray-500 font-semibold">Active conditions</p>
+                  {assessmentOutcomes.length > 0 && (
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      {assessmentOutcomes.map((outcome) => (
+                        <div key={outcome.label} className="rounded-lg border border-white/80 bg-white/70 px-3 py-2">
+                          <p className="text-[11px] font-semibold text-gray-500">{outcome.label}</p>
+                          <p className="text-sm font-bold text-gray-800">{outcome.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {agingModels.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Some assessment readings are more than 30 days old. Review them with your doctor.
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             </div>
 
             {/* Quick Summary Cards */}
@@ -564,7 +679,7 @@ export const PatientDashboard = () => {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {visitStats.recent_visits.slice(0, 3).map((v: any, i: number) => (
+                    {visitStats.recent_visits.slice(0, 3).map((v, i) => (
                       <div key={v.id ?? i} className="flex items-start gap-3 p-3 bg-blue-50 rounded-xl">
                         <div className="w-2 h-2 bg-medical-blue rounded-full mt-2 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
@@ -742,7 +857,7 @@ export const PatientDashboard = () => {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="mb-6">
               <h2 className="text-3xl font-bold text-gray-900 mb-2">Medical History</h2>
-              <p className="text-gray-600">Overview of your medical conditions and risk factors</p>
+              <p className="text-gray-600">Information you or your care team have reported</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -771,7 +886,7 @@ export const PatientDashboard = () => {
                     ? "bg-pink-100 text-pink-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.family_history ? "Present" : "Not Reported"}
+                  {historyStatus(patient.family_history, "Present")}
                 </div>
               </div>
 
@@ -800,7 +915,7 @@ export const PatientDashboard = () => {
                     ? "bg-purple-100 text-purple-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.pcos ? "Diagnosed" : "Not Reported"}
+                  {historyStatus(patient.pcos, "Diagnosed")}
                 </div>
               </div>
 
@@ -829,7 +944,7 @@ export const PatientDashboard = () => {
                     ? "bg-orange-100 text-orange-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.unexplained_prenatal_loss ? "Reported" : "Not Reported"}
+                  {historyStatus(patient.unexplained_prenatal_loss, "Reported")}
                 </div>
               </div>
 
@@ -858,7 +973,7 @@ export const PatientDashboard = () => {
                     ? "bg-indigo-100 text-indigo-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.large_child_or_birth_default ? "Reported" : "Not Reported"}
+                  {historyStatus(patient.large_child_or_birth_default, "Reported")}
                 </div>
               </div>
 
@@ -887,7 +1002,7 @@ export const PatientDashboard = () => {
                     ? "bg-rose-100 text-rose-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.prediabetes ? "Diagnosed" : "Not Reported"}
+                  {historyStatus(patient.prediabetes, "Diagnosed")}
                 </div>
               </div>
 
@@ -898,10 +1013,10 @@ export const PatientDashboard = () => {
                     <Heart className="w-7 h-7 text-white" />
                   </div>
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Pregnancies</h3>
-                <p className="text-sm text-gray-600 mb-4">Number of previous pregnancies</p>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Total Pregnancies</h3>
+                <p className="text-sm text-gray-600 mb-4">Total pregnancies reported</p>
                 <div className="px-3 py-1.5 rounded-full text-xs font-bold inline-block bg-teal-100 text-teal-700">
-                  {patient.number_of_pregnancies !== null ? `${patient.number_of_pregnancies} Previous` : "Not Reported"}
+                  {patient.number_of_pregnancies !== null ? patient.number_of_pregnancies : "Not provided"}
                 </div>
               </div>
             </div>
@@ -971,6 +1086,10 @@ export const PatientDashboard = () => {
               visits={visitHistoryVisits}
               hideCareStatusBadge={true}
               onDeleteUltrasound={handleDeleteUltrasound}
+              canDeleteUltrasound={(image) => (
+                image.uploaded_by_role === 'patient'
+                && image.uploaded_by_user_id === user?.id
+              )}
             />
           </div>
         )}
@@ -986,39 +1105,6 @@ export const PatientDashboard = () => {
                 <div>
                   <h2 className="text-2xl font-bold text-foreground">Vitals Tracking</h2>
                   <p className="text-sm text-muted-foreground">Monitor your key health metrics over time</p>
-                </div>
-              </div>
-
-              {/* Summary Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                <div className="bg-gradient-to-br from-medical-pink/10 to-rose-50/50 p-4 rounded-xl border border-medical-pink/20">
-                  <p className="text-xs font-semibold text-medical-pink mb-1">AVG GLUCOSE</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgGlucose !== null ? avgGlucose.toFixed(1) : 'N/A'}
-                    {avgGlucose !== null && <span className="text-sm font-normal text-muted-foreground"> mg/dL</span>}
-                  </p>
-                </div>
-                <div className="bg-gradient-to-br from-medical-blue/10 to-cyan-50/50 p-4 rounded-xl border border-medical-blue/20">
-                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG BLOOD PRESSURE</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgSystolic !== null && avgDiastolic !== null
-                      ? `${Math.round(avgSystolic)}/${Math.round(avgDiastolic)}`
-                      : 'N/A'}
-                    {avgSystolic !== null && avgDiastolic !== null && <span className="text-sm font-normal text-muted-foreground"> mmHg</span>}
-                  </p>
-                </div>
-                <div className="bg-gradient-to-br from-cyan-50 to-teal-50 p-4 rounded-xl border border-cyan-200">
-                  <p className="text-xs font-semibold text-cyan-600 mb-1">AVG BMI</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgBmi !== null ? avgBmi.toFixed(1) : 'N/A'}
-                  </p>
-                </div>
-                <div className="bg-gradient-to-br from-medical-pink/10 to-medical-blue/10 p-4 rounded-xl border border-medical-blue/20">
-                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG HEMOGLOBIN</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgHemoglobin !== null ? avgHemoglobin.toFixed(1) : 'N/A'}
-                    {avgHemoglobin !== null && <span className="text-sm font-normal text-muted-foreground"> g/dL</span>}
-                  </p>
                 </div>
               </div>
 

@@ -220,6 +220,7 @@ async def respond_node(state: AgentState) -> AgentState:
     state["assessment_type_to_save"] = None
     state["assessment_report_to_save"] = None
     state["assessment_risk_levels"] = None
+    state["assessment_model_results"] = None
     
     prediction_decision = state.get("prediction_decision")
     
@@ -243,17 +244,25 @@ async def respond_node(state: AgentState) -> AgentState:
         patient_data = state.get("patient_data", {})
         assessment = state.get("prediction_decision", {})
         
-        patient_data_str = "\n".join([f"{k}: {v}" for k, v in patient_data.items()]) if patient_data else "Not available"
+        patient_data_str = (
+            "\n".join(
+                f"{key}: {value}"
+                for key, value in patient_data.items()
+                if not key.startswith("_")
+            )
+            if patient_data
+            else "Not available"
+        )
 
-        _maternal_risks = _extract_maternal_risk_levels(maternal_report)
+        model_results = state.get("model_results") or {}
         risk_levels = {
-            "gdm":          _maternal_risks["gdm"],
-            "anemia":       _maternal_risks["anemia"],
-            "preeclampsia": _maternal_risks["preeclampsia"],
-            "fetal":        _extract_fetal_risk_level(fetal_report),
+            key: result.get("severity")
+            for key, result in model_results.items()
+            if result.get("status") == "completed" and result.get("severity")
         }
         state["assessment_type_to_save"] = prediction_decision
         state["assessment_risk_levels"] = risk_levels
+        state["assessment_model_results"] = model_results
         
         response_prompt = ASSESSMENT_RESPONSE_PROMPT.format(
             maternal_report=maternal_report,
@@ -339,11 +348,19 @@ async def respond_node(state: AgentState) -> AgentState:
     final_response = raw_response
     if prediction_decision in ["maternal", "fetal", "both"]:
         final_response = _enforce_concise_assessment_output(final_response)
-        confidence_footer = _build_pipeline_confidence_footer(
-            prediction_decision,
-            state.get("maternal_report", "") or "",
-            state.get("fetal_report", "") or "",
-        )
+        completed_confidences = [
+            float(result["confidence"])
+            for result in (state.get("assessment_model_results") or {}).values()
+            if result.get("status") == "completed"
+            and result.get("confidence") is not None
+        ]
+        confidence_footer = ""
+        if completed_confidences:
+            confidence_footer = (
+                "**Model confidence**\n"
+                f"{sum(completed_confidences) / len(completed_confidences):.1%}\n"
+                "_Model certainty only, not diagnostic certainty._"
+            )
         if confidence_footer:
             final_response += f"\n\n{confidence_footer}"
 
@@ -397,6 +414,7 @@ async def persist_node(state: AgentState) -> AgentState:
     assessment_type_to_save = state.get("assessment_type_to_save")
     assessment_report_to_save = state.get("assessment_report_to_save")
     assessment_risk_levels = state.get("assessment_risk_levels")
+    assessment_model_results = state.get("assessment_model_results")
     patient_identifier = state.get("patient_identifier")
     
     logger.info("="*60)
@@ -414,6 +432,7 @@ async def persist_node(state: AgentState) -> AgentState:
                 assessment_type=assessment_type_to_save,
                 assessment_report=assessment_report_to_save,
                 risk_levels=assessment_risk_levels,
+                model_results=assessment_model_results,
             )
             
             if success:
