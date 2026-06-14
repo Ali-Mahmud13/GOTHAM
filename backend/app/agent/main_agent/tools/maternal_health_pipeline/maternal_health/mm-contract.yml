@@ -1,0 +1,25 @@
+required_features:
+  - Age
+  - sys_bp
+  - dia_bp
+  - glucose_level
+  - body_temp
+  - heart_rate
+
+# Application values are stored in clinical display units. The predictor
+# converts glucose and temperature at the model boundary.
+application_units:
+  Age: years
+  sys_bp: mmHg
+  dia_bp: mmHg
+  glucose_level: mg/dL
+  body_temp: deg C
+  heart_rate: bpm
+
+model_units:
+  Age: years
+  SystolicBP: mmHg
+  DiastolicBP: mmHg
+  BS: mmol/L
+  BodyTemp: deg F
+  HeartRate: bpm

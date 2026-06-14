@@ -10,7 +10,6 @@ from app.services.assessment_results import (
     store_assessment_result,
     update_assessment_progress,
 )
-from app.services.assessment_persistence import save_assessment_report
 
 logger = logging.getLogger(__name__)
 
@@ -86,21 +85,9 @@ async def _save_and_store(
 
     try:
         resolved_patient_id = patient_id or result.get("patient_id")
-        assessment_report = result.get("assessment_report")
         assessment_type = result.get("assessment_type")
         assessment_risk_levels = result.get("assessment_risk_levels") or {}
-
-        if (
-            resolved_patient_id
-            and assessment_report
-            and assessment_type in {"maternal", "fetal", "both"}
-        ):
-            save_assessment_report(
-                patient_identifier=resolved_patient_id,
-                assessment_type=assessment_type,
-                assessment_report=assessment_report,
-                risk_levels=assessment_risk_levels,
-            )
+        assessment_report = result.get("assessment_report")
 
         logger.info(f"Completed assessment {assessment_id}")
 
@@ -113,6 +100,7 @@ async def _save_and_store(
             "status": "completed",
             "assessment_type": assessment_type,
             "risk_levels": assessment_risk_levels,
+            "model_results": result.get("assessment_model_results") or {},
             "suggested_questions": result.get("suggested_questions") or [],
         }
     except Exception as e:

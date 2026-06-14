@@ -10,6 +10,7 @@ import difflib
 
 from app.db.session import engine
 from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, MaternalHealthAssessment
+from app.services.risk_service import recompute_patient_risk
 import re
 
 def _compact_assessment_report(report: str) -> str:
@@ -106,13 +107,14 @@ def save_assessment_report(
     assessment_type: str,
     assessment_report: str,
     risk_levels: Optional[dict] = None,
+    model_results: Optional[dict] = None,
 ) -> bool:
-    """Save only structured assessment report output to latest assessment records."""
+    """Persist completed structured model results and recompute overall risk."""
     if not patient_identifier or not assessment_report:
         return False
     assessment_report = _compact_assessment_report(assessment_report)
 
-    risk_levels = risk_levels or {}
+    model_results = model_results or {}
 
     with Session(engine) as session:
         patient = _resolve_patient(session, patient_identifier)
@@ -131,62 +133,82 @@ def save_assessment_report(
 
         now = datetime.utcnow()
 
-        if assessment_type in {"maternal", "both"}:
+        completed_models = {
+            key: result
+            for key, result in model_results.items()
+            if result.get("status") == "completed"
+            and result.get("severity") in {"low", "medium", "high"}
+        }
+
+        if not completed_models:
+            return True
+
+        def apply_common(record, result: dict) -> None:
+            record.ai_report = assessment_report
+            record.created_at = now
+            record.prediction_status = "completed"
+            record.severity = result.get("severity")
+            record.predicted_class = result.get("predicted_class")
+            record.confidence = result.get("confidence")
+            record.probabilities = result.get("probabilities") or {}
+            record.input_snapshot = result.get("input_snapshot") or {}
+            record.input_provenance = result.get("input_provenance") or {}
+            record.oldest_input_age_days = result.get("oldest_input_age_days")
+            record.has_stale_inputs = bool(result.get("has_stale_inputs"))
+
+        if "gdm" in completed_models:
+            result = completed_models["gdm"]
             gdm = session.exec(select(GDMAssessment).where(GDMAssessment.visit_id == latest_visit.id)).first()
             if not gdm:
                 gdm = GDMAssessment(visit_id=latest_visit.id)
-            gdm.ai_report = assessment_report
-            gdm.created_at = now
-            gdm_risk = _to_gdm_risk_value(risk_levels.get("gdm"))
+            apply_common(gdm, result)
+            gdm_risk = _to_gdm_risk_value(result.get("severity"))
             if gdm_risk is not None:
                 gdm.risk_level = gdm_risk
             session.add(gdm)
 
+        if "anemia" in completed_models:
+            result = completed_models["anemia"]
             anemia = session.exec(select(AnemiaAssessment).where(AnemiaAssessment.visit_id == latest_visit.id)).first()
             if not anemia:
                 anemia = AnemiaAssessment(visit_id=latest_visit.id)
-            anemia.ai_report = assessment_report
-            anemia.created_at = now
+            apply_common(anemia, result)
+            anemia.diagnosis = result.get("outcome") or result.get("predicted_class")
             session.add(anemia)
 
+        if "preeclampsia" in completed_models:
+            result = completed_models["preeclampsia"]
             mha = session.exec(select(MaternalHealthAssessment).where(MaternalHealthAssessment.visit_id == latest_visit.id)).first()
             if not mha:
                 mha = MaternalHealthAssessment(visit_id=latest_visit.id)
-            mha.ai_report = assessment_report
-            mha.created_at = now
-            preec_risk = _to_gdm_risk_value(risk_levels.get("preeclampsia"))
+            apply_common(mha, result)
+            preec_risk = _to_gdm_risk_value(result.get("severity"))
             if preec_risk is not None:
                 mha.risk_level = preec_risk
             session.add(mha)
 
-        if assessment_type in {"fetal", "both"}:
+        if "fetal" in completed_models:
+            result = completed_models["fetal"]
             fetal = session.exec(select(FetalHealthAssessment).where(FetalHealthAssessment.visit_id == latest_visit.id)).first()
             if not fetal:
                 fetal = FetalHealthAssessment(visit_id=latest_visit.id)
-            fetal.ai_report = assessment_report
-            fetal.created_at = now
-            fetal_status = _to_fetal_status_value(risk_levels.get("fetal"))
+            apply_common(fetal, result)
+            fetal_status = result.get("class_value")
+            if fetal_status not in {1, 2, 3}:
+                fetal_status = _to_fetal_status_value(result.get("severity"))
             if fetal_status is not None:
                 fetal.status = fetal_status
             session.add(fetal)
 
-        overall_risk = None
-        if assessment_type in {"maternal", "both"}:
-            overall_risk = risk_levels.get("gdm") or risk_levels.get("anemia") or risk_levels.get("preeclampsia")
-        if assessment_type in {"fetal", "both"}:
-            fetal_risk = risk_levels.get("fetal")
-            if fetal_risk == "high":
-                overall_risk = "high"
-            elif fetal_risk == "medium" and overall_risk != "high":
-                overall_risk = "medium"
-            elif not overall_risk:
-                overall_risk = fetal_risk
-
-        if overall_risk in {"low", "medium", "high"}:
-            patient.risk_level = overall_risk
-
-        patient.updated_at = datetime.utcnow()
-        session.add(patient)
+        session.flush()
+        recompute_patient_risk(
+            session,
+            patient,
+            visit_id=latest_visit.id,
+            assessment_type=assessment_type,
+            record_history=True,
+            assessed_at=now,
+        )
         session.commit()
 
         return True

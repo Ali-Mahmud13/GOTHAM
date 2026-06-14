@@ -13,7 +13,10 @@ class PatientResponse(BaseModel):
     age: Optional[int] = Field(default=None, description="Patient age from latest visit")
     gestational_age: Optional[str] = Field(default=None, description="Current gestational age")
     last_visit: Optional[str] = Field(default="Never", description="Relative time of last visit")
-    risk_level: str = Field(default="unknown", description="Risk level: low, medium, high, unknown")
+    risk_level: str = Field(
+        default="unassessed",
+        description="Risk level: unassessed, low, medium, high",
+    )
     
     class Config:
         """Pydantic config."""
@@ -32,7 +35,7 @@ class ExtractedField(BaseModel):
     """A single extracted field from clinical notes."""
     
     name: str = Field(description="Field name (e.g., 'BMI', 'Blood Pressure')")
-    value: str | int | float = Field(description="Extracted value")
+    value: bool | int | float | str = Field(description="Extracted value")
     confidence: str = Field(description="Confidence level: high, medium, low")
     db_field: Optional[str] = Field(default=None, description="Database field name for mapping", alias="dbField")
     

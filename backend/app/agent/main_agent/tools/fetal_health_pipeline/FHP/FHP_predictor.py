@@ -149,7 +149,7 @@ async def predict_fetal_health(
 ):
     """
     Predict fetal health status with SHAP explainability
-    Returns formatted text report for LLM processing
+    Returns a structured prediction with a formatted report.
     """
     
     # Get cached agent (loads on first call only)
@@ -195,7 +195,19 @@ async def predict_fetal_health(
     # Format report
     report = await format_fetal_report(prediction_result, explanation_result, input_data)
     
-    return report
+    risk_level = prediction_result["risk_level"]
+    severity = {1: "low", 2: "medium", 3: "high"}[risk_level]
+    probabilities = prediction_result["probabilities"]
+    return {
+        "status": "completed",
+        "outcome": prediction_result["risk_label"],
+        "severity": severity,
+        "predicted_class": prediction_result["risk_label"],
+        "class_value": risk_level,
+        "confidence": max(probabilities.values()),
+        "probabilities": probabilities,
+        "report": report,
+    }
 
 
 async def format_fetal_report(prediction, explanation, input_data):

@@ -26,6 +26,7 @@ interface DashboardStats {
   high_risk_count: number;
   medium_risk_count: number;
   low_risk_count: number;
+  unassessed_count: number;
   total_visits: number;
   assessments_this_week: number;
   high_risk_patients: Array<{

@@ -9,5 +9,5 @@ maternal_health_model.pkl
 
 
 HOW TO RUN
-    in terminal, 'python mm.py'
-    VIOLA!!!!
+    From the backend directory:
+    python -m app.agent.main_agent.tools.maternal_health_pipeline.maternal_health.mm

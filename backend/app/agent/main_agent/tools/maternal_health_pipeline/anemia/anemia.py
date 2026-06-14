@@ -44,11 +44,21 @@ def generate_anemia_xai_report(WBC, RBC, HGB, HCT, MCV, MCH, MCHC, PLT):
     # Get cached AnemiaXAI (loads + builds SHAP explainers on first call only)
     xai = _get_anemia_xai()
 
+    diagnosis, probabilities, _ = xai.predict_anemia(features)
+
     # Generate Markdown report
     _t1 = time.perf_counter()
     md_report = xai.generate_markdown_report(features)
     record("Inference: Anemia predict() + SHAP", time.perf_counter() - _t1)
-    return md_report
+    return {
+        "status": "completed",
+        "outcome": diagnosis,
+        "severity": "low" if diagnosis.strip().lower() == "healthy" else "high",
+        "predicted_class": diagnosis,
+        "confidence": float(max(probabilities.values())),
+        "probabilities": {key: float(value) for key, value in probabilities.items()},
+        "report": md_report,
+    }
 
 
 # -------------------------

@@ -26,6 +26,28 @@ from app.utils.cloudinary_storage import upload_ultrasound_image, delete_ultraso
 logger = logging.getLogger(__name__)
 
 
+def _normalize_extracted_unit(field: dict) -> dict:
+    """Normalize LLM-extracted values into the application's storage units."""
+    normalized = dict(field)
+    db_field = normalized.get("db_field") or normalized.get("dbField")
+    source_unit = str(normalized.pop("source_unit", "") or "").strip().lower()
+    value = normalized.get("value")
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return normalized
+
+    compact_unit = source_unit.replace(" ", "")
+    if db_field in {"glucose_level", "hdl", "ogtt"} and "mmol/l" in compact_unit:
+        normalized["value"] = round(float(value) * 18.0182, 2)
+    elif db_field == "body_temp" and (
+        compact_unit in {"f", "°f", "degf", "fahrenheit"}
+        or "fahrenheit" in compact_unit
+    ):
+        normalized["value"] = round((float(value) - 32) * 5 / 9, 2)
+
+    return normalized
+
+
 class DataEntryService:
     """Service for data entry operations."""
     
@@ -86,7 +108,7 @@ class DataEntryService:
                     age=patient.age if patient.age else None,
                     gestational_age=None,  # Not tracked currently
                     last_visit=last_visit_str,
-                    risk_level=patient.risk_level if patient.risk_level else "unknown"
+                    risk_level=patient.risk_level if patient.risk_level else "unassessed"
                 ))
             
             return patient_responses
@@ -192,7 +214,7 @@ class DataEntryService:
             raw_missing = extracted_data.get("missing", []) or []
 
             extracted_fields = [
-                ExtractedField(**field)
+                ExtractedField(**_normalize_extracted_unit(field))
                 for field in raw_extracted
                 if isinstance(field, dict)
                 and (field.get("db_field") or field.get("dbField")) in allowed_db_fields
@@ -286,8 +308,22 @@ class DataEntryService:
                     )
             
             # Update patient static fields if provided
-            if any([request.family_history, request.pcos, request.unexplained_prenatal_loss,
-                    request.large_child_or_birth_default, request.prediabetes]):
+            static_updates = {
+                "number_of_pregnancies": request.no_of_pregnancy,
+                "gestation_in_previous_pregnancy": request.gestation_in_previous_pregnancy,
+                "family_history": request.family_history,
+                "pcos": request.pcos,
+                "unexplained_prenatal_loss": request.unexplained_prenatal_loss,
+                "large_child_or_birth_default": request.large_child_or_birth_default,
+                "prediabetes": request.prediabetes,
+            }
+            if any(value is not None for value in static_updates.values()):
+                if request.no_of_pregnancy is not None:
+                    patient.number_of_pregnancies = request.no_of_pregnancy
+                if request.gestation_in_previous_pregnancy is not None:
+                    patient.gestation_in_previous_pregnancy = (
+                        request.gestation_in_previous_pregnancy
+                    )
                 if request.family_history is not None:
                     patient.family_history = request.family_history
                 if request.pcos is not None:
@@ -298,7 +334,8 @@ class DataEntryService:
                     patient.large_child_or_birth_default = request.large_child_or_birth_default
                 if request.prediabetes is not None:
                     patient.prediabetes = request.prediabetes
-                
+
+                patient.updated_at = datetime.utcnow()
                 self.patient_repo.update(patient)
             
             # Create Visit record (basic info only)
@@ -509,7 +546,7 @@ class DataEntryService:
         if not patient:
             raise ValueError("Patient not found for ultrasound image")
 
-        self._validate_delete_access(patient, user)
+        self._validate_delete_access(patient, image, user)
 
         if image.public_id:
             delete_ultrasound_image(image.public_id)
@@ -534,7 +571,12 @@ class DataEntryService:
                 raise ValueError("You can only modify records for your registered patients")
             return
 
-    def _validate_delete_access(self, patient: Patient, user: Optional[AuthUser]) -> None:
+    def _validate_delete_access(
+        self,
+        patient: Patient,
+        image: UltrasoundImage,
+        user: Optional[AuthUser],
+    ) -> None:
         """Authorize delete operations for patient or doctor context."""
         if not user:
             return
@@ -542,6 +584,8 @@ class DataEntryService:
         if user.role == "patient":
             if not user.patient_id or user.patient_id != patient.id:
                 raise ValueError("Patients can only delete their own ultrasound images")
+            if image.uploaded_by_role != "patient" or image.uploaded_by_user_id != user.id:
+                raise ValueError("Patients can only delete ultrasound images they uploaded")
             return
 
         if user.role == "doctor":
@@ -564,6 +608,15 @@ CRITICAL: Keep the output SHORT and VALID JSON.
 - Do NOT include any fields outside the allowed db_field list below.
 
 IMPORTANT: Use these EXACT database field names in db_field:
+
+CANONICAL STORAGE UNITS:
+- Store glucose_level, hdl, and ogtt in mg/dL.
+- Store body_temp in °C.
+- Store blood pressure in mmHg, insulin in μU/mL, and CBC values in the units listed below.
+- Preserve the numeric value as written in the note and include its "source_unit".
+- If no unit is written, use the canonical unit listed for that field as "source_unit".
+- The backend converts mmol/L glucose to mg/dL and °F temperature to °C.
+- Do not include unit text inside "value".
 
 GDM ASSESSMENT:
 - glucose_level: Blood glucose level in mg/dL (number)
@@ -591,7 +644,7 @@ ANEMIA/CBC ASSESSMENT:
 - mchc: MCHC in g/dL (number)
 - plt: Platelet count in 10⁹/L (number)
 
-PREECLAMPSIA / MATERNAL HEALTH ASSESSMENT:
+PREECLAMPSIA ASSESSMENT:
 - body_temp: Body temperature in °C (number, e.g. 37.2)
 - heart_rate: Heart rate in bpm (integer, e.g. 88)
 
@@ -602,10 +655,10 @@ PREGNANCY HISTORY:
 Response format:
 {{
   "extracted": [
-    {{"name": "Glucose Level", "value": 105, "confidence": "high", "db_field": "glucose_level"}},
+    {{"name": "Glucose Level", "value": 105, "source_unit": "mg/dL", "confidence": "high", "db_field": "glucose_level"}},
     {{"name": "Gestation Weeks", "value": 28, "confidence": "high", "db_field": "gestation_weeks"}},
     {{"name": "BMI", "value": 27.3, "confidence": "high", "db_field": "bmi"}},
-    {{"name": "Systolic BP", "value": 130, "confidence": "medium", "db_field": "sys_bp"}},
+    {{"name": "Systolic BP", "value": 130, "source_unit": "mmHg", "confidence": "medium", "db_field": "sys_bp"}},
     {{"name": "Diastolic BP", "value": 85, "confidence": "medium", "db_field": "dia_bp"}},
     {{"name": "WBC", "value": 8.5, "confidence": "high", "db_field": "wbc"}},
     {{"name": "RBC", "value": 4.2, "confidence": "high", "db_field": "rbc"}},

@@ -6,8 +6,9 @@ import { PatientNavbar } from '@/components/PatientNavbar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { apiFetch } from '@/lib/apiClient';
+
+type HistoryAnswer = 'unknown' | 'yes' | 'no';
 
 interface PatientProfile {
   id: number;
@@ -35,11 +36,11 @@ export const EditProfilePage = () => {
   const [contactNumber, setContactNumber] = useState('');
   const [numberOfPregnancies, setNumberOfPregnancies] = useState<string>('');
   const [bmiCategory, setBmiCategory] = useState<string>('');
-  const [familyHistory, setFamilyHistory] = useState(false);
-  const [pcos, setPcos] = useState(false);
-  const [unexplainedPrenatalLoss, setUnexplainedPrenatalLoss] = useState(false);
-  const [largeChildOrBirthDefault, setLargeChildOrBirthDefault] = useState(false);
-  const [prediabetes, setPrediabetes] = useState(false);
+  const [familyHistory, setFamilyHistory] = useState<HistoryAnswer>('unknown');
+  const [pcos, setPcos] = useState<HistoryAnswer>('unknown');
+  const [unexplainedPrenatalLoss, setUnexplainedPrenatalLoss] = useState<HistoryAnswer>('unknown');
+  const [largeChildOrBirthDefault, setLargeChildOrBirthDefault] = useState<HistoryAnswer>('unknown');
+  const [prediabetes, setPrediabetes] = useState<HistoryAnswer>('unknown');
 
   const patientIdentifier = user?.patient_info?.patient_identifier;
 
@@ -73,14 +74,17 @@ export const EditProfilePage = () => {
       setContactNumber(data.contact_number || '');
       setNumberOfPregnancies(data.number_of_pregnancies !== null ? String(data.number_of_pregnancies) : '');
       setBmiCategory(data.bmi_category !== null ? String(data.bmi_category) : '');
-      setFamilyHistory(data.family_history || false);
-      setPcos(data.pcos || false);
-      setUnexplainedPrenatalLoss(data.unexplained_prenatal_loss || false);
-      setLargeChildOrBirthDefault(data.large_child_or_birth_default || false);
-      setPrediabetes(data.prediabetes || false);
+      const answer = (value: boolean | null): HistoryAnswer => (
+        value === true ? 'yes' : value === false ? 'no' : 'unknown'
+      );
+      setFamilyHistory(answer(data.family_history));
+      setPcos(answer(data.pcos));
+      setUnexplainedPrenatalLoss(answer(data.unexplained_prenatal_loss));
+      setLargeChildOrBirthDefault(answer(data.large_child_or_birth_default));
+      setPrediabetes(answer(data.prediabetes));
       
       setError('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching profile:', err);
       setError('Failed to load profile. Please try again.');
     } finally {
@@ -107,7 +111,7 @@ export const EditProfilePage = () => {
     setSuccess('');
 
     try {
-      const updateData: any = {
+      const updateData: Record<string, string | number | boolean | null> = {
         contact_number: contactNumber.trim()
       };
 
@@ -116,11 +120,14 @@ export const EditProfilePage = () => {
       if (numberOfPregnancies) updateData.number_of_pregnancies = parseInt(numberOfPregnancies);
       if (bmiCategory) updateData.bmi_category = parseInt(bmiCategory);
       
-      updateData.family_history = familyHistory;
-      updateData.pcos = pcos;
-      updateData.unexplained_prenatal_loss = unexplainedPrenatalLoss;
-      updateData.large_child_or_birth_default = largeChildOrBirthDefault;
-      updateData.prediabetes = prediabetes;
+      const answerValue = (value: HistoryAnswer): boolean | null => (
+        value === 'yes' ? true : value === 'no' ? false : null
+      );
+      updateData.family_history = answerValue(familyHistory);
+      updateData.pcos = answerValue(pcos);
+      updateData.unexplained_prenatal_loss = answerValue(unexplainedPrenatalLoss);
+      updateData.large_child_or_birth_default = answerValue(largeChildOrBirthDefault);
+      updateData.prediabetes = answerValue(prediabetes);
 
       const response = await apiFetch(
         `/api/patient-portal/profile/${patientIdentifier}`,
@@ -143,9 +150,9 @@ export const EditProfilePage = () => {
       setTimeout(() => {
         navigate('/patient/dashboard');
       }, 1500);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Update error:', err);
-      setError(err.message || 'Failed to update profile. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to update profile. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -260,7 +267,7 @@ export const EditProfilePage = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div>
                   <Label htmlFor="pregnancies" className="text-sm font-medium mb-2">
-                    Number of Pregnancies
+                    Total Pregnancies
                   </Label>
                   <Input
                     id="pregnancies"
@@ -290,67 +297,84 @@ export const EditProfilePage = () => {
                 </div>
               </div>
 
-              {/* Medical Conditions Checkboxes */}
+              {/* Medical History */}
               <div className="space-y-4">
-                <Label className="text-sm font-medium">Medical Conditions</Label>
+                <div>
+                  <Label className="text-sm font-medium">Medical History</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Choose Not provided when you do not know the answer.
+                  </p>
+                </div>
                 
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="family-history">Family History of Diabetes</Label>
+                    <select
                       id="family-history"
-                      checked={familyHistory}
-                      onCheckedChange={(checked) => setFamilyHistory(checked as boolean)}
-                    />
-                    <label
-                      htmlFor="family-history"
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                      value={familyHistory}
+                      onChange={(event) => setFamilyHistory(event.target.value as HistoryAnswer)}
+                      className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                     >
-                      Family History of Diabetes
-                    </label>
+                      <option value="unknown">Not provided</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
+                  <div>
+                    <Label htmlFor="pcos">PCOS (Polycystic Ovary Syndrome)</Label>
+                    <select
                       id="pcos"
-                      checked={pcos}
-                      onCheckedChange={(checked) => setPcos(checked as boolean)}
-                    />
-                    <label htmlFor="pcos" className="text-sm font-medium leading-none">
-                      PCOS (Polycystic Ovary Syndrome)
-                    </label>
+                      value={pcos}
+                      onChange={(event) => setPcos(event.target.value as HistoryAnswer)}
+                      className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="unknown">Not provided</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
+                  <div>
+                    <Label htmlFor="prenatal-loss">History of Unexplained Prenatal Loss</Label>
+                    <select
                       id="prenatal-loss"
-                      checked={unexplainedPrenatalLoss}
-                      onCheckedChange={(checked) => setUnexplainedPrenatalLoss(checked as boolean)}
-                    />
-                    <label htmlFor="prenatal-loss" className="text-sm font-medium leading-none">
-                      History of Unexplained Prenatal Loss
-                    </label>
+                      value={unexplainedPrenatalLoss}
+                      onChange={(event) => setUnexplainedPrenatalLoss(event.target.value as HistoryAnswer)}
+                      className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="unknown">Not provided</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
+                  <div>
+                    <Label htmlFor="large-child">History of Large Child or Birth Complications</Label>
+                    <select
                       id="large-child"
-                      checked={largeChildOrBirthDefault}
-                      onCheckedChange={(checked) => setLargeChildOrBirthDefault(checked as boolean)}
-                    />
-                    <label htmlFor="large-child" className="text-sm font-medium leading-none">
-                      History of Large Child or Birth Complications
-                    </label>
+                      value={largeChildOrBirthDefault}
+                      onChange={(event) => setLargeChildOrBirthDefault(event.target.value as HistoryAnswer)}
+                      className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="unknown">Not provided</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
+                  <div>
+                    <Label htmlFor="prediabetes">Pre-existing Prediabetes</Label>
+                    <select
                       id="prediabetes"
-                      checked={prediabetes}
-                      onCheckedChange={(checked) => setPrediabetes(checked as boolean)}
-                    />
-                    <label htmlFor="prediabetes" className="text-sm font-medium leading-none">
-                      Pre-existing Prediabetes
-                    </label>
+                      value={prediabetes}
+                      onChange={(event) => setPrediabetes(event.target.value as HistoryAnswer)}
+                      className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="unknown">Not provided</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
                 </div>
               </div>

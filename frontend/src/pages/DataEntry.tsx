@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -24,7 +25,7 @@ interface Patient {
 
 interface ExtractedField {
     name: string;
-    value: string | number;
+    value: string | number | boolean;
     confidence: "high" | "medium" | "low";
     dbField?: string;
 }
@@ -36,6 +37,41 @@ interface MissingField {
 }
 
 const API_BASE = "http://localhost:8000/api";
+
+interface FieldMetadata {
+    unit?: string;
+    guidance: string;
+    kind: "number" | "integer" | "boolean";
+}
+
+const FIELD_METADATA: Record<string, FieldMetadata> = {
+    glucose_level: { unit: "mg/dL", guidance: "Enter blood glucose in mg/dL.", kind: "number" },
+    gestation_weeks: { unit: "weeks", guidance: "Completed weeks of the current pregnancy.", kind: "integer" },
+    bmi: { unit: "kg/m^2", guidance: "Enter the calculated BMI, not weight.", kind: "number" },
+    sys_bp: { unit: "mmHg", guidance: "Upper blood-pressure reading.", kind: "integer" },
+    dia_bp: { unit: "mmHg", guidance: "Lower blood-pressure reading.", kind: "integer" },
+    hdl: { unit: "mg/dL", guidance: "HDL cholesterol concentration.", kind: "number" },
+    ogtt: { unit: "mg/dL", guidance: "Oral glucose tolerance test result.", kind: "number" },
+    insulin_level: { unit: "uU/mL", guidance: "Serum insulin concentration.", kind: "number" },
+    sedentary_lifestyle: { guidance: "Select whether a sedentary lifestyle is recorded.", kind: "boolean" },
+    family_history: { guidance: "Family history of diabetes.", kind: "boolean" },
+    pcos: { guidance: "Recorded PCOS diagnosis.", kind: "boolean" },
+    prediabetes: { guidance: "Recorded prediabetes diagnosis.", kind: "boolean" },
+    unexplained_prenatal_loss: { guidance: "History of unexplained prenatal loss.", kind: "boolean" },
+    large_child_or_birth_default: { guidance: "History of a large child or birth complication.", kind: "boolean" },
+    wbc: { unit: "10^9/L", guidance: "White blood cell count.", kind: "number" },
+    rbc: { unit: "10^12/L", guidance: "Red blood cell count.", kind: "number" },
+    hgb: { unit: "g/dL", guidance: "Hemoglobin concentration.", kind: "number" },
+    hct: { unit: "%", guidance: "Hematocrit percentage.", kind: "number" },
+    mcv: { unit: "fL", guidance: "Mean corpuscular volume.", kind: "number" },
+    mch: { unit: "pg", guidance: "Mean corpuscular hemoglobin.", kind: "number" },
+    mchc: { unit: "g/dL", guidance: "Mean corpuscular hemoglobin concentration.", kind: "number" },
+    plt: { unit: "10^9/L", guidance: "Platelet count.", kind: "number" },
+    body_temp: { unit: "deg C", guidance: "Enter Celsius; the model conversion is automatic.", kind: "number" },
+    heart_rate: { unit: "bpm", guidance: "Resting maternal heart rate.", kind: "integer" },
+    no_of_pregnancy: { unit: "pregnancies", guidance: "Total number of pregnancies.", kind: "integer" },
+    gestation_in_previous_pregnancy: { unit: "weeks", guidance: "Gestation length of the previous pregnancy.", kind: "integer" },
+};
 
 const DataEntry = () => {
     const navigate = useNavigate();
@@ -258,7 +294,7 @@ const DataEntry = () => {
         };
 
         fetchPatients();
-    }, [requestedPatientId, user?.email, isPatientUser]);
+    }, [requestedPatientId, user?.email, isPatientUser, tokens, setTokens, logout, toast]);
 
     useEffect(() => {
         const loadRegisteredDoctor = async () => {
@@ -278,7 +314,7 @@ const DataEntry = () => {
         };
 
         loadRegisteredDoctor();
-    }, [isPatientUser, user?.email]);
+    }, [isPatientUser, user?.email, tokens, setTokens, logout]);
 
     // Filter patients based on search
     useEffect(() => {
@@ -318,7 +354,7 @@ const DataEntry = () => {
         };
     }, [notes, runAIExtraction]);
 
-    const handleFieldChange = (index: number, newValue: string) => {
+    const handleFieldChange = (index: number, newValue: string | boolean) => {
         const updatedFields = [...extractedFields];
         updatedFields[index] = {
             ...updatedFields[index],
@@ -413,7 +449,7 @@ const DataEntry = () => {
             const visitNoteText = isPatientUser ? notes : (doctorVisitNotes.trim() || notes);
 
             // Build visit data from extracted fields
-            const visitData: any = {
+            const visitData: Record<string, string | number | boolean> = {
                 patient_id: selectedPatient.id,
                 // Patient AI entry is a clinical visit (separate from Patient Notes notepad entries).
                 visit_type: "clinical_notes",
@@ -974,6 +1010,9 @@ const DataEntry = () => {
                                     </span>
                                 )}
                             </div>
+                            <p className="mb-4 text-xs text-muted-foreground">
+                                Review each value in the displayed unit before saving. Parsed alternative units are normalized automatically.
+                            </p>
 
                             {extractedFields.length === 0 ? (
                                 <div className="py-12 text-center">
@@ -990,7 +1029,6 @@ const DataEntry = () => {
                                 <div className="space-y-5">
                                     {Object.entries(groupedFields).map(([groupName, fields]) => {
                                         if (fields.length === 0) return null;
-                                        const startIdx = extractedFields.indexOf(fields[0]);
                                         return (
                                             <div key={groupName}>
                                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-medical-blue/10 text-medical-blue text-xs font-semibold mb-2">
@@ -999,6 +1037,7 @@ const DataEntry = () => {
                                                 <div className="space-y-2">
                                                     {fields.map((field) => {
                                                         const idx = extractedFields.indexOf(field);
+                                                        const metadata = field.dbField ? FIELD_METADATA[field.dbField] : undefined;
                                                         return (
                                                             <div
                                                                 key={idx}
@@ -1011,12 +1050,49 @@ const DataEntry = () => {
                                                                             <label className="text-xs font-medium text-muted-foreground">
                                                                                 {field.name}
                                                                             </label>
+                                                                            {metadata?.unit && (
+                                                                                <span className="rounded-full bg-medical-blue/10 px-2 py-0.5 text-[10px] font-semibold text-medical-blue">
+                                                                                    {metadata.unit}
+                                                                                </span>
+                                                                            )}
                                                                         </div>
-                                                                        <Input
-                                                                            value={field.value}
-                                                                            onChange={(e) => handleFieldChange(idx, e.target.value)}
-                                                                            className="h-8 text-sm border-border/50 bg-white/50 focus-visible:ring-medical-blue/50"
-                                                                        />
+                                                                        {metadata?.kind === "boolean" ? (
+                                                                            <Select
+                                                                                value={String(field.value)}
+                                                                                onValueChange={(value) => handleFieldChange(idx, value === "true")}
+                                                                            >
+                                                                                <SelectTrigger className="h-9 bg-white/50 text-sm border-border/50 focus:ring-medical-blue/50">
+                                                                                    <SelectValue placeholder="Select Yes or No" />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    <SelectItem value="true">Yes</SelectItem>
+                                                                                    <SelectItem value="false">No</SelectItem>
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        ) : (
+                                                                            <div className="relative">
+                                                                                <Input
+                                                                                    type={metadata ? "number" : "text"}
+                                                                                    step={metadata?.kind === "integer" ? "1" : "any"}
+                                                                                    value={String(field.value)}
+                                                                                    onChange={(e) => handleFieldChange(idx, e.target.value)}
+                                                                                    className={cn(
+                                                                                        "h-9 text-sm border-border/50 bg-white/50 focus-visible:ring-medical-blue/50",
+                                                                                        metadata?.unit && "pr-24",
+                                                                                    )}
+                                                                                />
+                                                                                {metadata?.unit && (
+                                                                                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-medium text-muted-foreground">
+                                                                                        {metadata.unit}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        {metadata && (
+                                                                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                                                                {metadata.guidance}
+                                                                            </p>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -1055,6 +1131,9 @@ const DataEntry = () => {
                                                 </p>
                                                 <p className="text-xs text-muted-foreground">
                                                     {field.category}
+                                                    {FIELD_METADATA[field.db_field]?.unit
+                                                        ? ` · ${FIELD_METADATA[field.db_field].unit}`
+                                                        : ""}
                                                 </p>
                                             </div>
                                             <Button
@@ -1087,7 +1166,7 @@ const DataEntry = () => {
                             </span>
                         </DialogTitle>
                         <p className="text-xs text-muted-foreground">
-                            Transcribe values directly from your CTG machine printout. All fields are optional.
+                            Transcribe values directly from your CTG machine printout using the units shown. All fields are optional.
                         </p>
                     </DialogHeader>
 
@@ -1117,25 +1196,25 @@ const DataEntry = () => {
                                 cols: 2,
                                 fields: [
                                     { key: "abnormal_short_term_variability",                       label: "Abnormal STV",  unit: "%",  placeholder: "e.g. 20" },
-                                    { key: "mean_value_of_short_term_variability",                  label: "Mean STV",      unit: "",   placeholder: "e.g. 0.8" },
+                                    { key: "mean_value_of_short_term_variability",                  label: "Mean STV",      unit: "dataset value", placeholder: "e.g. 0.8" },
                                     { key: "percentage_of_time_with_abnormal_long_term_variability",label: "Abnormal LTV",  unit: "%",  placeholder: "e.g. 0" },
-                                    { key: "mean_value_of_long_term_variability",                   label: "Mean LTV",      unit: "",   placeholder: "e.g. 10" },
+                                    { key: "mean_value_of_long_term_variability",                   label: "Mean LTV",      unit: "dataset value", placeholder: "e.g. 10" },
                                 ],
                             },
                             {
                                 label: "Histogram",
                                 cols: 3,
                                 fields: [
-                                    { key: "histogram_width",           label: "Width",    unit: "", placeholder: "e.g. 64" },
-                                    { key: "histogram_min",             label: "Min",      unit: "", placeholder: "e.g. 62" },
-                                    { key: "histogram_max",             label: "Max",      unit: "", placeholder: "e.g. 126" },
-                                    { key: "histogram_number_of_peaks", label: "Peaks",    unit: "", placeholder: "e.g. 2",   integer: true },
-                                    { key: "histogram_number_of_zeroes",label: "Zeroes",   unit: "", placeholder: "e.g. 0",   integer: true },
-                                    { key: "histogram_mode",            label: "Mode",     unit: "", placeholder: "e.g. 140" },
-                                    { key: "histogram_mean",            label: "Mean",     unit: "", placeholder: "e.g. 137" },
-                                    { key: "histogram_median",          label: "Median",   unit: "", placeholder: "e.g. 139" },
-                                    { key: "histogram_variance",        label: "Variance", unit: "", placeholder: "e.g. 3" },
-                                    { key: "histogram_tendency",        label: "Tendency", unit: "−1/0/1", placeholder: "−1, 0 or 1", integer: true },
+                                    { key: "histogram_width",           label: "Width",    unit: "bpm", placeholder: "e.g. 64" },
+                                    { key: "histogram_min",             label: "Min",      unit: "bpm", placeholder: "e.g. 62" },
+                                    { key: "histogram_max",             label: "Max",      unit: "bpm", placeholder: "e.g. 126" },
+                                    { key: "histogram_number_of_peaks", label: "Peaks",    unit: "count", placeholder: "e.g. 2",   integer: true },
+                                    { key: "histogram_number_of_zeroes",label: "Zeroes",   unit: "count", placeholder: "e.g. 0",   integer: true },
+                                    { key: "histogram_mode",            label: "Mode",     unit: "bpm", placeholder: "e.g. 140" },
+                                    { key: "histogram_mean",            label: "Mean",     unit: "bpm", placeholder: "e.g. 137" },
+                                    { key: "histogram_median",          label: "Median",   unit: "bpm", placeholder: "e.g. 139" },
+                                    { key: "histogram_variance",        label: "Variance", unit: "bpm^2", placeholder: "e.g. 3" },
+                                    { key: "histogram_tendency",        label: "Histogram Tendency", unit: "device output", placeholder: "Select direction", integer: true },
                                 ],
                             },
                         ] as { label: string; cols: number; fields: { key: string; label: string; unit: string; placeholder: string; integer?: boolean }[] }[]).map((section, si, arr) => (
@@ -1152,16 +1231,32 @@ const DataEntry = () => {
                                                 {label}
                                                 {unit && <span className="text-[10px] text-muted-foreground/60 font-normal">{unit}</span>}
                                             </label>
-                                            <Input
-                                                type="number"
-                                                step={integer ? "1" : "any"}
-                                                min={CTG_BOUNDS[key]?.[0]}
-                                                max={CTG_BOUNDS[key]?.[1]}
-                                                value={ctgData[key] ?? ""}
-                                                onChange={(e) => setCtgData(prev => ({ ...prev, [key]: e.target.value }))}
-                                                className="h-10 bg-background text-sm border-border/60 focus-visible:ring-medical-blue/40"
-                                                placeholder={placeholder}
-                                            />
+                                            {key === "histogram_tendency" ? (
+                                                <Select
+                                                    value={ctgData[key] ?? ""}
+                                                    onValueChange={(value) => setCtgData(prev => ({ ...prev, [key]: value }))}
+                                                >
+                                                    <SelectTrigger className="h-10 bg-background text-sm border-border/60 focus:ring-medical-blue/40">
+                                                        <SelectValue placeholder={placeholder} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="-1">Left tendency (-1)</SelectItem>
+                                                        <SelectItem value="0">Symmetric / neutral (0)</SelectItem>
+                                                        <SelectItem value="1">Right tendency (1)</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : (
+                                                <Input
+                                                    type="number"
+                                                    step={integer ? "1" : "any"}
+                                                    min={CTG_BOUNDS[key]?.[0]}
+                                                    max={CTG_BOUNDS[key]?.[1]}
+                                                    value={ctgData[key] ?? ""}
+                                                    onChange={(e) => setCtgData(prev => ({ ...prev, [key]: e.target.value }))}
+                                                    className="h-10 bg-background text-sm border-border/60 focus-visible:ring-medical-blue/40"
+                                                    placeholder={placeholder}
+                                                />
+                                            )}
                                         </div>
                                     ))}
                                 </div>

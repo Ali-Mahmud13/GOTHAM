@@ -225,7 +225,7 @@ def signup(request: Request, payload: SignupRequest, session: Session = Depends(
             name=payload.full_name,
             age=payload.age or 0,
             contact_number=payload.contact_number or "",
-            risk_level="low",
+            risk_level="unassessed",
             doctor_id=None,
         )
 

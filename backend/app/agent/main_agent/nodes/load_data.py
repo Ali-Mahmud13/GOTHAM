@@ -36,6 +36,10 @@ def _normalize_patient_identifier(raw_value: str | None) -> str:
 async def load_data_node(state: AgentState) -> AgentState:
     report_progress(2, "Loading patient data")
     llm = get_llm(temperature=0)
+    if state.get("prediction_decision") in {"maternal", "fetal", "both"}:
+        state["model_results"] = {}
+        state["maternal_report"] = None
+        state["fetal_report"] = None
     
     user_message = state["messages"][-1].content
     current_patient_id = state.get("current_patient_id")

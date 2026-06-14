@@ -1,32 +1,36 @@
-"""Async wrapper for the Preeclampsia / Maternal Health risk model.
+"""Async wrapper for the Preeclampsia / Maternal Health risk model."""
 
-The underlying model lives in the 'maternal health' directory (space in name
-prevents normal Python imports), so we load it via importlib.
-"""
-
-import importlib.util
 from pathlib import Path
 
-_MM_DIR = Path(__file__).parent / "maternal health"
-_MODEL_PATH = str(_MM_DIR / "maternal_health_model.pkl")
+from .maternal_health.mm import generate_xai_report
 
-_spec = importlib.util.spec_from_file_location("mm", _MM_DIR / "mm.py")
-_mm = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mm)
+_MODEL_PATH = Path(__file__).parent / "maternal_health" / "maternal_health_model.pkl"
 
 
-async def predict_preeclampsia(Age, sys_bp, dia_bp, glucose_level, body_temp, heart_rate) -> str:
+def _mg_dl_to_mmol_l(value: float) -> float:
+    """Convert the application's canonical glucose unit to the model training unit."""
+    return float(value) / 18.0182
+
+
+def _celsius_to_fahrenheit(value: float) -> float:
+    """Convert the application's canonical temperature unit to the model training unit."""
+    return (float(value) * 9 / 5) + 32
+
+
+async def predict_preeclampsia(Age, sys_bp, dia_bp, glucose_level, body_temp, heart_rate) -> dict:
     """Run the Preeclampsia risk model and return a markdown report.
 
     Parameter names match the mm-contract.yml required_features keys so that
-    clean_data_for_model passes them through correctly.
+    clean_data_for_model passes them through correctly. The application stores
+    glucose in mg/dL and temperature in °C, while the model was trained on
+    mmol/L and °F, so conversion happens only at this model boundary.
     """
-    return _mm.generate_xai_report(
+    return generate_xai_report(
         model_path=_MODEL_PATH,
         Age=Age,
         SystolicBP=sys_bp,
         DiastolicBP=dia_bp,
-        BS=glucose_level,
-        BodyTemp=body_temp,
+        BS=_mg_dl_to_mmol_l(glucose_level),
+        BodyTemp=_celsius_to_fahrenheit(body_temp),
         HeartRate=heart_rate,
     )
