@@ -34,6 +34,10 @@ class AuthUser(SQLModel, table=True):
     
     # Active status
     is_active: bool = Field(default=True, description="Whether the user account is active")
+    token_version: int = Field(
+        default=0,
+        description="Incremented to revoke all previously issued access and refresh tokens",
+    )
 
     # Admin flag (e.g. list /auth/users). Default false for all users.
     is_admin: bool = Field(default=False, description="Platform admin capabilities")

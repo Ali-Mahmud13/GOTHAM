@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { apiFetch } from "@/lib/apiClient";
+import { useApiMutation, useApiQuery } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RegistrationRequestResult {
   id: number;
-  patient_name: string;
+  doctor_name: string;
   status: string;
 }
 
@@ -25,86 +26,55 @@ interface VisitRow {
 
 export const PatientNotesPage = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
 
   const patientIdentifier = user?.patient_info?.patient_identifier;
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const [doctorName, setDoctorName] = useState<string | null>(null);
-  const [pendingDoctor, setPendingDoctor] = useState<string | null>(null);
-  const [history, setHistory] = useState<VisitRow[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== "patient") {
       navigate("/patient/login");
-      return;
     }
-
-    const loadState = async () => {
-      if (!user?.email || !patientIdentifier) return;
-
-      let resolvedDoctorName: string | null = null;
-      try {
-        const myDoctorRes = await apiFetch(
-          `/appointments/my-doctor`,
-          { method: "GET" },
-          tokens,
-          setTokens,
-          logout,
-        );
-        if (myDoctorRes.ok) {
-          const doctor = await myDoctorRes.json();
-          resolvedDoctorName = doctor?.full_name || null;
-          setDoctorName(resolvedDoctorName);
-        } else {
-          setDoctorName(null);
-        }
-      } catch {
-        setDoctorName(null);
-      }
-
-      if (!resolvedDoctorName) {
-        try {
-          const reqRes = await apiFetch(
-            `/appointments/my-registration-requests`,
-            { method: "GET" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          if (reqRes.ok) {
-            const reqs: RegistrationRequestResult[] = await reqRes.json();
-            const pending = reqs.find((r) => r.status === "pending");
-            setPendingDoctor(pending?.patient_name || null);
-          }
-        } catch {
-          setPendingDoctor(null);
-        }
-      } else {
-        setPendingDoctor(null);
-      }
-
-      try {
-        const visitsRes = await apiFetch(
-          `/api/dashboard/patient/${patientIdentifier}/visits`,
-          { method: "GET" },
-          tokens,
-          setTokens,
-          logout,
-        );
-        if (visitsRes.ok) {
-          const payload = await visitsRes.json();
-          const rows: VisitRow[] = payload?.recent_visits || [];
-          setHistory(rows.filter((v) => Boolean(v.notes)).slice(0, 10));
-        }
-      } catch {
-        setHistory([]);
-      }
-    };
-
-    loadState();
-  }, [isAuthenticated, user, navigate, patientIdentifier, tokens, setTokens, logout]);
+  }, [isAuthenticated, navigate, user]);
+  const enabled = Boolean(isAuthenticated && patientIdentifier);
+  const doctorQuery = useApiQuery<{ full_name?: string } | null>(
+    queryKeys.appointments.myDoctor,
+    "/appointments/my-doctor",
+    { enabled, retry: false },
+  );
+  const registrationQuery = useApiQuery<RegistrationRequestResult[]>(
+    queryKeys.registration.patientRequests,
+    "/appointments/my-registration-requests",
+    { enabled },
+  );
+  const visitsKey = queryKeys.patients.visits(patientIdentifier ?? "self");
+  const visitsQuery = useApiQuery<{ recent_visits?: VisitRow[] }>(
+    visitsKey,
+    `/api/dashboard/patient/${patientIdentifier ?? ""}/visits`,
+    { enabled },
+  );
+  const doctorName = doctorQuery.data?.full_name ?? null;
+  const pendingDoctor = doctorName
+    ? null
+    : registrationQuery.data?.find((request) => request.status === "pending")?.doctor_name ?? null;
+  const history = (visitsQuery.data?.recent_visits ?? [])
+    .filter((visit) => Boolean(visit.notes))
+    .slice(0, 10);
+  const createNote = useApiMutation<{ success: boolean; message?: string }, string>({
+    invalidate: [visitsKey, queryKeys.patients.portalProfile, queryKeys.dashboard.stats],
+    mutationFn: (notes, request) =>
+      request("/api/visits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_id: patientIdentifier,
+          visit_type: "patient_notes",
+          notes,
+        }),
+      }),
+  });
 
   const isRegistered = Boolean(doctorName);
 
@@ -132,24 +102,8 @@ export const PatientNotesPage = () => {
 
     setSaving(true);
     try {
-      const res = await apiFetch(
-        `/api/visits`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            patient_id: patientIdentifier,
-            visit_type: "patient_notes",
-            notes: note.trim(),
-          }),
-        },
-        tokens,
-        setTokens,
-        logout,
-      );
-
-      const payload = await res.json();
-      if (!res.ok || !payload.success) {
+      const payload = await createNote.mutateAsync(note.trim());
+      if (!payload.success) {
         throw new Error(payload.message || "Failed to save note");
       }
 

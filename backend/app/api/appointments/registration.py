@@ -15,7 +15,7 @@ from .schemas import (
     PatientRegistrationRequestOut, StandaloneRegistrationRequest
 )
 from .utils import (
-    _require_patient, _require_doctor
+    _appointment_is_future, _require_patient, _require_doctor
 )
 
 router = APIRouter()
@@ -53,7 +53,12 @@ def get_my_doctor(
     if not patient or not patient.doctor_id:
         return None
     doctor = session.get(AuthUser, patient.doctor_id)
-    if not doctor or doctor.role != "doctor":
+    if (
+        not doctor
+        or doctor.role != "doctor"
+        or not doctor.is_active
+        or doctor.verification_status != "verified"
+    ):
         return None
     return DoctorOut(
         id=doctor.id,
@@ -76,11 +81,45 @@ def patient_unregister(
     if not patient or not patient.doctor_id:
         raise HTTPException(status_code=400, detail="Not registered.")
 
+    doctor_id = patient.doctor_id
     patient.doctor_id = None
     patient.clinical_notes = None
+    patient.updated_at = datetime.utcnow()
     session.add(patient)
+
+    appointments = session.exec(
+        select(Appointment)
+        .where(Appointment.patient_id == user.id)
+        .where(Appointment.doctor_id == doctor_id)
+        .where(Appointment.status.in_(["booked", "pending_approval"]))
+    ).all()
+    for appointment in appointments:
+        if _appointment_is_future(appointment):
+            appointment.status = "cancelled"
+            appointment.cancelled_by = "patient"
+            appointment.cancellation_reason = "patient_unregistered"
+            appointment.updated_at = datetime.utcnow()
+            session.add(appointment)
+
+    pending_requests = session.exec(
+        select(RegistrationRequest)
+        .where(RegistrationRequest.patient_id == user.id)
+        .where(RegistrationRequest.status == "pending")
+    ).all()
+    for request in pending_requests:
+        request.status = "declined"
+        request.updated_at = datetime.utcnow()
+        session.add(request)
+        if request.appointment_id:
+            linked = session.get(Appointment, request.appointment_id)
+            if linked and linked.status == "pending_approval":
+                linked.status = "cancelled"
+                linked.cancelled_by = "patient"
+                linked.cancellation_reason = "patient_unregistered"
+                linked.updated_at = datetime.utcnow()
+                session.add(linked)
     session.commit()
-    return {"detail": "Successfully unregistered"}
+    return {"detail": "Successfully unregistered. Future appointments were cancelled."}
 
 
 @router.delete("/unregister/patient/{patient_identifier}", status_code=200)
@@ -137,6 +176,21 @@ def doctor_unregister_patient(
                 appointment.updated_at = datetime.utcnow()
                 session.add(appointment)
 
+    if patient_user:
+        appointments = session.exec(
+            select(Appointment)
+            .where(Appointment.patient_id == patient_user.id)
+            .where(Appointment.doctor_id == user.id)
+            .where(Appointment.status.in_(["booked", "pending_approval"]))
+        ).all()
+        for appointment in appointments:
+            if _appointment_is_future(appointment):
+                appointment.status = "cancelled"
+                appointment.cancelled_by = "doctor"
+                appointment.cancellation_reason = "doctor_unregistered_patient"
+                appointment.updated_at = datetime.utcnow()
+                session.add(appointment)
+
     session.commit()
     return {"detail": "Patient unregistered successfully"}
 
@@ -152,7 +206,12 @@ def standalone_register_with_doctor(
 
     # Check doctor exists and is verified
     doctor = session.get(AuthUser, body.doctor_id)
-    if not doctor or doctor.role != "doctor" or not doctor.is_active:
+    if (
+        not doctor
+        or doctor.role != "doctor"
+        or not doctor.is_active
+        or doctor.verification_status != "verified"
+    ):
         raise HTTPException(status_code=404, detail="Doctor not found.")
 
     # Prevent duplicate pending requests
@@ -261,30 +320,70 @@ def approve_registration_request(
 ):
     """Approve a registration request."""
     _require_doctor(user)
-    reg_req = session.get(RegistrationRequest, request_id)
+    reg_req = session.exec(
+        select(RegistrationRequest)
+        .where(RegistrationRequest.id == request_id)
+        .with_for_update()
+    ).first()
     if not reg_req or reg_req.doctor_id != user.id:
         raise HTTPException(status_code=404, detail="Request not found")
     if reg_req.status != "pending":
-        raise HTTPException(status_code=400, detail="Already processed")
+        raise HTTPException(status_code=409, detail="Registration request was already processed")
 
     # Update patient record
     patient_auth = session.get(AuthUser, reg_req.patient_id)
-    if patient_auth and patient_auth.patient_id:
-        p = session.get(Patient, patient_auth.patient_id)
-        if p:
-            p.doctor_id = user.id
-            session.add(p)
+    if not patient_auth or not patient_auth.patient_id or not patient_auth.is_active:
+        raise HTTPException(status_code=409, detail="Patient account is unavailable")
+    p = session.exec(
+        select(Patient)
+        .where(Patient.id == patient_auth.patient_id)
+        .with_for_update()
+    ).first()
+    if not p:
+        raise HTTPException(status_code=409, detail="Patient record is unavailable")
+    if p.doctor_id and p.doctor_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Patient is already registered with another doctor",
+        )
+    p.doctor_id = user.id
+    p.updated_at = datetime.utcnow()
+    session.add(p)
 
     # Approve appt
     if reg_req.appointment_id:
         appt = session.get(Appointment, reg_req.appointment_id)
         if appt and appt.status == "pending_approval":
+            if not _appointment_is_future(appt):
+                raise HTTPException(
+                    status_code=409,
+                    detail="The linked appointment has expired and cannot be approved",
+                )
             appt.status = "booked"
             session.add(appt)
 
     reg_req.status = "approved"
     reg_req.updated_at = datetime.utcnow()
     session.add(reg_req)
+
+    competing = session.exec(
+        select(RegistrationRequest)
+        .where(RegistrationRequest.patient_id == reg_req.patient_id)
+        .where(RegistrationRequest.status == "pending")
+        .where(RegistrationRequest.id != reg_req.id)
+    ).all()
+    for other in competing:
+        other.status = "declined"
+        other.updated_at = datetime.utcnow()
+        session.add(other)
+        if other.appointment_id:
+            other_appointment = session.get(Appointment, other.appointment_id)
+            if other_appointment and other_appointment.status == "pending_approval":
+                other_appointment.status = "cancelled"
+                other_appointment.cancelled_by = "doctor"
+                other_appointment.cancellation_reason = "registration_approved_elsewhere"
+                other_appointment.updated_at = datetime.utcnow()
+                session.add(other_appointment)
     session.commit()
     session.refresh(reg_req)
     
@@ -312,14 +411,23 @@ def decline_registration_request(
 ):
     """Decline a registration request."""
     _require_doctor(user)
-    reg_req = session.get(RegistrationRequest, request_id)
+    reg_req = session.exec(
+        select(RegistrationRequest)
+        .where(RegistrationRequest.id == request_id)
+        .with_for_update()
+    ).first()
     if not reg_req or reg_req.doctor_id != user.id:
         raise HTTPException(status_code=404, detail="Request not found")
-    
+    if reg_req.status != "pending":
+        raise HTTPException(status_code=409, detail="Registration request was already processed")
+
     if reg_req.appointment_id:
         appt = session.get(Appointment, reg_req.appointment_id)
         if appt and appt.status == "pending_approval":
             appt.status = "cancelled"
+            appt.cancelled_by = "doctor"
+            appt.cancellation_reason = "registration_declined"
+            appt.updated_at = datetime.utcnow()
             session.add(appt)
 
     reg_req.status = "declined"

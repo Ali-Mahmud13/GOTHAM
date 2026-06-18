@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, Loader2, AlertCircle, User, Phone, Calendar, Heart, ArrowLeft } from 'lucide-react';
+import { Save, Loader2, AlertCircle, User, Heart, ArrowLeft, UserX } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { apiFetch } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 
 type HistoryAnswer = 'unknown' | 'yes' | 'no';
 
@@ -25,12 +26,13 @@ interface PatientProfile {
 }
 
 export const EditProfilePage = () => {
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [closeConfirmation, setCloseConfirmation] = useState('');
+  const [closingAccount, setClosingAccount] = useState(false);
   
   const [age, setAge] = useState<string>('');
   const [contactNumber, setContactNumber] = useState('');
@@ -49,27 +51,37 @@ export const EditProfilePage = () => {
       navigate('/patient/login');
       return;
     }
-    fetchProfile();
   }, [isAuthenticated, user, patientIdentifier, navigate]);
+  const profileQuery = useApiQuery<PatientProfile>(
+    queryKeys.patients.portalProfile,
+    `/api/patient-portal/profile/${patientIdentifier ?? ""}`,
+    { enabled: Boolean(isAuthenticated && patientIdentifier) },
+  );
+  const updateProfile = useApiMutation<void, Record<string, string | number | boolean | null>>({
+    invalidate: [
+      queryKeys.patients.portalProfile,
+      queryKeys.patients.all,
+      queryKeys.dashboard.stats,
+    ],
+    mutationFn: (body, request) =>
+      request<void>(`/api/patient-portal/profile/${patientIdentifier}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+  });
+  const closeAccountMutation = useApiMutation<void, string>({
+    mutationFn: (confirmation, request) =>
+      request<void>("/auth/me/close-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation }),
+      }),
+  });
 
-  const fetchProfile = async () => {
-    if (!patientIdentifier) return;
-
-    try {
-      const response = await apiFetch(
-        `/api/patient-portal/profile/${patientIdentifier}`,
-        { method: 'GET' },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (!response.ok) {
-        throw new Error('Failed to fetch profile');
-      }
-      
-      const data: PatientProfile = await response.json();
-      
-      // Set form values
+  useEffect(() => {
+    const data = profileQuery.data;
+    if (!data) return;
       setAge(data.age > 0 ? String(data.age) : '');
       setContactNumber(data.contact_number || '');
       setNumberOfPregnancies(data.number_of_pregnancies !== null ? String(data.number_of_pregnancies) : '');
@@ -82,15 +94,14 @@ export const EditProfilePage = () => {
       setUnexplainedPrenatalLoss(answer(data.unexplained_prenatal_loss));
       setLargeChildOrBirthDefault(answer(data.large_child_or_birth_default));
       setPrediabetes(answer(data.prediabetes));
-      
       setError('');
-    } catch (err: unknown) {
-      console.error('Error fetching profile:', err);
+  }, [profileQuery.data]);
+
+  useEffect(() => {
+    if (profileQuery.isError) {
       setError('Failed to load profile. Please try again.');
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [profileQuery.isError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,23 +140,7 @@ export const EditProfilePage = () => {
       updateData.large_child_or_birth_default = answerValue(largeChildOrBirthDefault);
       updateData.prediabetes = answerValue(prediabetes);
 
-      const response = await apiFetch(
-        `/api/patient-portal/profile/${patientIdentifier}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updateData),
-        },
-        tokens,
-        setTokens,
-        logout,
-      );
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to update profile');
-      }
-
+      await updateProfile.mutateAsync(updateData);
       setSuccess('Profile updated successfully!');
       setTimeout(() => {
         navigate('/patient/dashboard');
@@ -158,7 +153,25 @@ export const EditProfilePage = () => {
     }
   };
 
-  if (loading) {
+  const closeAccount = async () => {
+    if (closeConfirmation.trim().toUpperCase() !== 'CLOSE') {
+      setError('Type CLOSE to confirm account closure.');
+      return;
+    }
+    setClosingAccount(true);
+    setError('');
+    try {
+      await closeAccountMutation.mutateAsync(closeConfirmation);
+      logout();
+      navigate('/patient/login', { replace: true });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unable to close account.');
+    } finally {
+      setClosingAccount(false);
+    }
+  };
+
+  if (profileQuery.isPending) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-pink-50/30">
         <PatientNavbar />
@@ -409,6 +422,36 @@ export const EditProfilePage = () => {
               </Button>
             </div>
           </form>
+
+          <div className="mt-10 rounded-2xl border border-red-200 bg-red-50/70 p-6 shadow-sm">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-red-800">
+              <UserX className="h-5 w-5" />
+              Close Patient Account
+            </h2>
+            <p className="mt-2 text-sm text-red-700">
+              This disables your sign-in, ends your doctor registration, and cancels future appointments. Your medical record and appointment history are retained.
+            </p>
+            <Label htmlFor="close-confirmation" className="mt-4 block text-sm font-medium text-red-800">
+              Type CLOSE to confirm
+            </Label>
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+              <Input
+                id="close-confirmation"
+                value={closeConfirmation}
+                onChange={(event) => setCloseConfirmation(event.target.value)}
+                placeholder="CLOSE"
+                className="bg-white"
+              />
+              <Button
+                type="button"
+                onClick={closeAccount}
+                disabled={closingAccount || closeConfirmation.trim().toUpperCase() !== 'CLOSE'}
+                className="bg-red-600 text-white hover:bg-red-700 sm:min-w-40"
+              >
+                {closingAccount ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Close Account'}
+              </Button>
+            </div>
+          </div>
         </div>
       </main>
     </div>

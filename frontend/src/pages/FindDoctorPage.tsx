@@ -4,7 +4,8 @@ import { ShieldCheck, Building2, Stethoscope, ChevronDown, ChevronUp, Loader2, C
 import { Button } from '@/components/ui/button';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 
 interface Doctor {
   id: number;
@@ -22,13 +23,9 @@ interface RegRequest {
 }
 
 export const FindDoctorPage = () => {
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [myDoctor, setMyDoctor] = useState<Doctor | null | undefined>(undefined);
-  const [regRequests, setRegRequests] = useState<RegRequest[]>([]);
-  const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState<number | null>(null);
   const [unregistering, setUnregistering] = useState(false);
   const [showUnregisterConfirm, setShowUnregisterConfirm] = useState(false);
@@ -40,59 +37,59 @@ export const FindDoctorPage = () => {
       navigate('/patient/login');
       return;
     }
-    loadAll();
-  }, [isAuthenticated, user]);
-
-  const loadAll = async () => {
-    setLoading(true);
-    await Promise.all([loadDoctors(), loadMyDoctor(), loadRegRequests()]);
-    setLoading(false);
-  };
-
-  const loadDoctors = async () => {
-    try {
-      const res = await apiFetch('/appointments/doctors', { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) setDoctors(await res.json());
-    } catch { }
-  };
-
-  const loadMyDoctor = async () => {
-    try {
-      const res = await apiFetch('/appointments/my-doctor', { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) setMyDoctor(await res.json());
-      else setMyDoctor(null);
-    } catch { setMyDoctor(null); }
-  };
-
-  const loadRegRequests = async () => {
-    try {
-      const res = await apiFetch('/appointments/my-registration-requests', { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) setRegRequests(await res.json());
-    } catch { }
-  };
+  }, [isAuthenticated, navigate, user]);
+  const enabled = isAuthenticated && user?.role === "patient";
+  const doctorsQuery = useApiQuery<Doctor[]>(
+    queryKeys.appointments.doctors,
+    "/appointments/doctors",
+    { enabled, staleTime: 15 * 60_000 },
+  );
+  const myDoctorQuery = useApiQuery<Doctor | null>(
+    queryKeys.appointments.myDoctor,
+    "/appointments/my-doctor",
+    { enabled, retry: false },
+  );
+  const regRequestsQuery = useApiQuery<RegRequest[]>(
+    queryKeys.registration.patientRequests,
+    "/appointments/my-registration-requests",
+    { enabled },
+  );
+  const doctors = doctorsQuery.data ?? [];
+  const myDoctor = myDoctorQuery.data ?? null;
+  const regRequests = regRequestsQuery.data ?? [];
+  const loading = doctorsQuery.isPending || myDoctorQuery.isPending || regRequestsQuery.isPending;
+  const registerPatient = useApiMutation<void, number>({
+    invalidate: [
+      queryKeys.appointments.myDoctor,
+      queryKeys.registration.patientRequests,
+      queryKeys.registration.doctorRequests,
+    ],
+    mutationFn: (doctorId, request) =>
+      request<void>("/appointments/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doctor_id: doctorId }),
+      }),
+  });
+  const unregisterPatient = useApiMutation<void, void>({
+    invalidate: [
+      queryKeys.appointments.myDoctor,
+      queryKeys.registration.all,
+      queryKeys.appointments.all,
+      queryKeys.dashboard.stats,
+    ],
+    mutationFn: (_, request) =>
+      request<void>("/appointments/unregister", { method: "DELETE" }),
+  });
 
   const handleRegister = async (doctorId: number) => {
     setRegistering(doctorId);
     setMessage(null);
     try {
-      const res = await apiFetch(
-        '/appointments/register',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doctor_id: doctorId }),
-        },
-        tokens, setTokens, logout,
-      );
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Registration request sent. Waiting for doctor approval.' });
-        await Promise.all([loadMyDoctor(), loadRegRequests()]);
-      } else {
-        const err = await res.json();
-        setMessage({ type: 'error', text: err.detail || 'Could not send registration request.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+      await registerPatient.mutateAsync(doctorId);
+      setMessage({ type: 'success', text: 'Registration request sent. Waiting for doctor approval.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error. Please try again.' });
     } finally {
       setRegistering(null);
     }
@@ -101,14 +98,17 @@ export const FindDoctorPage = () => {
   const handleUnregister = async () => {
     setUnregistering(true);
     try {
-      const res = await apiFetch('/appointments/unregister', { method: 'DELETE' }, tokens, setTokens, logout);
-      if (res.ok) {
-        setMyDoctor(null);
-        setShowUnregisterConfirm(false);
-        setMessage({ type: 'success', text: 'You have unregistered from your doctor.' });
-        await loadRegRequests();
-      }
-    } catch { } finally { setUnregistering(false); }
+      await unregisterPatient.mutateAsync();
+      setShowUnregisterConfirm(false);
+      setMessage({ type: 'success', text: 'You have unregistered from your doctor.' });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not unregister from doctor.",
+      });
+    } finally {
+      setUnregistering(false);
+    }
   };
 
   const toggleBio = (id: number) => {
@@ -172,7 +172,7 @@ export const FindDoctorPage = () => {
               </button>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Are you sure?</span>
+                <span className="text-xs text-muted-foreground">Future appointments will be cancelled. Your login and history remain.</span>
                 <button
                   disabled={unregistering}
                   onClick={handleUnregister}

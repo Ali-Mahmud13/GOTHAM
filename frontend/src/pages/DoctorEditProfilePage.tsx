@@ -6,13 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Navbar } from '@/components/Navbar';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 
 export const DoctorEditProfilePage = () => {
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -26,51 +26,54 @@ export const DoctorEditProfilePage = () => {
       navigate('/doctor/login');
       return;
     }
-    loadProfile();
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, navigate, user]);
+  const profileQuery = useApiQuery<{
+    full_name?: string;
+    specialty?: string;
+    clinic_name?: string;
+    bio?: string;
+  }>(queryKeys.auth.me, "/auth/me", {
+    enabled: isAuthenticated && user?.role === "doctor",
+  });
+  const updateProfile = useApiMutation<void, {
+    full_name: string | null;
+    specialty: string | null;
+    clinic_name: string | null;
+    bio: string | null;
+  }>({
+    invalidate: [queryKeys.auth.me, queryKeys.appointments.doctors],
+    mutationFn: (body, request) =>
+      request<void>("/auth/me", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+  });
 
-  const loadProfile = async () => {
-    setLoading(true);
-    try {
-      const res = await apiFetch('/auth/me', { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) {
-        const data = await res.json();
-        setFullName(data.full_name || '');
-        setSpecialty(data.specialty || '');
-        setClinicName(data.clinic_name || '');
-        setBio(data.bio || '');
-      }
-    } catch { } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!profileQuery.data) return;
+    setFullName(profileQuery.data.full_name || "");
+    setSpecialty(profileQuery.data.specialty || "");
+    setClinicName(profileQuery.data.clinic_name || "");
+    setBio(profileQuery.data.bio || "");
+  }, [profileQuery.data]);
 
   const handleSave = async () => {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await apiFetch(
-        '/auth/me',
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            full_name: fullName || null,
-            specialty: specialty || null,
-            clinic_name: clinicName || null,
-            bio: bio || null,
-          }),
-        },
-        tokens, setTokens, logout,
-      );
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Profile updated successfully.' });
-      } else {
-        const err = await res.json();
-        setMessage({ type: 'error', text: err.detail || 'Could not update profile.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+      await updateProfile.mutateAsync({
+        full_name: fullName || null,
+        specialty: specialty || null,
+        clinic_name: clinicName || null,
+        bio: bio || null,
+      });
+      setMessage({ type: 'success', text: 'Profile updated successfully.' });
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Network error. Please try again.',
+      });
     } finally {
       setSaving(false);
     }
@@ -110,7 +113,7 @@ export const DoctorEditProfilePage = () => {
           </div>
         )}
 
-        {loading ? (
+        {profileQuery.isPending ? (
           <div className="flex justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-medical-blue" />
           </div>
