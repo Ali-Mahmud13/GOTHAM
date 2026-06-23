@@ -87,6 +87,7 @@ backend/PERFORMANCE_OPTIMIZATION_TODO.md
 docs/
 outputs/
 *.md
+!README.md
 !backend/alembic/README
 TECHNICAL_DETAILS.md
 RISK_ASSESSMENT_VERIFICATION.md
