@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import {
   User, Phone, Calendar, Heart, Activity, Clock, Stethoscope, BarChart3,
-  AlertCircle, TrendingUp, ChevronRight, FileText, Clipboard,
-  CalendarCheck, PlusCircle, ShieldAlert
+  AlertCircle, ChevronRight, Clipboard,
+  CalendarCheck, PlusCircle, ShieldAlert, FileText
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PatientNavbar } from "@/components/PatientNavbar";
@@ -11,7 +11,9 @@ import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
-import { apiFetch } from "@/lib/apiClient";
+import { formatPakistanDate, formatPakistanDateTime } from "@/lib/dateTime";
+import { useApiMutation, useApiQuery, useSessionCache } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface PatientProfile {
   id: number;
@@ -22,7 +24,7 @@ interface PatientProfile {
   clinical_notes: string | null;
   doctor_id: number | null;
   is_registered_with_doctor: boolean;
-  risk_level: 'high' | 'medium' | 'low';
+  risk_level: 'unassessed' | 'high' | 'medium' | 'low';
   number_of_pregnancies: number | null;
   bmi_category: number | null;
   family_history: boolean | null;
@@ -32,6 +34,18 @@ interface PatientProfile {
   prediabetes: boolean | null;
   created_at: string;
   updated_at: string;
+  latest_assessment_type: 'maternal' | 'fetal' | 'both' | null;
+  latest_assessment_at: string | null;
+  latest_assessment_outcomes: {
+    gdm_risk_level?: number | null;
+    anemia_diagnosis?: string | null;
+    fetal_health_status?: number | null;
+    preeclampsia_risk_level?: number | null;
+  } | null;
+  latest_assessment_freshness: Record<string, {
+    oldest_input_age_days?: number | null;
+    has_stale_inputs?: boolean;
+  }> | null;
 }
 
 interface Appointment {
@@ -40,13 +54,15 @@ interface Appointment {
   appointment_date: string;
   start_time: string;
   end_time: string;
+  start_at_utc: string;
+  end_at_utc: string;
   status: string;
   notes?: string;
 }
 
 interface RegistrationRequestResult {
   id: number;
-  patient_name: string;
+  doctor_name: string;
   status: string;
 }
 
@@ -61,6 +77,7 @@ interface VisitRecord extends VisitVitalsPoint {
     thumbnail_url?: string | null;
     file_name?: string | null;
     uploaded_by_role?: string | null;
+    uploaded_by_user_id?: number | null;
     created_at?: string | null;
   }>;
   wbc?: number | null;
@@ -72,9 +89,38 @@ interface VisitRecord extends VisitVitalsPoint {
   mchc?: number | null;
   plt?: number | null;
   accelerations?: number | null;
+  fetal_movement?: number | null;
+  uterine_contractions?: number | null;
+  light_decelerations?: number | null;
+  severe_decelerations?: number | null;
+  prolongued_decelerations?: number | null;
+  abnormal_short_term_variability?: number | null;
+  mean_value_of_short_term_variability?: number | null;
+  percentage_of_time_with_abnormal_long_term_variability?: number | null;
+  mean_value_of_long_term_variability?: number | null;
+  histogram_width?: number | null;
+  histogram_min?: number | null;
+  histogram_max?: number | null;
+  histogram_number_of_peaks?: number | null;
+  histogram_number_of_zeroes?: number | null;
+  histogram_mode?: number | null;
+  histogram_mean?: number | null;
+  histogram_median?: number | null;
+  histogram_variance?: number | null;
+  histogram_tendency?: number | null;
   fetal_health_status?: number | null;
   gdm_risk_level?: number | null;
   anemia_diagnosis?: string | null;
+  body_temp?: number | null;
+  heart_rate?: number | null;
+  maternal_risk_level?: number | null;
+  assessment_results?: Record<string, {
+    status?: 'completed' | 'incomplete' | 'failed' | null;
+    severity?: 'low' | 'medium' | 'high' | null;
+    outcome?: string | null;
+    oldest_input_age_days?: number | null;
+    has_stale_inputs?: boolean;
+  } | null>;
 }
 
 interface VisitStatsResponse {
@@ -85,17 +131,11 @@ interface VisitStatsResponse {
 type TabType = 'overview' | 'medical' | 'notes' | 'visits' | 'vitals';
 
 export const PatientDashboard = () => {
-  const { isAuthenticated, user, logout, tokens, setTokens } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const [patient, setPatient] = useState<PatientProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [visitStats, setVisitStats] = useState<VisitStatsResponse>({ total_visits: 0, recent_visits: [] });
-  const [visits, setVisits] = useState<VisitRecord[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [pendingRegistrationDoctor, setPendingRegistrationDoctor] = useState<string | null>(null);
+  const { queryClient, key } = useSessionCache();
 
   // Get patient identifier from auth user
   const patientIdentifier = user?.patient_info?.patient_identifier;
@@ -105,112 +145,64 @@ export const PatientDashboard = () => {
       navigate('/patient/login');
       return;
     }
-    fetchPatientData();
   }, [isAuthenticated, user, patientIdentifier, navigate]);
-
-  const fetchUpcomingAppointments = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/upcoming`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setAppointments(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch appointments:', err);
-    }
-  };
-
-  const fetchPatientData = async () => {
-    if (!patientIdentifier) return;
-
-    try {
-      // Fetch patient profile
-      const profileResponse = await apiFetch(
-        `/api/patient-portal/profile/${patientIdentifier}`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (!profileResponse.ok) {
-        throw new Error('Failed to fetch patient profile');
-      }
-      const profileData = await profileResponse.json();
-      setPatient(profileData);
-
-      if (!profileData.doctor_id) {
-        try {
-          const regRes = await apiFetch(
-            `/appointments/my-registration-requests`,
-            { method: "GET" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          if (regRes.ok) {
-            const regData: RegistrationRequestResult[] = await regRes.json();
-            const pendingReq = regData.find((r) => r.status === 'pending');
-            setPendingRegistrationDoctor(pendingReq?.patient_name || null);
-          } else {
-            setPendingRegistrationDoctor(null);
-          }
-        } catch {
-          setPendingRegistrationDoctor(null);
-        }
-      } else {
-        setPendingRegistrationDoctor(null);
-      }
-
-      // Fetch visit history with assessment metrics for trend charts and summaries
-      const visitsResponse = await apiFetch(
-        `/api/dashboard/patient/${patientIdentifier}/visits`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (visitsResponse.ok) {
-        const visitsData: VisitStatsResponse = await visitsResponse.json();
-        setVisits(visitsData.recent_visits || []);
-        setVisitStats(visitsData);
-      }
-
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching patient data:', err);
-      setError('Failed to load your profile. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-    fetchUpcomingAppointments();
-  };
+  const enabled = Boolean(isAuthenticated && patientIdentifier);
+  const profileQuery = useApiQuery<PatientProfile>(
+    queryKeys.patients.portalProfile,
+    `/api/patient-portal/profile/${patientIdentifier ?? ""}`,
+    { enabled },
+  );
+  const visitsKey = queryKeys.patients.visits(patientIdentifier ?? "self");
+  const visitsQuery = useApiQuery<VisitStatsResponse>(
+    visitsKey,
+    `/api/dashboard/patient/${patientIdentifier ?? ""}/visits`,
+    { enabled },
+  );
+  const appointmentsQuery = useApiQuery<Appointment[]>(
+    queryKeys.appointments.upcoming,
+    "/appointments/upcoming",
+    { enabled },
+  );
+  const registrationQuery = useApiQuery<RegistrationRequestResult[]>(
+    queryKeys.registration.patientRequests,
+    "/appointments/my-registration-requests",
+    { enabled },
+  );
+  const patient = profileQuery.data ?? null;
+  const visitStats = visitsQuery.data ?? { total_visits: 0, recent_visits: [] };
+  const visits = visitStats.recent_visits ?? [];
+  const appointments = appointmentsQuery.data ?? [];
+  const pendingRegistrationDoctor =
+    patient?.doctor_id
+      ? null
+      : registrationQuery.data?.find((request) => request.status === "pending")?.doctor_name ?? null;
+  const loading = profileQuery.isPending || visitsQuery.isPending;
+  const error = profileQuery.isError ? "Failed to load your profile. Please try again." : null;
+  const deleteUltrasound = useApiMutation<void, number>({
+    invalidate: [visitsKey],
+    mutationFn: (imageId, request) =>
+      request<void>(`/api/ultrasound/${imageId}`, { method: "DELETE" }),
+  });
+  const refetchPatientData = () => Promise.all([
+    profileQuery.refetch(),
+    visitsQuery.refetch(),
+    appointmentsQuery.refetch(),
+  ]);
 
   const handleDeleteUltrasound = async (imageId: number) => {
     try {
-      const res = await apiFetch(
-        `/api/ultrasound/${imageId}`,
-        { method: "DELETE" },
-        tokens,
-        setTokens,
-        logout,
+      queryClient.setQueryData<VisitStatsResponse>(key(visitsKey), (previous) =>
+        previous
+          ? {
+              ...previous,
+              recent_visits: previous.recent_visits.map((visit) => ({
+                ...visit,
+                ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
+              })),
+            }
+          : previous,
       );
-      if (!res.ok) {
-        const errorPayload = await res.json();
-        throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
-      }
-
-      setVisits((prev) =>
-        prev.map((visit) => ({
-          ...visit,
-          ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
-        }))
-      );
+      await deleteUltrasound.mutateAsync(imageId);
     } catch (err) {
       console.error(err);
     }
@@ -239,38 +231,19 @@ export const PatientDashboard = () => {
           ringColor: 'stroke-cyan-500',
           label: 'Low Risk',
         };
+      case 'unassessed':
       default:
         return {
           bgColor: 'from-gray-400 to-gray-500',
           textColor: 'text-gray-600',
           ringColor: 'stroke-gray-400',
-          label: 'Unknown',
+          label: 'Not Assessed',
         };
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  const averageMetric = (selector: (visit: VisitVitalsPoint) => number | null | undefined) => {
-    const values = visits
-      .map(selector)
-      .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
-    if (values.length === 0) return null;
-    return values.reduce((sum, value) => sum + value, 0) / values.length;
-  };
-
-  const avgGlucose = averageMetric((visit) => visit.glucose_level ?? visit.ogtt);
-  const avgSystolic = averageMetric((visit) => visit.blood_pressure_systolic);
-  const avgDiastolic = averageMetric((visit) => visit.blood_pressure_diastolic);
-  const avgBmi = averageMetric((visit) => visit.bmi);
-  const avgHemoglobin = averageMetric((visit) => visit.hgb);
+  const formatDate = (dateString: string) => formatPakistanDateTime(dateString);
+  const formatMeasurementDate = (date?: string | null) => formatPakistanDate(date, 'No reading');
 
   const timelineVisits = visits.map((visit) => ({
     id: visit.id,
@@ -290,6 +263,25 @@ export const PatientDashboard = () => {
     plt: visit.plt ?? null,
     baseline_value: visit.baseline_value ?? null,
     accelerations: visit.accelerations ?? null,
+    fetal_movement: visit.fetal_movement ?? null,
+    uterine_contractions: visit.uterine_contractions ?? null,
+    light_decelerations: visit.light_decelerations ?? null,
+    severe_decelerations: visit.severe_decelerations ?? null,
+    prolongued_decelerations: visit.prolongued_decelerations ?? null,
+    abnormal_short_term_variability: visit.abnormal_short_term_variability ?? null,
+    mean_value_of_short_term_variability: visit.mean_value_of_short_term_variability ?? null,
+    percentage_of_time_with_abnormal_long_term_variability: visit.percentage_of_time_with_abnormal_long_term_variability ?? null,
+    mean_value_of_long_term_variability: visit.mean_value_of_long_term_variability ?? null,
+    histogram_width: visit.histogram_width ?? null,
+    histogram_min: visit.histogram_min ?? null,
+    histogram_max: visit.histogram_max ?? null,
+    histogram_number_of_peaks: visit.histogram_number_of_peaks ?? null,
+    histogram_number_of_zeroes: visit.histogram_number_of_zeroes ?? null,
+    histogram_mode: visit.histogram_mode ?? null,
+    histogram_mean: visit.histogram_mean ?? null,
+    histogram_median: visit.histogram_median ?? null,
+    histogram_variance: visit.histogram_variance ?? null,
+    histogram_tendency: visit.histogram_tendency ?? null,
     fetal_health_status: visit.fetal_health_status ?? null,
     glucose_level: visit.glucose_level ?? null,
     blood_pressure_systolic: visit.blood_pressure_systolic ?? null,
@@ -298,6 +290,10 @@ export const PatientDashboard = () => {
     ogtt: visit.ogtt ?? null,
     gdm_risk_level: visit.gdm_risk_level ?? null,
     anemia_diagnosis: visit.anemia_diagnosis ?? null,
+    body_temp: visit.body_temp ?? null,
+    heart_rate: visit.heart_rate ?? null,
+    maternal_risk_level: visit.maternal_risk_level ?? null,
+    assessment_results: visit.assessment_results || {},
   }));
 
   const visitHistoryVisits = timelineVisits.filter((visit) => {
@@ -339,7 +335,7 @@ export const PatientDashboard = () => {
           <div className="text-center text-red-500">
             <p>{error || 'Failed to load your profile.'}</p>
             <button
-              onClick={fetchPatientData}
+              onClick={refetchPatientData}
               className="mt-4 px-6 py-2 bg-medical-blue text-white rounded-lg hover:bg-medical-blue/90"
             >
               Retry
@@ -352,6 +348,50 @@ export const PatientDashboard = () => {
 
   const riskConfig = getRiskConfig(patient.risk_level);
   const isRegisteredWithDoctor = Boolean(patient.is_registered_with_doctor || patient.doctor_id);
+  const assessmentOutcomes = [
+    {
+      label: 'GDM',
+      value: patient.latest_assessment_outcomes?.gdm_risk_level === 0
+        ? 'Negative'
+        : patient.latest_assessment_outcomes?.gdm_risk_level != null
+          ? 'Positive'
+          : null,
+    },
+    {
+      label: 'Anemia',
+      value: patient.latest_assessment_outcomes?.anemia_diagnosis || null,
+    },
+    {
+      label: 'Fetal CTG',
+      value: patient.latest_assessment_outcomes?.fetal_health_status === 1
+        ? 'Normal'
+        : patient.latest_assessment_outcomes?.fetal_health_status === 2
+          ? 'Suspect'
+          : patient.latest_assessment_outcomes?.fetal_health_status === 3
+            ? 'Pathological'
+            : null,
+    },
+    {
+      label: 'Preeclampsia',
+      value: patient.latest_assessment_outcomes?.preeclampsia_risk_level === 0
+        ? 'Low'
+        : patient.latest_assessment_outcomes?.preeclampsia_risk_level === 1
+          ? 'Medium'
+          : patient.latest_assessment_outcomes?.preeclampsia_risk_level === 2
+            ? 'High'
+            : null,
+    },
+  ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+  const agingModels = Object.entries(patient.latest_assessment_freshness || {})
+    .filter(([, details]) => (
+      details.has_stale_inputs
+      || (details.oldest_input_age_days != null && details.oldest_input_age_days > 30)
+    ));
+  const historyStatus = (value: boolean | null, yesLabel: string) => {
+    if (value === true) return yesLabel;
+    if (value === false) return 'No';
+    return 'Not provided';
+  };
 
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: BarChart3 },
@@ -384,13 +424,6 @@ export const PatientDashboard = () => {
               <div>
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="text-xs font-semibold text-gray-500 tracking-wide">{patient.patient_identifier}</span>
-                  <div className={cn(
-                    "px-3 py-1 rounded-full text-xs font-bold text-white",
-                    `bg-gradient-to-r ${riskConfig.bgColor}`,
-                    patient.risk_level === 'high' && "animate-pulse"
-                  )}>
-                    {riskConfig.label}
-                  </div>
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
@@ -500,23 +533,7 @@ export const PatientDashboard = () => {
         {activeTab === 'overview' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-              {/* Risk Level */}
-              <div className="group relative bg-gradient-to-br from-medical-pink/5 to-rose-50/50 p-6 rounded-2xl border border-medical-pink/20 hover:shadow-xl transition-all duration-300 overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-medical-pink/10 rounded-full blur-2xl" />
-                <div className="relative">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-medical-pink to-rose-400 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                      <ShieldAlert className="w-6 h-6 text-white" />
-                    </div>
-                    <TrendingUp className="w-5 h-5 text-medical-pink" />
-                  </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Level</p>
-                  <p className={cn("text-3xl font-bold mb-2", riskConfig.textColor)}>{riskConfig.label}</p>
-                  <p className="text-xs text-gray-500 font-semibold">Based on latest assessment</p>
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               {/* Total Visits */}
               <button
                 onClick={() => setActiveTab('visits')}
@@ -534,32 +551,51 @@ export const PatientDashboard = () => {
                   <p className="text-4xl font-bold text-gray-900 mb-2">{visitStats.total_visits}</p>
                   <p className="text-xs text-gray-500 font-semibold">
                     {visitStats.recent_visits[0]
-                      ? `Last: ${new Date(visitStats.recent_visits[0].visit_date).toLocaleDateString()}`
+                      ? `Last: ${formatMeasurementDate(visitStats.recent_visits[0].visit_date)}`
                       : 'No visits yet'}
                   </p>
                 </div>
               </button>
 
-              {/* Risk Factors */}
-              <button
-                onClick={() => setActiveTab('medical')}
-                className="group relative bg-gradient-to-br from-purple-50 to-violet-50 p-6 rounded-2xl border border-purple-200/50 hover:shadow-xl transition-all duration-300 overflow-hidden text-left w-full"
-              >
+              {/* Assessment Status */}
+              <div className="relative bg-gradient-to-br from-purple-50 to-violet-50 p-6 rounded-2xl border border-purple-200/50 shadow-sm overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/10 to-violet-500/10 rounded-full blur-2xl" />
                 <div className="relative">
                   <div className="flex items-center justify-between mb-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-violet-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                      <AlertCircle className="w-6 h-6 text-white" />
+                      <ShieldAlert className="w-6 h-6 text-white" />
                     </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                    <span className={cn(
+                      "rounded-full bg-white/80 px-3 py-1 text-xs font-bold shadow-sm",
+                      riskConfig.textColor,
+                    )}>
+                      {riskConfig.label}
+                    </span>
                   </div>
-                  <p className="text-sm font-semibold text-gray-600 mb-1">Risk Factors</p>
-                  <p className="text-4xl font-bold text-gray-900 mb-2">
-                    {[patient.family_history, patient.pcos, patient.prediabetes, patient.unexplained_prenatal_loss].filter(Boolean).length}
+                  <p className="text-sm font-semibold text-gray-600 mb-1">Assessment Status</p>
+                  <p className="text-xl font-bold text-gray-900 mb-2">{riskConfig.label}</p>
+                  <p className="text-xs text-gray-500 font-semibold">
+                    {patient.latest_assessment_at
+                      ? `Last assessed ${formatDate(patient.latest_assessment_at)}`
+                      : 'No completed model assessment yet'}
                   </p>
-                  <p className="text-xs text-gray-500 font-semibold">Active conditions</p>
+                  {assessmentOutcomes.length > 0 && (
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      {assessmentOutcomes.map((outcome) => (
+                        <div key={outcome.label} className="rounded-lg border border-white/80 bg-white/70 px-3 py-2">
+                          <p className="text-[11px] font-semibold text-gray-500">{outcome.label}</p>
+                          <p className="text-sm font-bold text-gray-800">{outcome.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {agingModels.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Some assessment readings are more than 30 days old. Review them with your doctor.
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             </div>
 
             {/* Quick Summary Cards */}
@@ -587,14 +623,14 @@ export const PatientDashboard = () => {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {visitStats.recent_visits.slice(0, 3).map((v: any, i: number) => (
+                    {visitStats.recent_visits.slice(0, 3).map((v, i) => (
                       <div key={v.id ?? i} className="flex items-start gap-3 p-3 bg-blue-50 rounded-xl">
                         <div className="w-2 h-2 bg-medical-blue rounded-full mt-2 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900">
                             {v.visit_type ? v.visit_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Clinical Visit'}
                           </p>
-                          <p className="text-xs text-gray-500">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          <p className="text-xs text-gray-500">{formatMeasurementDate(v.visit_date)}</p>
                           {v.notes && <p className="text-xs text-gray-400 mt-1 truncate">{v.notes}</p>}
                         </div>
                       </div>
@@ -613,10 +649,6 @@ export const PatientDashboard = () => {
                   <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                     <span className="text-sm font-semibold text-gray-600">Patient ID</span>
                     <span className="text-sm font-bold text-gray-900">{patient.patient_identifier}</span>
-                  </div>
-                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                    <span className="text-sm font-semibold text-gray-600">Risk Level</span>
-                    <span className={cn("text-sm font-bold", riskConfig.textColor)}>{riskConfig.label}</span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                     <span className="text-sm font-semibold text-gray-600">Contact</span>
@@ -663,21 +695,30 @@ export const PatientDashboard = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {appointments.slice(0, 3).map((appt) => (
-                    <div key={appt.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-medical-blue/10 rounded-lg flex items-center justify-center">
+                  {appointments.slice(0, 3).map((appt, idx) => (
+                    <div key={appt.id} className={`flex items-center justify-between p-3 rounded-xl relative ${
+                      idx === 0
+                        ? 'bg-gradient-to-r from-medical-pink/10 to-medical-blue/10 border border-medical-blue/20'
+                        : 'bg-blue-50'
+                    }`}>
+                      {idx === 0 && (
+                        <span className="absolute top-2 right-2 text-[9px] font-bold uppercase bg-gradient-to-r from-medical-pink to-medical-blue text-white px-1.5 py-0.5 rounded-full leading-none">
+                          Next
+                        </span>
+                      )}
+                      <div className="flex items-center gap-3 pr-10">
+                        <div className="w-10 h-10 bg-medical-blue/10 rounded-lg flex items-center justify-center flex-shrink-0">
                           <Stethoscope className="w-5 h-5 text-medical-blue" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{appt.doctor_name}</p>
+                          <p className="text-sm font-semibold text-gray-900">Dr. {appt.doctor_name}</p>
                           <p className="text-xs text-gray-500">
-                            {new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                            {' · '}{appt.start_time} – {appt.end_time}
+                            {new Date(appt.start_at_utc).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            {' · '}{new Date(appt.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(appt.end_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
                       </div>
-                      <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${
+                      <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize flex-shrink-0 ${
                         appt.status === 'booked' ? 'bg-emerald-100 text-emerald-700' :
                         appt.status === 'pending_approval' ? 'bg-amber-100 text-amber-700' :
                         appt.status === 'cancelled' ? 'bg-red-100 text-red-700' :
@@ -760,7 +801,7 @@ export const PatientDashboard = () => {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="mb-6">
               <h2 className="text-3xl font-bold text-gray-900 mb-2">Medical History</h2>
-              <p className="text-gray-600">Overview of your medical conditions and risk factors</p>
+              <p className="text-gray-600">Information you or your care team have reported</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -789,7 +830,7 @@ export const PatientDashboard = () => {
                     ? "bg-pink-100 text-pink-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.family_history ? "Present" : "Not Reported"}
+                  {historyStatus(patient.family_history, "Present")}
                 </div>
               </div>
 
@@ -818,7 +859,7 @@ export const PatientDashboard = () => {
                     ? "bg-purple-100 text-purple-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.pcos ? "Diagnosed" : "Not Reported"}
+                  {historyStatus(patient.pcos, "Diagnosed")}
                 </div>
               </div>
 
@@ -847,7 +888,7 @@ export const PatientDashboard = () => {
                     ? "bg-orange-100 text-orange-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.unexplained_prenatal_loss ? "Reported" : "Not Reported"}
+                  {historyStatus(patient.unexplained_prenatal_loss, "Reported")}
                 </div>
               </div>
 
@@ -876,7 +917,7 @@ export const PatientDashboard = () => {
                     ? "bg-indigo-100 text-indigo-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.large_child_or_birth_default ? "Reported" : "Not Reported"}
+                  {historyStatus(patient.large_child_or_birth_default, "Reported")}
                 </div>
               </div>
 
@@ -905,7 +946,7 @@ export const PatientDashboard = () => {
                     ? "bg-rose-100 text-rose-700"
                     : "bg-gray-100 text-gray-600"
                 )}>
-                  {patient.prediabetes ? "Diagnosed" : "Not Reported"}
+                  {historyStatus(patient.prediabetes, "Diagnosed")}
                 </div>
               </div>
 
@@ -916,10 +957,10 @@ export const PatientDashboard = () => {
                     <Heart className="w-7 h-7 text-white" />
                   </div>
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Pregnancies</h3>
-                <p className="text-sm text-gray-600 mb-4">Number of previous pregnancies</p>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Total Pregnancies</h3>
+                <p className="text-sm text-gray-600 mb-4">Total pregnancies reported</p>
                 <div className="px-3 py-1.5 rounded-full text-xs font-bold inline-block bg-teal-100 text-teal-700">
-                  {patient.number_of_pregnancies !== null ? `${patient.number_of_pregnancies} Previous` : "Not Reported"}
+                  {patient.number_of_pregnancies !== null ? patient.number_of_pregnancies : "Not provided"}
                 </div>
               </div>
             </div>
@@ -963,7 +1004,7 @@ export const PatientDashboard = () => {
                   {labeledNotes.map((v) => (
                       <div key={v.id} className="rounded-xl border border-gray-200 p-4 bg-white">
                         <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs text-gray-500">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          <p className="text-xs text-gray-500">{formatMeasurementDate(v.visit_date)}</p>
                           <span className={cn(
                             'text-xs font-semibold px-2 py-1 rounded-full',
                             v.note_source === 'current_doctor' || v.note_source === 'doctor'
@@ -989,6 +1030,10 @@ export const PatientDashboard = () => {
               visits={visitHistoryVisits}
               hideCareStatusBadge={true}
               onDeleteUltrasound={handleDeleteUltrasound}
+              canDeleteUltrasound={(image) => (
+                image.uploaded_by_role === 'patient'
+                && image.uploaded_by_user_id === user?.id
+              )}
             />
           </div>
         )}
@@ -1004,39 +1049,6 @@ export const PatientDashboard = () => {
                 <div>
                   <h2 className="text-2xl font-bold text-foreground">Vitals Tracking</h2>
                   <p className="text-sm text-muted-foreground">Monitor your key health metrics over time</p>
-                </div>
-              </div>
-
-              {/* Summary Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                <div className="bg-gradient-to-br from-medical-pink/10 to-rose-50/50 p-4 rounded-xl border border-medical-pink/20">
-                  <p className="text-xs font-semibold text-medical-pink mb-1">AVG GLUCOSE</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgGlucose !== null ? avgGlucose.toFixed(1) : 'N/A'}
-                    {avgGlucose !== null && <span className="text-sm font-normal text-muted-foreground"> mg/dL</span>}
-                  </p>
-                </div>
-                <div className="bg-gradient-to-br from-medical-blue/10 to-cyan-50/50 p-4 rounded-xl border border-medical-blue/20">
-                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG BLOOD PRESSURE</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgSystolic !== null && avgDiastolic !== null
-                      ? `${Math.round(avgSystolic)}/${Math.round(avgDiastolic)}`
-                      : 'N/A'}
-                    {avgSystolic !== null && avgDiastolic !== null && <span className="text-sm font-normal text-muted-foreground"> mmHg</span>}
-                  </p>
-                </div>
-                <div className="bg-gradient-to-br from-cyan-50 to-teal-50 p-4 rounded-xl border border-cyan-200">
-                  <p className="text-xs font-semibold text-cyan-600 mb-1">AVG BMI</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgBmi !== null ? avgBmi.toFixed(1) : 'N/A'}
-                  </p>
-                </div>
-                <div className="bg-gradient-to-br from-medical-pink/10 to-medical-blue/10 p-4 rounded-xl border border-medical-blue/20">
-                  <p className="text-xs font-semibold text-medical-blue mb-1">AVG HEMOGLOBIN</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    {avgHemoglobin !== null ? avgHemoglobin.toFixed(1) : 'N/A'}
-                    {avgHemoglobin !== null && <span className="text-sm font-normal text-muted-foreground"> g/dL</span>}
-                  </p>
                 </div>
               </div>
 

@@ -34,6 +34,24 @@ class AuthUser(SQLModel, table=True):
     
     # Active status
     is_active: bool = Field(default=True, description="Whether the user account is active")
+    token_version: int = Field(
+        default=0,
+        description="Incremented to revoke all previously issued access and refresh tokens",
+    )
 
     # Admin flag (e.g. list /auth/users). Default false for all users.
     is_admin: bool = Field(default=False, description="Platform admin capabilities")
+
+    # Doctor verification fields (only relevant when role == 'doctor')
+    # pending_verification | verified | rejected
+    verification_status: Optional[str] = Field(
+        default=None,
+        description="Doctor account verification state: pending_verification, verified, or rejected",
+    )
+    license_number: Optional[str] = Field(default=None, description="Medical license number")
+    specialty: Optional[str] = Field(default=None, description="OB/GYN subspecialty")
+    clinic_name: Optional[str] = Field(default=None, description="Name of the clinic or hospital")
+    bio: Optional[str] = Field(
+        default=None,
+        description="Doctor's professional biography / description of experience",
+    )

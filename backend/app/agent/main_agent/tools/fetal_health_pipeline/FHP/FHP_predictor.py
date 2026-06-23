@@ -9,6 +9,8 @@ from pathlib import Path
 from catboost import CatBoostClassifier, Pool
 import asyncio
 import logging
+from ...helper.benchmark import async_timer, timer, record
+import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,14 +40,14 @@ CLASS_LABELS = {
 
 class FetalHealthAgent:
     """Agent for fetal health prediction with explainability"""
-    
+
     def __init__(self, model_path: str):
         """Initialize agent with CatBoost model"""
         self.model = CatBoostClassifier()
         self.model.load_model(model_path)
         self.feature_names = FEATURES
         logger.info("Fetal Health Agent initialized successfully")
-    
+
     def predict(self, input_data: dict):
         """Make prediction on input data"""
         x = np.array([[input_data[feat] for feat in self.feature_names]])
@@ -102,6 +104,26 @@ class FetalHealthAgent:
         }
 
 
+# ── Singleton cache ──────────────────────────────────────────
+# Loaded once on first call, reused forever. Eliminates ~0.8s per request.
+_fhp_agent: FetalHealthAgent | None = None
+
+
+def _get_fhp_agent() -> FetalHealthAgent:
+    """Return the cached FetalHealthAgent, loading it on first call."""
+    global _fhp_agent
+    if _fhp_agent is None:
+        current_file = Path(__file__)
+        model_path = str(current_file.parent / "FHP_1_catboost_model.cbm")
+        _t0 = time.perf_counter()
+        _fhp_agent = FetalHealthAgent(model_path)
+        record("Model Load: FHP (CatBoost .cbm) [COLD]", time.perf_counter() - _t0)
+        logger.info("FHP model loaded and cached (cold start)")
+    else:
+        record("Model Load: FHP (CatBoost .cbm) [WARM]", 0.0)
+    return _fhp_agent
+
+
 async def predict_fetal_health(
     baseline_value,
     accelerations,
@@ -127,15 +149,13 @@ async def predict_fetal_health(
 ):
     """
     Predict fetal health status with SHAP explainability
-    Returns formatted text report for LLM processing
+    Returns a structured prediction with a formatted report.
     """
     
-    # Construct model path
-    current_file = Path(__file__)
-    model_path = str(current_file.parent / "FHP_1_catboost_model.cbm")
-    
-    # Initialize agent
-    agent = await asyncio.to_thread(FetalHealthAgent, model_path)
+    # Get cached agent (loads on first call only)
+    _t0 = time.perf_counter()
+    agent = await asyncio.to_thread(_get_fhp_agent)
+    record("Model Load: FHP (CatBoost .cbm)", time.perf_counter() - _t0)
     
     # Prepare input data
     input_data = {
@@ -162,16 +182,32 @@ async def predict_fetal_health(
         'histogram_tendency': histogram_tendency
     }
     
-    # Make prediction
+    # Make prediction — timed to measure inference cost
+    _t1 = time.perf_counter()
     prediction_result = await asyncio.to_thread(agent.predict, input_data)
+    record("Inference: FHP predict()", time.perf_counter() - _t1)
     
     # Generate explanation
+    _t2 = time.perf_counter()
     explanation_result = await asyncio.to_thread(agent.explain, input_data)
+    record("Inference: FHP explain() SHAP", time.perf_counter() - _t2)
     
     # Format report
     report = await format_fetal_report(prediction_result, explanation_result, input_data)
     
-    return report
+    risk_level = prediction_result["risk_level"]
+    severity = {1: "low", 2: "medium", 3: "high"}[risk_level]
+    probabilities = prediction_result["probabilities"]
+    return {
+        "status": "completed",
+        "outcome": prediction_result["risk_label"],
+        "severity": severity,
+        "predicted_class": prediction_result["risk_label"],
+        "class_value": risk_level,
+        "confidence": max(probabilities.values()),
+        "probabilities": probabilities,
+        "report": report,
+    }
 
 
 async def format_fetal_report(prediction, explanation, input_data):

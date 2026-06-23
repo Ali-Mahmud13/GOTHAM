@@ -1,8 +1,6 @@
-import { useState, useEffect } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/context/AuthContext";
-import { apiFetch } from "@/lib/apiClient";
+import { useApiQuery } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RiskData {
     name: string;
@@ -11,45 +9,18 @@ interface RiskData {
 }
 
 export const RiskOverviewChart = () => {
-    const { user, tokens, setTokens, logout } = useAuth();
-    const [data, setData] = useState<RiskData[]>([
-        { name: "High Risk", value: 0, color: "hsl(340, 45%, 65%)" },
-        { name: "Medium Risk", value: 0, color: "hsl(270, 50%, 60%)" },
-        { name: "Low Risk", value: 0, color: "hsl(200, 60%, 55%)" },
-    ]);
-    const [totalPatients, setTotalPatients] = useState(0);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        if (user?.email) {
-            fetchRiskData();
-        }
-    }, [user?.email]);
-
-    const fetchRiskData = async () => {
-        try {
-            const response = await apiFetch(
-                `/api/dashboard/stats`,
-                { method: "GET" },
-                tokens,
-                setTokens,
-                logout,
-            );
-            if (response.ok) {
-                const stats = await response.json();
-                setData([
-                    { name: "High Risk", value: stats.high_risk_count || 0, color: "hsl(340, 45%, 65%)" },
-                    { name: "Medium Risk", value: stats.medium_risk_count || 0, color: "hsl(270, 50%, 60%)" },
-                    { name: "Low Risk", value: stats.low_risk_count || 0, color: "hsl(200, 60%, 55%)" },
-                ]);
-                setTotalPatients(stats.total_patients || 0);
-            }
-        } catch (error) {
-            console.error('Failed to fetch risk data:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const statsQuery = useApiQuery<Record<string, number>>(
+        queryKeys.dashboard.stats,
+        "/api/dashboard/stats",
+    );
+    const stats = statsQuery.data;
+    const data: RiskData[] = [
+        { name: "High Risk", value: stats?.high_risk_count || 0, color: "hsl(340, 45%, 65%)" },
+        { name: "Medium Risk", value: stats?.medium_risk_count || 0, color: "hsl(270, 50%, 60%)" },
+        { name: "Low Risk", value: stats?.low_risk_count || 0, color: "hsl(200, 60%, 55%)" },
+        { name: "Not Assessed", value: stats?.unassessed_count || 0, color: "hsl(215, 16%, 65%)" },
+    ];
+    const totalPatients = stats?.total_patients || 0;
 
     return (
         <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-soft h-full">
@@ -59,7 +30,7 @@ export const RiskOverviewChart = () => {
             </div>
 
             <div className="h-[250px] w-full relative">
-                {loading ? (
+                {statsQuery.isPending ? (
                     <div className="flex items-center justify-center h-full">
                         <p className="text-sm text-muted-foreground">Loading...</p>
                     </div>
@@ -94,7 +65,7 @@ export const RiskOverviewChart = () => {
                                     verticalAlign="bottom"
                                     height={36}
                                     iconType="circle"
-                                    formatter={(value, entry: any) => (
+                                    formatter={(value) => (
                                         <span className="text-sm text-muted-foreground font-medium ml-1">{value}</span>
                                     )}
                                 />

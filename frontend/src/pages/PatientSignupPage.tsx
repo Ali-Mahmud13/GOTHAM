@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, ArrowRight, Loader2, AlertCircle, Lock, User } from 'lucide-react';
+import { Mail, ArrowRight, Loader2, AlertCircle, Lock, User, Phone, Calendar } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,8 @@ const API_URL = 'http://localhost:8000';
 export const PatientSignupPage = () => {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
+  const [age, setAge] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -27,6 +29,16 @@ export const PatientSignupPage = () => {
 
     if (!fullName.trim()) {
       setError('Please enter your full name');
+      return;
+    }
+
+    if (!age || isNaN(Number(age)) || Number(age) < 1 || Number(age) > 120) {
+      setError('Please enter a valid age (1–120)');
+      return;
+    }
+
+    if (!contactNumber.trim()) {
+      setError('Please enter your contact number');
       return;
     }
 
@@ -54,9 +66,11 @@ export const PatientSignupPage = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           email: email.trim(),
           full_name: fullName.trim(),
+          age: Number(age),
+          contact_number: contactNumber.trim(),
           password: password,
           role: 'patient'
         }),
@@ -140,6 +154,50 @@ export const PatientSignupPage = () => {
                   disabled={isLoading}
                   autoFocus
                 />
+              </div>
+            </div>
+
+            {/* Age + Contact Number (side by side) */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label htmlFor="age" className="block text-sm font-semibold text-gray-700">
+                  Age
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Calendar className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <Input
+                    id="age"
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={age}
+                    onChange={(e) => setAge(e.target.value)}
+                    placeholder="Your age"
+                    className="pl-12 h-12 text-base border-gray-300 focus:ring-2 focus:ring-medical-blue/50 focus:border-medical-blue"
+                    disabled={isLoading}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="contactNumber" className="block text-sm font-semibold text-gray-700">
+                  Contact Number
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Phone className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <Input
+                    id="contactNumber"
+                    type="tel"
+                    value={contactNumber}
+                    onChange={(e) => setContactNumber(e.target.value)}
+                    placeholder="+92 300 0000000"
+                    className="pl-12 h-12 text-base border-gray-300 focus:ring-2 focus:ring-medical-blue/50 focus:border-medical-blue"
+                    disabled={isLoading}
+                  />
+                </div>
               </div>
             </div>
 

@@ -98,9 +98,9 @@ export const PatientLoginPage = () => {
         {/* Login Form */}
         <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/50 p-5 sm:p-8">
           <div className="mb-6">
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Welcome</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
             <p className="text-gray-600 text-sm">
-              Enter your name to access your profile
+              Enter your email and password to access your health information
             </p>
           </div>
 
@@ -147,7 +147,7 @@ export const PatientLoginPage = () => {
                 />
               </div>
               <p className="text-xs text-gray-500">
-                Enter your email and password to access your health dashboard
+                Use the email and password you registered with
               </p>
             </div>
 

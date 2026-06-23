@@ -4,11 +4,14 @@ from ..system_prompt import (
     SYSTEM_PROMPT, 
     RAG_RESPONSE_PROMPT, 
     ASSESSMENT_RESPONSE_PROMPT,
-    RESPOND_PROMPT
+    RESPOND_PROMPT,
+    FOLLOW_UP_QUESTIONS_PROMPT
 )
 from app.core.llm import get_llm
 import logging
 import re
+import json
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_maternal_risk_levels(maternal_report: str) -> dict:
-    risks = {"gdm": "unknown", "anemia": "unknown"}
+    risks = {"gdm": "unknown", "anemia": "unknown", "preeclampsia": "unknown"}
 
     report_lower = maternal_report.lower()
 
@@ -38,6 +41,17 @@ def _extract_maternal_risk_levels(maternal_report: str) -> dict:
             risks["anemia"] = "medium"
     elif "no anemia" in report_lower or "normal hemoglobin" in report_lower:
         risks["anemia"] = "low"
+
+    # Preeclampsia section — mmxai.py emits "Low Risk", "Mid Risk", or "High Risk"
+    if "preeclampsia risk assessment" in report_lower:
+        section_start = report_lower.find("preeclampsia risk assessment")
+        section = report_lower[section_start:section_start + 600]
+        if "high risk" in section:
+            risks["preeclampsia"] = "high"
+        elif "mid risk" in section:
+            risks["preeclampsia"] = "medium"
+        elif "low risk" in section:
+            risks["preeclampsia"] = "low"
 
     return risks
 
@@ -206,6 +220,7 @@ async def respond_node(state: AgentState) -> AgentState:
     state["assessment_type_to_save"] = None
     state["assessment_report_to_save"] = None
     state["assessment_risk_levels"] = None
+    state["assessment_model_results"] = None
     
     prediction_decision = state.get("prediction_decision")
     
@@ -229,15 +244,25 @@ async def respond_node(state: AgentState) -> AgentState:
         patient_data = state.get("patient_data", {})
         assessment = state.get("prediction_decision", {})
         
-        patient_data_str = "\n".join([f"{k}: {v}" for k, v in patient_data.items()]) if patient_data else "Not available"
+        patient_data_str = (
+            "\n".join(
+                f"{key}: {value}"
+                for key, value in patient_data.items()
+                if not key.startswith("_")
+            )
+            if patient_data
+            else "Not available"
+        )
 
+        model_results = state.get("model_results") or {}
         risk_levels = {
-            "gdm": _extract_maternal_risk_levels(maternal_report)["gdm"],
-            "anemia": _extract_maternal_risk_levels(maternal_report)["anemia"],
-            "fetal": _extract_fetal_risk_level(fetal_report),
+            key: result.get("severity")
+            for key, result in model_results.items()
+            if result.get("status") == "completed" and result.get("severity")
         }
         state["assessment_type_to_save"] = prediction_decision
         state["assessment_risk_levels"] = risk_levels
+        state["assessment_model_results"] = model_results
         
         response_prompt = ASSESSMENT_RESPONSE_PROMPT.format(
             maternal_report=maternal_report,
@@ -247,9 +272,12 @@ async def respond_node(state: AgentState) -> AgentState:
             assessment_type=assessment
         )
         
+        # Keep only the last 4 messages to save tokens and prevent 413 Payload Too Large errors
+        recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
+        
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            *state["messages"],
+            *recent_messages,
             HumanMessage(content=response_prompt)
         ]
     
@@ -267,9 +295,12 @@ async def respond_node(state: AgentState) -> AgentState:
             user_question=user_message
         )
         
+        # Keep only the last 4 messages to save tokens and prevent 413 Payload Too Large errors
+        recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
+        
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            *state["messages"],
+            *recent_messages,
             HumanMessage(content=response_prompt)
         ]
     
@@ -294,23 +325,42 @@ async def respond_node(state: AgentState) -> AgentState:
             conversation_history=conversation_history
         )
         
+        # Keep only the last 4 messages to save tokens and prevent 413 Payload Too Large errors
+        recent_messages = state["messages"][-4:] if len(state["messages"]) > 4 else state["messages"]
+        
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
-            *state["messages"],
+            *recent_messages,
             HumanMessage(content=response_prompt)
         ]
-    
+        
     logger.info("Sending to LLM for response generation...")
     response = await llm.ainvoke(messages)
+    raw_response = response.content
 
-    final_response = response.content
+    # Suggested questions feature has been disabled by user request.
+    suggested_questions: list = []
+
+    state["suggested_questions"] = suggested_questions
+    if suggested_questions:
+        logger.info(f"Suggested questions: {suggested_questions}")
+
+    final_response = raw_response
     if prediction_decision in ["maternal", "fetal", "both"]:
         final_response = _enforce_concise_assessment_output(final_response)
-        confidence_footer = _build_pipeline_confidence_footer(
-            prediction_decision,
-            state.get("maternal_report", "") or "",
-            state.get("fetal_report", "") or "",
-        )
+        completed_confidences = [
+            float(result["confidence"])
+            for result in (state.get("assessment_model_results") or {}).values()
+            if result.get("status") == "completed"
+            and result.get("confidence") is not None
+        ]
+        confidence_footer = ""
+        if completed_confidences:
+            confidence_footer = (
+                "**Model confidence**\n"
+                f"{sum(completed_confidences) / len(completed_confidences):.1%}\n"
+                "_Model certainty only, not diagnostic certainty._"
+            )
         if confidence_footer:
             final_response += f"\n\n{confidence_footer}"
 
@@ -348,6 +398,8 @@ def reset_state(state: AgentState):
     state["clear"] = None
     state["prediction_decision"] = None
     state["patient_identifier"] = None
+    # NOTE: suggested_questions is intentionally NOT cleared here.
+    # It must survive in the returned graph state so agent_service can read it.
     if "should_retrieve_decision" in state:
         state["should_retrieve_decision"] = None
     if "rag_keywords" in state:
@@ -362,6 +414,7 @@ async def persist_node(state: AgentState) -> AgentState:
     assessment_type_to_save = state.get("assessment_type_to_save")
     assessment_report_to_save = state.get("assessment_report_to_save")
     assessment_risk_levels = state.get("assessment_risk_levels")
+    assessment_model_results = state.get("assessment_model_results")
     patient_identifier = state.get("patient_identifier")
     
     logger.info("="*60)
@@ -379,6 +432,7 @@ async def persist_node(state: AgentState) -> AgentState:
                 assessment_type=assessment_type_to_save,
                 assessment_report=assessment_report_to_save,
                 risk_levels=assessment_risk_levels,
+                model_results=assessment_model_results,
             )
             
             if success:

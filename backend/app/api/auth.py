@@ -5,10 +5,14 @@ from sqlmodel import Session, select
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
+from fastapi import Request
+from app.core.rate_limit import limiter
 
 from app.db import get_session
 from app.models.auth import AuthUser
 from app.models.patient import Patient
+from app.models.appointments import Appointment, RegistrationRequest
+from app.api.appointments.utils import _appointment_is_elapsed, _appointment_is_future
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -17,6 +21,7 @@ from app.core.security import (
     is_legacy_sha256_hash,
     verify_stored_password,
     require_admin,
+    get_current_user_compat,
 )
 
 
@@ -37,6 +42,14 @@ class SignupRequest(BaseModel):
     password: str
     full_name: str
     role: str
+    # Patient-only fields
+    age: Optional[int] = None
+    contact_number: Optional[str] = None
+    # Doctor-only credential fields (ignored for patient signups)
+    license_number: Optional[str] = None
+    specialty: Optional[str] = None
+    clinic_name: Optional[str] = None
+    bio: Optional[str] = None
 
     @field_validator("role")
     @classmethod
@@ -73,22 +86,32 @@ class LoginResponse(BaseModel):
 
 
 def _next_patient_identifier(session: Session) -> str:
-    """Next P### id (Phase C will replace with a single SQL MAX)."""
-    patients = session.exec(select(Patient).where(Patient.patient_identifier.like("P%"))).all()
-    max_num = 0
-    for p in patients:
-        pid = p.patient_identifier
-        if pid.startswith("P") and len(pid) > 1:
-            try:
-                max_num = max(max_num, int(pid[1:]))
-            except ValueError:
-                continue
+    """Next P### id (Phase C replaced with a single SQL MAX)."""
+    from sqlmodel import func
+    from sqlalchemy import cast, Integer
+    
+    max_id = session.exec(
+        select(func.max(cast(func.substr(Patient.patient_identifier, 2), Integer)))
+        .where(Patient.patient_identifier.like("P%"))
+    ).one()
+    
+    max_num = max_id or 0
     return f"P{max_num + 1:03d}"
 
 
 def _issue_tokens(user: AuthUser) -> tuple[str, str]:
-    access = create_access_token(user_id=user.id, email=user.email, role=user.role)
-    refresh = create_refresh_token(user_id=user.id, email=user.email, role=user.role)
+    access = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        role=user.role,
+        token_version=user.token_version,
+    )
+    refresh = create_refresh_token(
+        user_id=user.id,
+        email=user.email,
+        role=user.role,
+        token_version=user.token_version,
+    )
     return access, refresh
 
 
@@ -99,6 +122,7 @@ def _user_payload(auth_user: AuthUser, session: Session) -> dict:
         "full_name": auth_user.full_name,
         "role": auth_user.role,
         "patient_id": auth_user.patient_id,
+        "is_admin": auth_user.is_admin,
     }
     if auth_user.role == "patient" and auth_user.patient_id:
         patient = session.get(Patient, auth_user.patient_id)
@@ -114,9 +138,10 @@ def _user_payload(auth_user: AuthUser, session: Session) -> dict:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(request: LoginRequest, session: Session = Depends(get_session)):
+@limiter.limit("5/minute")
+def login(request: Request, payload: LoginRequest, session: Session = Depends(get_session)):
     """Authenticate user with email and password."""
-    statement = select(AuthUser).where(AuthUser.email == request.email.lower())
+    statement = select(AuthUser).where(AuthUser.email == payload.email.lower())
     auth_user = session.exec(statement).first()
 
     if not auth_user:
@@ -125,13 +150,24 @@ def login(request: LoginRequest, session: Session = Depends(get_session)):
             detail="Invalid email or password",
         )
 
-    if not verify_stored_password(request.password, auth_user.password_hash):
+    if not verify_stored_password(payload.password, auth_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     if not auth_user.is_active:
+        # Give a more descriptive error for doctors awaiting verification
+        if auth_user.role == "doctor" and auth_user.verification_status == "pending_verification":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your doctor account is pending admin verification. You will be notified once approved.",
+            )
+        if auth_user.role == "doctor" and auth_user.verification_status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your doctor account application was rejected. Please contact support.",
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
@@ -139,7 +175,7 @@ def login(request: LoginRequest, session: Session = Depends(get_session)):
 
     # Upgrade legacy SHA-256 hash to bcrypt on successful login
     if is_legacy_sha256_hash(auth_user.password_hash):
-        auth_user.password_hash = hash_password(request.password)
+        auth_user.password_hash = hash_password(payload.password)
         session.add(auth_user)
 
     auth_user.last_login = datetime.utcnow()
@@ -160,10 +196,11 @@ def login(request: LoginRequest, session: Session = Depends(get_session)):
 
 
 @router.post("/signup", response_model=LoginResponse)
-def signup(request: SignupRequest, session: Session = Depends(get_session)):
+@limiter.limit("5/minute")
+def signup(request: Request, payload: SignupRequest, session: Session = Depends(get_session)):
     """Register a new user account."""
     existing_user = session.exec(
-        select(AuthUser).where(AuthUser.email == request.email.lower())
+        select(AuthUser).where(AuthUser.email == payload.email.lower())
     ).first()
 
     if existing_user:
@@ -172,12 +209,20 @@ def signup(request: SignupRequest, session: Session = Depends(get_session)):
             detail="Email already registered",
         )
 
+    is_doctor = payload.role == "doctor"
+
     new_user = AuthUser(
-        email=request.email.lower(),
-        full_name=request.full_name,
-        password_hash=hash_password(request.password),
-        role=request.role,
-        is_active=True,
+        email=payload.email.lower(),
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        # Doctors start inactive and pending verification; patients are active immediately.
+        is_active=not is_doctor,
+        verification_status="pending_verification" if is_doctor else None,
+        license_number=payload.license_number if is_doctor else None,
+        specialty=payload.specialty if is_doctor else None,
+        clinic_name=payload.clinic_name if is_doctor else None,
+        bio=payload.bio if is_doctor else None,
     )
 
     session.add(new_user)
@@ -185,14 +230,14 @@ def signup(request: SignupRequest, session: Session = Depends(get_session)):
     session.refresh(new_user)
 
     patient_info = None
-    if request.role == "patient":
+    if payload.role == "patient":
         next_patient_id = _next_patient_identifier(session)
         new_patient = Patient(
             patient_identifier=next_patient_id,
-            name=request.full_name,
-            age=0,
-            contact_number="",
-            risk_level="low",
+            name=payload.full_name,
+            age=payload.age or 0,
+            contact_number=payload.contact_number or "",
+            risk_level="unassessed",
             doctor_id=None,
         )
 
@@ -219,10 +264,24 @@ def signup(request: SignupRequest, session: Session = Depends(get_session)):
         "full_name": new_user.full_name,
         "role": new_user.role,
         "patient_id": new_user.patient_id,
+        "verification_status": new_user.verification_status,
+        "is_admin": new_user.is_admin,
     }
 
     if patient_info:
         user_data["patient_info"] = patient_info
+
+    if is_doctor:
+        # Doctor accounts are not active yet — do NOT issue tokens or log them in.
+        return LoginResponse(
+            success=True,
+            message=(
+                f"Application submitted, {new_user.full_name}! "
+                "Your account is pending admin verification. You will be able to log in once approved."
+            ),
+            user=user_data,
+            token_type="bearer",
+        )
 
     access, refresh = _issue_tokens(new_user)
 
@@ -236,6 +295,171 @@ def signup(request: SignupRequest, session: Session = Depends(get_session)):
     )
 
 
+# ---------------------------------------------------------------------------
+# Self-profile
+# ---------------------------------------------------------------------------
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    specialty: Optional[str] = None
+    clinic_name: Optional[str] = None
+    bio: Optional[str] = None
+
+
+class CloseAccountRequest(BaseModel):
+    confirmation: str
+
+
+@router.get("/me")
+def get_me(
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Return the authenticated user's own profile."""
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "specialty": user.specialty if user.role == "doctor" else None,
+        "clinic_name": user.clinic_name if user.role == "doctor" else None,
+        "bio": user.bio if user.role == "doctor" else None,
+    }
+
+
+@router.put("/me")
+def update_me(
+    body: UpdateProfileRequest,
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Update the authenticated user's own profile."""
+    if body.full_name is not None:
+        user.full_name = body.full_name
+    if user.role == "doctor":
+        if body.specialty is not None:
+            user.specialty = body.specialty
+        if body.clinic_name is not None:
+            user.clinic_name = body.clinic_name
+        if body.bio is not None:
+            user.bio = body.bio
+    session.add(user)
+    session.commit()
+    return {"message": "Profile updated successfully"}
+
+
+@router.post("/me/close-account")
+def close_patient_account(
+    body: CloseAccountRequest,
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Deactivate a patient login while retaining the clinical record."""
+    if user.role != "patient":
+        raise HTTPException(status_code=403, detail="Only patients can close their own account")
+    if body.confirmation.strip().upper() != "CLOSE":
+        raise HTTPException(status_code=400, detail='Type "CLOSE" to confirm account closure')
+
+    now = datetime.utcnow()
+    patient = session.get(Patient, user.patient_id) if user.patient_id else None
+    if patient:
+        patient.doctor_id = None
+        patient.updated_at = now
+        session.add(patient)
+
+    appointments = session.exec(
+        select(Appointment)
+        .where(Appointment.patient_id == user.id)
+        .where(Appointment.status.in_(["booked", "pending_approval"]))
+    ).all()
+    for appointment in appointments:
+        if _appointment_is_future(appointment):
+            appointment.status = "cancelled"
+            appointment.cancelled_by = "patient"
+            appointment.cancellation_reason = "patient_account_closed"
+            appointment.updated_at = now
+            session.add(appointment)
+        elif appointment.status == "booked" and _appointment_is_elapsed(appointment):
+            appointment.status = "awaiting_outcome"
+            appointment.updated_at = now
+            session.add(appointment)
+        elif appointment.status == "pending_approval":
+            appointment.status = "cancelled"
+            appointment.cancellation_reason = "registration_request_expired"
+            appointment.updated_at = now
+            session.add(appointment)
+
+    requests = session.exec(
+        select(RegistrationRequest)
+        .where(RegistrationRequest.patient_id == user.id)
+        .where(RegistrationRequest.status == "pending")
+    ).all()
+    for request in requests:
+        request.status = "declined"
+        request.updated_at = now
+        session.add(request)
+
+    user.is_active = False
+    user.token_version += 1
+    session.add(user)
+    session.commit()
+    return {"detail": "Account closed. Your medical record has been retained."}
+
+
+# ---------------------------------------------------------------------------
+# Admin: Doctor Verification
+# ---------------------------------------------------------------------------
+
+@router.get("/doctors/pending", tags=["Authentication"])
+def list_pending_doctors(_: AuthUser = Depends(require_admin), session: Session = Depends(get_session)):
+    """List all doctor accounts awaiting verification (admin only)."""
+    doctors = session.exec(
+        select(AuthUser)
+        .where(AuthUser.role == "doctor")
+        .where(AuthUser.verification_status == "pending_verification")
+        .order_by(AuthUser.created_at)
+    ).all()
+    return [
+        {
+            "id": d.id,
+            "email": d.email,
+            "full_name": d.full_name,
+            "license_number": d.license_number,
+            "specialty": d.specialty,
+            "clinic_name": d.clinic_name,
+            "bio": d.bio,
+            "created_at": d.created_at,
+        }
+        for d in doctors
+    ]
+
+
+@router.put("/doctors/{doctor_id}/approve", tags=["Authentication"])
+def approve_doctor(doctor_id: int, _: AuthUser = Depends(require_admin), session: Session = Depends(get_session)):
+    """Approve a pending doctor account (admin only)."""
+    doctor = session.get(AuthUser, doctor_id)
+    if not doctor or doctor.role != "doctor":
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    doctor.is_active = True
+    doctor.verification_status = "verified"
+    session.add(doctor)
+    session.commit()
+    return {"detail": f"Doctor {doctor.full_name} approved and activated."}
+
+
+@router.put("/doctors/{doctor_id}/reject", tags=["Authentication"])
+def reject_doctor(doctor_id: int, _: AuthUser = Depends(require_admin), session: Session = Depends(get_session)):
+    """Reject a pending doctor account (admin only)."""
+    doctor = session.get(AuthUser, doctor_id)
+    if not doctor or doctor.role != "doctor":
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    doctor.is_active = False
+    doctor.verification_status = "rejected"
+    session.add(doctor)
+    session.commit()
+    return {"detail": f"Doctor {doctor.full_name} application rejected."}
+
+
 @router.post("/refresh", response_model=LoginResponse)
 def refresh_tokens(body: RefreshRequest, session: Session = Depends(get_session)):
     """Exchange a valid refresh token for new access and refresh tokens."""
@@ -244,6 +468,8 @@ def refresh_tokens(body: RefreshRequest, session: Session = Depends(get_session)
     auth_user = session.get(AuthUser, uid)
     if not auth_user or not auth_user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if int(payload.get("ver", 0)) != auth_user.token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
     access, refresh = _issue_tokens(auth_user)
     return LoginResponse(

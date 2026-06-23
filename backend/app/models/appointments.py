@@ -42,17 +42,17 @@ class DoctorAvailability(SQLModel, table=True):
 
 
 class DoctorScheduleException(SQLModel, table=True):
-    """Per-date override of a doctor's recurring weekly availability (block day or custom hours)."""
+    """Per-date replacement hours or blocked interval/day."""
 
     __tablename__ = "doctor_schedule_exceptions"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     doctor_id: int = Field(foreign_key="auth_users.id", index=True)
     exception_date: str = Field(index=True, description="YYYY-MM-DD")
-    kind: str = Field(description="'blocked' or 'custom'")
-    start_time: Optional[str] = Field(default=None, description="HH:MM when kind=custom")
-    end_time: Optional[str] = Field(default=None, description="HH:MM when kind=custom")
-    slot_duration_minutes: Optional[int] = Field(default=None, description="Slot length when kind=custom")
+    kind: str = Field(description="'blocked', 'blocked_interval', or 'custom'")
+    start_time: Optional[str] = Field(default=None, description="HH:MM for timed exceptions")
+    end_time: Optional[str] = Field(default=None, description="HH:MM for timed exceptions")
+    slot_duration_minutes: Optional[int] = Field(default=None, description="Slot length for custom hours")
     timezone: str = Field(default="UTC")
     notes: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -79,6 +79,7 @@ class Appointment(SQLModel, table=True):
             "start_time",
             unique=True,
             postgresql_where=text("status IN ('booked', 'pending_approval')"),
+            sqlite_where=text("status IN ('booked', 'pending_approval')"),
         ),
     )
 
@@ -89,14 +90,21 @@ class Appointment(SQLModel, table=True):
     appointment_date: str = Field(index=True, description="Date YYYY-MM-DD")
     start_time: str = Field(description="Start time HH:MM")
     end_time: str = Field(description="End time HH:MM")
-    # IANA timezone name used when the slot was displayed to the patient
+    # Legacy local fields remain during the UTC migration.
     timezone: str = Field(default="UTC")
-    # booked | cancelled | completed | rescheduled
+    schedule_timezone: str = Field(default="UTC")
+    start_at_utc: Optional[datetime] = Field(default=None, index=True)
+    end_at_utc: Optional[datetime] = Field(default=None, index=True)
+    # pending_approval is retained only for legacy linked registration requests.
+    # booked | pending_approval | awaiting_outcome | completed | no_show | cancelled
     status: str = Field(default="booked")
     notes: Optional[str] = Field(default=None)
     # Set to "doctor" or "patient" when that party reschedules; cleared when the other party views
     rescheduled_by: Optional[str] = Field(default=None)
     # Set to "doctor" or "patient" when that party cancels; cleared when the other party views
     cancelled_by: Optional[str] = Field(default=None)
+    cancellation_reason: Optional[str] = Field(default=None)
+    outcome_recorded_at: Optional[datetime] = Field(default=None)
+    outcome_recorded_by: Optional[int] = Field(default=None, foreign_key="auth_users.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

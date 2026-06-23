@@ -1,7 +1,14 @@
 """Models package."""
 
 from app.models.patient import Patient, Visit
-from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
+from app.models.assessments import (
+    GDMAssessment,
+    AnemiaAssessment,
+    FetalHealthAssessment,
+    MaternalHealthAssessment,
+    PatientRiskHistory,
+    UltrasoundImage,
+)
 from app.models.patient_latest_assessments import PatientLatestAssessments
 from app.models.example import User
 from app.models.auth import AuthUser
@@ -19,6 +26,8 @@ __all__ = [
     "GDMAssessment",
     "AnemiaAssessment",
     "FetalHealthAssessment",
+    "MaternalHealthAssessment",
+    "PatientRiskHistory",
     "UltrasoundImage",
     "PatientLatestAssessments",
     "User",

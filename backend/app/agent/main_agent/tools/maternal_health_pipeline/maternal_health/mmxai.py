@@ -46,7 +46,7 @@ class MaternalHealthXAI:
         return shap_df, shap_values, expected_value
 
     def generate_markdown_report(self, input_data, patient_id="Patient_001",
-                                 condition_name="Maternal Health Risk Assessment"):
+                                 condition_name="Preeclampsia Risk Assessment"):
         pred_label, probabilities, x_input = self.predict_risk(input_data)
         shap_df, shap_values, expected_value = self.get_shap_explanations(x_input)
 

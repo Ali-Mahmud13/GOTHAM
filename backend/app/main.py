@@ -7,13 +7,18 @@ os.environ['TRANSFORMERS_OFFLINE'] = '0'
 
 import inngest
 import inngest.fast_api
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import sys
 from sqlalchemy import inspect
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.rate_limit import limiter
 from app.core.config import setup_logging
+from app.core import config
 from app.inngest import inngest_client, ALL_FUNCTIONS
 from app.api.chat import router as chat_router
 from app.api.data_entry import router as data_entry_router
@@ -31,61 +36,16 @@ logger = logging.getLogger(__name__)
 
 # Setup
 setup_logging()
-app = FastAPI(title="GOTHAM - Medical Agent System")
 
-# Database initialization on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database tables on application startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
     logger.info("Initializing database tables...")
     try:
         create_db_and_tables()
         logger.info("✓ Database tables initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {str(e)}", exc_info=True)
-    # Ensure schema drift is healed on startup for existing deployments.
-    try:
-        inspector = inspect(engine)
-        existing_columns = {
-            c["name"] for c in inspector.get_columns("appointments")
-        }
-        required_columns = {
-            "rescheduled_by": "TEXT",
-            "cancelled_by": "TEXT",
-        }
-
-        with engine.connect() as conn:
-            for col_name, col_type in required_columns.items():
-                if col_name not in existing_columns:
-                    logger.warning(
-                        "Missing appointments.%s column detected. Applying startup migration...",
-                        col_name,
-                    )
-                    conn.execute(text(f"ALTER TABLE appointments ADD COLUMN {col_name} {col_type}"))
-                    conn.commit()
-                    logger.info("✓ Added appointments.%s", col_name)
-
-        visit_columns = {c["name"] for c in inspector.get_columns("visits")}
-        required_visit_columns = {
-            "recorded_by_role": "TEXT",
-            "recorded_by_user_id": "INTEGER",
-        }
-        with engine.connect() as conn:
-            for col_name, col_type in required_visit_columns.items():
-                if col_name not in visit_columns:
-                    logger.warning(
-                        "Missing visits.%s column detected. Applying startup migration...",
-                        col_name,
-                    )
-                    conn.execute(text(f"ALTER TABLE visits ADD COLUMN {col_name} {col_type}"))
-                    conn.commit()
-                    logger.info("✓ Added visits.%s", col_name)
-    except Exception as e:
-        logger.error(
-            "Failed while ensuring appointments migration columns: %s",
-            str(e),
-            exc_info=True,
-        )
 
     # Data hygiene: unregistered patients should not retain doctor-authored notes.
     try:
@@ -125,36 +85,35 @@ async def startup_event():
             exc_info=True,
         )
 
+    yield
+    # Shutdown logic goes here if needed
+
+
+app = FastAPI(title="GOTHAM - Medical Agent System", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Removed legacy on_event startup logic
+
 # CORS for React frontend
+origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080",
+]
+if config.CORS_ALLOWED_ORIGINS:
+    origins.extend([o.strip() for o in config.CORS_ALLOWED_ORIGINS.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8080",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8080",
-    ],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def ensure_local_cors_headers(request: Request, call_next):
-    """Force CORS headers for localhost origins, even on error paths."""
-    response = await call_next(request)
-    origin = request.headers.get("origin", "")
-    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-    return response
 
 # Register Inngest — streaming sends keepalive bytes so long-running
 # step handlers (ML inference, LLM calls) don't hit idle-connection resets.

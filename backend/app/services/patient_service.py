@@ -1,12 +1,13 @@
 """Patient service - Handles patient data fetching and management."""
 
+from datetime import datetime
 from typing import Dict, Optional, List
 import difflib
 import re
 from sqlmodel import Session, select
 from sqlalchemy import func
 from app.db.session import engine
-from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
+from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, MaternalHealthAssessment, UltrasoundImage
 from app.models.patient_latest_assessments import PatientLatestAssessments
 import logging
 
@@ -128,12 +129,11 @@ class PatientService:
     
     async def get_patient_data_optimized(self, patient_identifier: str) -> Dict:
         """
-        Optimized patient data retrieval using materialized table.
-        
-        Performance: 2 queries instead of 13+ (6-8x faster)
-        - Query 1: Get patient
-        - Query 2: Get latest assessments from materialized table
-        - Query 3: Get latest visit for metadata
+        Build a dated prediction snapshot from source assessment records.
+
+        Maternal fields use the latest non-null reading per feature. CTG fields
+        are selected from one recording so the fetal model never receives a
+        synthetic mixture of separate tests.
         
         Args:
             patient_identifier: The patient ID to search for
@@ -154,54 +154,7 @@ class PatientService:
                 
                 logger.info(f"Found patient: {patient.name} (ID: {patient.id})")
                 
-                # Query 2: Get latest assessments from materialized table (SINGLE QUERY!)
-                latest = session.get(PatientLatestAssessments, patient.id)
-                
-                # WORKAROUND: If CBC/CTG fields are None, fetch directly via SQL
-                if latest and latest.wbc is None:
-                    logger.info("[WORKAROUND] CBC fields are None, fetching via direct SQL...")
-                    # Fetch directly via SQL to bypass ORM mapping issues
-                    from sqlalchemy import text
-                    result = session.exec(text("""
-                        SELECT wbc, rbc, hgb, hct, mcv, mch, mchc, plt,
-                               uterine_contractions, light_decelerations, severe_decelerations,
-                               prolongued_decelerations, abnormal_short_term_variability,
-                               mean_value_of_short_term_variability,
-                               percentage_of_time_with_abnormal_long_term_variability,
-                               mean_value_of_long_term_variability,
-                               histogram_width, histogram_min, histogram_max,
-                               histogram_number_of_peaks, histogram_number_of_zeroes,
-                               histogram_mode, histogram_mean, histogram_median,
-                               histogram_variance, histogram_tendency
-                        FROM patient_latest_assessments
-                        WHERE patient_id = :patient_id
-                    """), {"patient_id": patient.id}).first()
-                    
-                    if result:
-                        logger.info(f"[WORKAROUND] Fetched CBC data via SQL: WBC={result[0]}, HGB={result[2]}")
-                        # Manually set attributes
-                        latest.wbc, latest.rbc, latest.hgb, latest.hct = result[0], result[1], result[2], result[3]
-                        latest.mcv, latest.mch, latest.mchc, latest.plt = result[4], result[5], result[6], result[7]
-                        latest.uterine_contractions = result[8]
-                        latest.light_decelerations = result[9]
-                        latest.severe_decelerations = result[10]
-                        latest.prolongued_decelerations = result[11]
-                        latest.abnormal_short_term_variability = result[12]
-                        latest.mean_value_of_short_term_variability = result[13]
-                        latest.percentage_of_time_with_abnormal_long_term_variability = result[14]
-                        latest.mean_value_of_long_term_variability = result[15]
-                        latest.histogram_width = result[16]
-                        latest.histogram_min = result[17]
-                        latest.histogram_max = result[18]
-                        latest.histogram_number_of_peaks = result[19]
-                        latest.histogram_number_of_zeroes = result[20]
-                        latest.histogram_mode = result[21]
-                        latest.histogram_mean = result[22]
-                        latest.histogram_median = result[23]
-                        latest.histogram_variance = result[24]
-                        latest.histogram_tendency = result[25]
-                
-                # Query 3: Get latest visit for metadata only
+                # Get latest visit for metadata only.
                 latest_visit = session.exec(
                     select(Visit)
                     .where(Visit.patient_id == patient.id)
@@ -215,9 +168,17 @@ class PatientService:
                     .limit(5)
                 ).all()
                 
-                # Build response
-                patient_data = self._build_patient_response_optimized(patient, latest, latest_visit, ultrasound_refs)
-                logger.info(f"[OPTIMIZED] Successfully built patient response with {len(patient_data)} fields (3 queries)")
+                patient_data = self._build_prediction_snapshot(
+                    session,
+                    patient,
+                    latest_visit,
+                    ultrasound_refs,
+                )
+
+                logger.info(
+                    "[OPTIMIZED] Built dated prediction snapshot with %s fields",
+                    len(patient_data),
+                )
                 
                 return patient_data
                 
@@ -242,6 +203,196 @@ class PatientService:
         except Exception as e:
             logger.error(f"Error validating patient ID: {str(e)}")
             return False
+
+    @staticmethod
+    def _freshness(measured_at: datetime) -> tuple[int, str]:
+        age_days = max(0, (datetime.utcnow() - measured_at).days)
+        if age_days <= 30:
+            return age_days, "fresh"
+        if age_days <= 90:
+            return age_days, "aging"
+        return age_days, "stale"
+
+    def _build_prediction_snapshot(
+        self,
+        session: Session,
+        patient: Patient,
+        latest_visit: Optional[Visit],
+        ultrasound_refs: Optional[List[UltrasoundImage]] = None,
+    ) -> Dict:
+        """Build model inputs with source dates and a coherent CTG recording."""
+        response: Dict = {
+            "Patient_ID": patient.patient_identifier,
+            "name": patient.name,
+            "contact_number": patient.contact_number,
+            "risk_level": patient.risk_level,
+        }
+        provenance: dict[str, dict] = {}
+
+        static_fields = {
+            "age": patient.age,
+            "family_history": patient.family_history,
+            "pcos": patient.pcos,
+            "unexplained_prenatal_loss": patient.unexplained_prenatal_loss,
+            "large_child_or_birth_default": patient.large_child_or_birth_default,
+            "prediabetes": patient.prediabetes,
+            "no_of_pregnancy": patient.number_of_pregnancies,
+            "bmi_category": patient.bmi_category,
+            "gestation_in_previous_pregnancy": patient.gestation_in_previous_pregnancy,
+        }
+        for key, value in static_fields.items():
+            response[key] = value
+            if value is not None:
+                provenance[key] = {
+                    "source": "patient_profile",
+                    "measured_at": patient.updated_at.isoformat(),
+                    "freshness": "profile",
+                }
+
+        if latest_visit:
+            response["visit_date"] = latest_visit.visit_date.isoformat()
+            response["visit_type"] = latest_visit.visit_type
+            response["visit_notes"] = latest_visit.notes
+
+        if ultrasound_refs:
+            latest_image = ultrasound_refs[0]
+            response["latest_ultrasound_image_url"] = latest_image.secure_url
+            response["latest_ultrasound_thumbnail_url"] = latest_image.thumbnail_url
+            response["latest_ultrasound_visit_id"] = latest_image.visit_id
+            response["ultrasound_images"] = [
+                {
+                    "id": image.id,
+                    "visit_id": image.visit_id,
+                    "public_id": image.public_id,
+                    "secure_url": image.secure_url,
+                    "thumbnail_url": image.thumbnail_url,
+                    "uploaded_by_role": image.uploaded_by_role,
+                    "created_at": image.created_at.isoformat() if image.created_at else None,
+                }
+                for image in ultrasound_refs
+            ]
+
+        def merge_latest(model, field_map: dict[str, str]) -> None:
+            rows = session.exec(
+                select(model, Visit)
+                .join(Visit, model.visit_id == Visit.id)
+                .where(Visit.patient_id == patient.id)
+                .order_by(Visit.visit_date.desc(), model.created_at.desc())
+            ).all()
+            for assessment, visit in rows:
+                for output_key, attribute in field_map.items():
+                    if output_key in response:
+                        continue
+                    value = getattr(assessment, attribute)
+                    if value is None:
+                        continue
+                    age_days, freshness = self._freshness(visit.visit_date)
+                    response[output_key] = value
+                    provenance[output_key] = {
+                        "source": model.__tablename__,
+                        "source_visit_id": visit.id,
+                        "measured_at": visit.visit_date.isoformat(),
+                        "age_days": age_days,
+                        "freshness": freshness,
+                    }
+
+        merge_latest(
+            GDMAssessment,
+            {
+                "glucose_level": "glucose_level",
+                "gestation_weeks": "gestation_weeks",
+                "sys_bp": "blood_pressure_systolic",
+                "dia_bp": "blood_pressure_diastolic",
+                "bmi": "bmi",
+                "ogtt": "ogtt",
+                "hdl": "hdl",
+                "insulin_level": "insulin_level",
+                "sedentary_lifestyle": "sedentary_lifestyle",
+            },
+        )
+        merge_latest(
+            AnemiaAssessment,
+            {
+                "WBC": "wbc",
+                "RBC": "rbc",
+                "HGB": "hgb",
+                "HCT": "hct",
+                "MCV": "mcv",
+                "MCH": "mch",
+                "MCHC": "mchc",
+                "PLT": "plt",
+            },
+        )
+        if "HGB" in response:
+            response["hemoglobin"] = response["HGB"]
+            provenance["hemoglobin"] = provenance["HGB"]
+
+        merge_latest(
+            MaternalHealthAssessment,
+            {
+                "body_temp": "body_temp",
+                "heart_rate": "heart_rate",
+            },
+        )
+
+        ctg_fields = {
+            "baseline_value": "baseline_value",
+            "accelerations": "accelerations",
+            "fetal_movement": "fetal_movement",
+            "uterine_contractions": "uterine_contractions",
+            "light_decelerations": "light_decelerations",
+            "severe_decelerations": "severe_decelerations",
+            "prolongued_decelerations": "prolongued_decelerations",
+            "abnormal_short_term_variability": "abnormal_short_term_variability",
+            "mean_value_of_short_term_variability": "mean_value_of_short_term_variability",
+            "percentage_of_time_with_abnormal_long_term_variability": (
+                "percentage_of_time_with_abnormal_long_term_variability"
+            ),
+            "mean_value_of_long_term_variability": "mean_value_of_long_term_variability",
+            "histogram_width": "histogram_width",
+            "histogram_min": "histogram_min",
+            "histogram_max": "histogram_max",
+            "histogram_number_of_peaks": "histogram_number_of_peaks",
+            "histogram_number_of_zeroes": "histogram_number_of_zeroes",
+            "histogram_mode": "histogram_mode",
+            "histogram_mean": "histogram_mean",
+            "histogram_median": "histogram_median",
+            "histogram_variance": "histogram_variance",
+            "histogram_tendency": "histogram_tendency",
+        }
+        ctg_rows = session.exec(
+            select(FetalHealthAssessment, Visit)
+            .join(Visit, FetalHealthAssessment.visit_id == Visit.id)
+            .where(Visit.patient_id == patient.id)
+            .order_by(Visit.visit_date.desc(), FetalHealthAssessment.created_at.desc())
+        ).all()
+        selected_ctg = next(
+            (
+                row
+                for row in ctg_rows
+                if all(getattr(row[0], attribute) is not None for attribute in ctg_fields.values())
+            ),
+            ctg_rows[0] if ctg_rows else None,
+        )
+        if selected_ctg:
+            assessment, visit = selected_ctg
+            age_days, freshness = self._freshness(visit.visit_date)
+            for output_key, attribute in ctg_fields.items():
+                value = getattr(assessment, attribute)
+                if value is None:
+                    continue
+                response[output_key] = value
+                provenance[output_key] = {
+                    "source": "fetal_health_assessments",
+                    "source_visit_id": visit.id,
+                    "measured_at": visit.visit_date.isoformat(),
+                    "age_days": age_days,
+                    "freshness": freshness,
+                    "recording_group": f"ctg-visit-{visit.id}",
+                }
+
+        response["_input_provenance"] = provenance
+        return response
     
     async def get_patient_visit_history(self, patient_identifier: str) -> List[Dict]:
         """
@@ -672,18 +823,11 @@ class PatientService:
         return visit_dict
 
 
-# Singleton instance
-_patient_service_instance = None
-
-
 def get_patient_service() -> PatientService:
     """
-    Get the singleton patient service instance.
+    Get the patient service instance.
     
     Returns:
         PatientService instance
     """
-    global _patient_service_instance
-    if _patient_service_instance is None:
-        _patient_service_instance = PatientService()
-    return _patient_service_instance
+    return PatientService()

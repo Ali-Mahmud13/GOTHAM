@@ -2,7 +2,8 @@
 
 import logging
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Request
+from app.core.rate_limit import limiter
 
 from app.core import config
 from app.services import transcription as transcription_service
@@ -18,7 +19,9 @@ _ALLOWED_LANGUAGES = {"en", "ur"}
 
 
 @router.post("/transcribe")
+@limiter.limit("10/minute")
 async def transcribe_audio(
+    request: Request,
     audio: UploadFile = File(...),
     language: str = Form("en"),
 ):

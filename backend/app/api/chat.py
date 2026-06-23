@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from uuid import uuid4
-from app.services.agent_service import get_agent_service
+from fastapi import Request
+from app.core.rate_limit import limiter
+from app.services.agent_service import get_agent_service, AgentService
 from app.inngest.client import inngest_client
 from app.services.assessment_results import (
     get_assessment_result,
@@ -33,6 +35,7 @@ class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     response: str
     session_id: str
+    suggested_questions: list = []
 
 
 class AssessmentRequest(BaseModel):
@@ -51,26 +54,27 @@ class AssessmentResponse(BaseModel):
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user_compat)):
+@limiter.limit("20/minute")
+async def chat(request: Request, payload: ChatRequest, user: AuthUser = Depends(get_current_user_compat), agent_service: AgentService = Depends(get_agent_service)):
     """
     Process a chat message through the medical agent.
     
     Args:
-        request: Chat request containing message and optional session_id
+        request: Request object for rate limiting
+        payload: Chat request containing message and optional session_id
         
     Returns:
         ChatResponse with agent's response and session_id
     """
     try:
-        logger.info(f"Received chat request (session: {request.session_id})")
+        logger.info(f"Received chat request (session: {payload.session_id})")
         
-        # Get agent service and process message
-        agent_service = get_agent_service()
+        # Process message with injected agent service
         # TODO: thread user_id into agent memory/persistence if needed.
         _ = user
         result = await agent_service.process_message(
-            message=request.message,
-            session_id=request.session_id
+            message=payload.message,
+            session_id=payload.session_id
         )
         
         if not result.get("success", True):
@@ -82,7 +86,8 @@ async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user_c
         
         return ChatResponse(
             response=result["response"],
-            session_id=result["session_id"]
+            session_id=result["session_id"],
+            suggested_questions=result.get("suggested_questions") or [],
         )
         
     except HTTPException:
@@ -96,7 +101,8 @@ async def chat(request: ChatRequest, user: AuthUser = Depends(get_current_user_c
 
 
 @router.post("/assess", response_model=AssessmentResponse)
-async def assess_risk(request: AssessmentRequest, user: AuthUser = Depends(get_current_user_compat)):
+@limiter.limit("10/minute")
+async def assess_risk(request: Request, payload: AssessmentRequest, user: AuthUser = Depends(get_current_user_compat)):
     """
     Trigger a background risk assessment.
     
@@ -104,7 +110,8 @@ async def assess_risk(request: AssessmentRequest, user: AuthUser = Depends(get_c
     assessment runs in the background via Inngest.
     
     Args:
-        request: Assessment request containing message, session_id, and patient_id
+        request: Request object for rate limiting
+        payload: Assessment request containing message, session_id, and patient_id
         
     Returns:
         AssessmentResponse with assessment_id and status
@@ -112,11 +119,11 @@ async def assess_risk(request: AssessmentRequest, user: AuthUser = Depends(get_c
     try:
         # Generate IDs
         assessment_id = str(uuid4())
-        session_id = request.session_id or str(uuid4())
+        session_id = payload.session_id or str(uuid4())
         
         logger.info(
             f"Triggering background assessment {assessment_id} "
-            f"for patient {request.patient_id}"
+            f"for patient {payload.patient_id}"
         )
         
         _ = user
@@ -126,9 +133,9 @@ async def assess_risk(request: AssessmentRequest, user: AuthUser = Depends(get_c
         # Prepare event data
         event_data = {
             "assessment_id": assessment_id,
-            "message": request.message,
+            "message": payload.message,
             "session_id": session_id,
-            "patient_id": request.patient_id,
+            "patient_id": payload.patient_id,
         }
 
         # Trigger Inngest background job using official SDK

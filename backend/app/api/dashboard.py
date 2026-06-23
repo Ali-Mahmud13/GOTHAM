@@ -1,13 +1,23 @@
 """Dashboard statistics API endpoint."""
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import or_
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select, func
-from typing import Dict
+from typing import Dict, List
 from datetime import datetime, timedelta, date
 
 from app.db.session import get_session
-from app.models import Patient, Visit, GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
+from app.models import (
+    AnemiaAssessment,
+    FetalHealthAssessment,
+    GDMAssessment,
+    MaternalHealthAssessment,
+    Patient,
+    PatientRiskHistory,
+    UltrasoundImage,
+    Visit,
+)
 from app.models.auth import AuthUser
 from app.core.security import get_current_user_compat, assert_patient_access
 
@@ -20,16 +30,20 @@ def get_risk_trends(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ) -> Dict:
-    """Get daily high/medium risk counts based on visit activity over the last N days."""
+    """Get daily high/medium counts from historical assessment outcomes."""
     window_days = max(1, min(days, 30))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
     start_dt = datetime.combine(start_date, datetime.min.time())
 
     query = (
-        select(Visit.visit_date, Patient.id, Patient.risk_level)
-        .join(Patient, Visit.patient_id == Patient.id)
-        .where(Visit.visit_date >= start_dt)
+        select(
+            PatientRiskHistory.assessed_at,
+            PatientRiskHistory.patient_id,
+            PatientRiskHistory.risk_level,
+        )
+        .join(Patient, PatientRiskHistory.patient_id == Patient.id)
+        .where(PatientRiskHistory.assessed_at >= start_dt)
     )
 
     if user.role == "doctor":
@@ -41,17 +55,24 @@ def get_risk_trends(
 
     rows = session.exec(query).all()
 
+    latest_by_patient_day: Dict[tuple[date, int], tuple[datetime, str]] = {}
+
+    for assessed_at, patient_id, risk_level in rows:
+        assessment_day = assessed_at.date()
+        if assessment_day < start_date or assessment_day > today:
+            continue
+        key = (assessment_day, patient_id)
+        current = latest_by_patient_day.get(key)
+        if current is None or assessed_at > current[0]:
+            latest_by_patient_day[key] = (assessed_at, risk_level)
+
     high_by_day: Dict[date, set[int]] = {}
     medium_by_day: Dict[date, set[int]] = {}
-
-    for visit_date, patient_id, risk_level in rows:
-        visit_day = visit_date.date()
-        if visit_day < start_date or visit_day > today:
-            continue
+    for (assessment_day, patient_id), (_, risk_level) in latest_by_patient_day.items():
         if risk_level == "high":
-            high_by_day.setdefault(visit_day, set()).add(patient_id)
+            high_by_day.setdefault(assessment_day, set()).add(patient_id)
         elif risk_level == "medium":
-            medium_by_day.setdefault(visit_day, set()).add(patient_id)
+            medium_by_day.setdefault(assessment_day, set()).add(patient_id)
 
     trend = []
     for i in range(window_days):
@@ -90,27 +111,17 @@ def get_dashboard_stats(
                     select(func.count(Visit.id)).where(Visit.patient_id == patient.id)
                 ).one()
                 
-                # Get assessments this week
+                # Get assessments this week (count unique visit runs)
                 week_ago = datetime.utcnow() - timedelta(days=7)
-                gdm_this_week = session.exec(
-                    select(func.count(GDMAssessment.id))
-                    .join(Visit)
-                    .where(Visit.patient_id == patient.id)
-                    .where(GDMAssessment.created_at >= week_ago)
-                ).one()
-                anemia_this_week = session.exec(
-                    select(func.count(AnemiaAssessment.id))
-                    .join(Visit)
-                    .where(Visit.patient_id == patient.id)
-                    .where(AnemiaAssessment.created_at >= week_ago)
-                ).one()
-                fetal_this_week = session.exec(
-                    select(func.count(FetalHealthAssessment.id))
-                    .join(Visit)
-                    .where(Visit.patient_id == patient.id)
-                    .where(FetalHealthAssessment.created_at >= week_ago)
-                ).one()
-                assessments_this_week = gdm_this_week + anemia_this_week + fetal_this_week
+                from sqlalchemy import union
+
+                stmt_gdm = select(GDMAssessment.visit_id).join(Visit).where(Visit.patient_id == patient.id).where(GDMAssessment.created_at >= week_ago)
+                stmt_anemia = select(AnemiaAssessment.visit_id).join(Visit).where(Visit.patient_id == patient.id).where(AnemiaAssessment.created_at >= week_ago)
+                stmt_fetal = select(FetalHealthAssessment.visit_id).join(Visit).where(Visit.patient_id == patient.id).where(FetalHealthAssessment.created_at >= week_ago)
+                stmt_preeclampsia = select(MaternalHealthAssessment.visit_id).join(Visit).where(Visit.patient_id == patient.id).where(MaternalHealthAssessment.created_at >= week_ago)
+
+                unique_visits = union(stmt_gdm, stmt_anemia, stmt_fetal, stmt_preeclampsia)
+                assessments_this_week = session.exec(select(func.count()).select_from(unique_visits.subquery())).one()
                 
                 return {
                     "user_role": "patient",
@@ -130,31 +141,29 @@ def get_dashboard_stats(
     
     # For doctors, return statistics filtered by doctor
     if user.role == "doctor":
-        # Filter patients by this doctor's ID
-        total_patients = session.exec(
-            select(func.count(Patient.id)).where(Patient.doctor_id == user.id)
-        ).one()
-        
-        # High-risk patients for this doctor
-        high_risk_count = session.exec(
-            select(func.count(Patient.id))
+        # Single query to aggregate all risk levels
+        risk_counts = session.exec(
+            select(func.count(Patient.id), Patient.risk_level)
             .where(Patient.doctor_id == user.id)
-            .where(Patient.risk_level == "high")
-        ).one()
+            .group_by(Patient.risk_level)
+        ).all()
         
-        # Medium-risk patients for this doctor
-        medium_risk_count = session.exec(
-            select(func.count(Patient.id))
-            .where(Patient.doctor_id == user.id)
-            .where(Patient.risk_level == "medium")
-        ).one()
+        total_patients = 0
+        high_risk_count = 0
+        medium_risk_count = 0
+        low_risk_count = 0
+        unassessed_count = 0
         
-        # Low-risk patients for this doctor
-        low_risk_count = session.exec(
-            select(func.count(Patient.id))
-            .where(Patient.doctor_id == user.id)
-            .where(Patient.risk_level == "low")
-        ).one()
+        for count, risk in risk_counts:
+            total_patients += count
+            if risk == "high":
+                high_risk_count = count
+            elif risk == "medium":
+                medium_risk_count = count
+            elif risk == "low":
+                low_risk_count = count
+            elif risk == "unassessed":
+                unassessed_count = count
         
         # Get patient IDs for this doctor
         doctor_patients = session.exec(
@@ -168,27 +177,17 @@ def get_dashboard_stats(
                 .where(Visit.patient_id.in_(doctor_patients))
             ).one()
             
-            # Assessments this week for this doctor's patients
+            # Assessments this week for this doctor's patients (count unique visit runs)
             week_ago = datetime.utcnow() - timedelta(days=7)
-            gdm_this_week = session.exec(
-                select(func.count(GDMAssessment.id))
-                .join(Visit)
-                .where(Visit.patient_id.in_(doctor_patients))
-                .where(GDMAssessment.created_at >= week_ago)
-            ).one()
-            anemia_this_week = session.exec(
-                select(func.count(AnemiaAssessment.id))
-                .join(Visit)
-                .where(Visit.patient_id.in_(doctor_patients))
-                .where(AnemiaAssessment.created_at >= week_ago)
-            ).one()
-            fetal_this_week = session.exec(
-                select(func.count(FetalHealthAssessment.id))
-                .join(Visit)
-                .where(Visit.patient_id.in_(doctor_patients))
-                .where(FetalHealthAssessment.created_at >= week_ago)
-            ).one()
-            assessments_this_week = gdm_this_week + anemia_this_week + fetal_this_week
+            from sqlalchemy import union
+
+            stmt_gdm = select(GDMAssessment.visit_id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(GDMAssessment.created_at >= week_ago)
+            stmt_anemia = select(AnemiaAssessment.visit_id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(AnemiaAssessment.created_at >= week_ago)
+            stmt_fetal = select(FetalHealthAssessment.visit_id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(FetalHealthAssessment.created_at >= week_ago)
+            stmt_preeclampsia = select(MaternalHealthAssessment.visit_id).join(Visit).where(Visit.patient_id.in_(doctor_patients)).where(MaternalHealthAssessment.created_at >= week_ago)
+
+            unique_visits = union(stmt_gdm, stmt_anemia, stmt_fetal, stmt_preeclampsia)
+            assessments_this_week = session.exec(select(func.count()).select_from(unique_visits.subquery())).one()
         else:
             total_visits = 0
             assessments_this_week = 0
@@ -219,6 +218,7 @@ def get_dashboard_stats(
         "high_risk_count": high_risk_count or 0,
         "medium_risk_count": medium_risk_count or 0,
         "low_risk_count": low_risk_count or 0,
+        "unassessed_count": unassessed_count or 0,
         "total_visits": total_visits or 0,
         "assessments_this_week": assessments_this_week or 0,
         "high_risk_patients": [
@@ -265,6 +265,16 @@ def get_patient_visits(
     total_visits = session.exec(
         select(func.count(Visit.id)).where(Visit.patient_id == patient.id)
     ).one()
+    total_clinical_visits = session.exec(
+        select(func.count(Visit.id))
+        .where(Visit.patient_id == patient.id)
+        .where(
+            or_(
+                Visit.visit_type.is_(None),
+                Visit.visit_type.notin_(("patient_notes", "doctor_notes")),
+            )
+        )
+    ).one()
 
     visits = session.exec(
         select(Visit)
@@ -273,6 +283,7 @@ def get_patient_visits(
             selectinload(Visit.anemia_assessment),
             selectinload(Visit.fetal_health_assessment),
             selectinload(Visit.gdm_assessment),
+            selectinload(Visit.maternal_health_assessment),
             selectinload(Visit.ultrasound_images),
         )
         .order_by(Visit.visit_date.desc())
@@ -285,6 +296,7 @@ def get_patient_visits(
         anemia = visit.anemia_assessment
         fetal = visit.fetal_health_assessment
         gdm = visit.gdm_assessment
+        mha = visit.maternal_health_assessment
         ultrasound_images = sorted(
             visit.ultrasound_images or [],
             key=lambda im: im.created_at or datetime.min,
@@ -337,8 +349,34 @@ def get_patient_visits(
             # FHP Data from fetal health assessment
             "baseline_value": fetal.baseline_value if fetal else None,
             "accelerations": fetal.accelerations if fetal else None,
+            "fetal_movement": fetal.fetal_movement if fetal else None,
+            "uterine_contractions": fetal.uterine_contractions if fetal else None,
+            "light_decelerations": fetal.light_decelerations if fetal else None,
+            "severe_decelerations": fetal.severe_decelerations if fetal else None,
+            "prolongued_decelerations": fetal.prolongued_decelerations if fetal else None,
+            "abnormal_short_term_variability": fetal.abnormal_short_term_variability if fetal else None,
+            "mean_value_of_short_term_variability": fetal.mean_value_of_short_term_variability if fetal else None,
+            "percentage_of_time_with_abnormal_long_term_variability": (
+                fetal.percentage_of_time_with_abnormal_long_term_variability if fetal else None
+            ),
+            "mean_value_of_long_term_variability": fetal.mean_value_of_long_term_variability if fetal else None,
+            "histogram_width": fetal.histogram_width if fetal else None,
+            "histogram_min": fetal.histogram_min if fetal else None,
+            "histogram_max": fetal.histogram_max if fetal else None,
+            "histogram_number_of_peaks": fetal.histogram_number_of_peaks if fetal else None,
+            "histogram_number_of_zeroes": fetal.histogram_number_of_zeroes if fetal else None,
+            "histogram_mode": fetal.histogram_mode if fetal else None,
+            "histogram_mean": fetal.histogram_mean if fetal else None,
+            "histogram_median": fetal.histogram_median if fetal else None,
+            "histogram_variance": fetal.histogram_variance if fetal else None,
+            "histogram_tendency": fetal.histogram_tendency if fetal else None,
             "fetal_health_status": fetal.status if fetal else None,
             
+            # Preeclampsia data
+            "body_temp":          mha.body_temp    if mha else None,
+            "heart_rate":         mha.heart_rate   if mha else None,
+            "maternal_risk_level": mha.risk_level  if mha else None,
+
             # GDM Data from GDM assessment
             "glucose_level": gdm.glucose_level if gdm else None,
             "blood_pressure_systolic": gdm.blood_pressure_systolic if gdm else None,
@@ -346,6 +384,36 @@ def get_patient_visits(
             "bmi": gdm.bmi if gdm else None,
             "ogtt": gdm.ogtt if gdm else None,
             "gdm_risk_level": gdm.risk_level if gdm else None,
+            "assessment_results": {
+                "gdm": {
+                    "status": gdm.prediction_status,
+                    "severity": gdm.severity,
+                    "outcome": gdm.predicted_class,
+                    "oldest_input_age_days": gdm.oldest_input_age_days,
+                    "has_stale_inputs": bool(gdm.has_stale_inputs),
+                } if gdm else None,
+                "anemia": {
+                    "status": anemia.prediction_status,
+                    "severity": anemia.severity,
+                    "outcome": anemia.predicted_class or anemia.diagnosis,
+                    "oldest_input_age_days": anemia.oldest_input_age_days,
+                    "has_stale_inputs": bool(anemia.has_stale_inputs),
+                } if anemia else None,
+                "fetal": {
+                    "status": fetal.prediction_status,
+                    "severity": fetal.severity,
+                    "outcome": fetal.predicted_class,
+                    "oldest_input_age_days": fetal.oldest_input_age_days,
+                    "has_stale_inputs": bool(fetal.has_stale_inputs),
+                } if fetal else None,
+                "preeclampsia": {
+                    "status": mha.prediction_status,
+                    "severity": mha.severity,
+                    "outcome": mha.predicted_class,
+                    "oldest_input_age_days": mha.oldest_input_age_days,
+                    "has_stale_inputs": bool(mha.has_stale_inputs),
+                } if mha else None,
+            },
             "ultrasound_images": [
                 {
                     "id": image.id,
@@ -371,5 +439,114 @@ def get_patient_visits(
     
     return {
         "total_visits": total_visits or 0,
+        "total_clinical_visits": total_clinical_visits or 0,
         "recent_visits": visit_data
     }
+
+
+@router.get("/assessments/week")
+def get_weekly_assessments(
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+) -> List[Dict]:
+    """Return this week's assessment runs for doctor's patients, grouped by visit."""
+    if user.role != "doctor":
+        raise HTTPException(status_code=403, detail="Doctors only.")
+
+    week_ago = datetime.utcnow() - timedelta(days=7)
+
+    doctor_patients = session.exec(
+        select(Patient).where(Patient.doctor_id == user.id)
+    ).all()
+    if not doctor_patients:
+        return []
+
+    patient_ids = [p.id for p in doctor_patients]
+    patient_map = {p.id: p for p in doctor_patients}
+
+    gdm_vids = set(session.exec(
+        select(GDMAssessment.visit_id).join(Visit)
+        .where(Visit.patient_id.in_(patient_ids))
+        .where(GDMAssessment.created_at >= week_ago)
+    ).all())
+    anemia_vids = set(session.exec(
+        select(AnemiaAssessment.visit_id).join(Visit)
+        .where(Visit.patient_id.in_(patient_ids))
+        .where(AnemiaAssessment.created_at >= week_ago)
+    ).all())
+    fetal_vids = set(session.exec(
+        select(FetalHealthAssessment.visit_id).join(Visit)
+        .where(Visit.patient_id.in_(patient_ids))
+        .where(FetalHealthAssessment.created_at >= week_ago)
+    ).all())
+    preeclampsia_vids = set(session.exec(
+        select(MaternalHealthAssessment.visit_id).join(Visit)
+        .where(Visit.patient_id.in_(patient_ids))
+        .where(MaternalHealthAssessment.created_at >= week_ago)
+    ).all())
+
+    all_visit_ids = gdm_vids | anemia_vids | fetal_vids | preeclampsia_vids
+    results = []
+
+    for vid in all_visit_ids:
+        visit = session.get(Visit, vid)
+        if not visit:
+            continue
+        patient = patient_map.get(visit.patient_id)
+        if not patient:
+            continue
+
+        gdm = session.exec(
+            select(GDMAssessment)
+            .where(GDMAssessment.visit_id == vid)
+            .where(GDMAssessment.created_at >= week_ago)
+            .order_by(GDMAssessment.created_at.desc())
+        ).first()
+        anemia = session.exec(
+            select(AnemiaAssessment)
+            .where(AnemiaAssessment.visit_id == vid)
+            .where(AnemiaAssessment.created_at >= week_ago)
+            .order_by(AnemiaAssessment.created_at.desc())
+        ).first()
+        fetal = session.exec(
+            select(FetalHealthAssessment)
+            .where(FetalHealthAssessment.visit_id == vid)
+            .where(FetalHealthAssessment.created_at >= week_ago)
+            .order_by(FetalHealthAssessment.created_at.desc())
+        ).first()
+        preeclampsia = session.exec(
+            select(MaternalHealthAssessment)
+            .where(MaternalHealthAssessment.visit_id == vid)
+            .where(MaternalHealthAssessment.created_at >= week_ago)
+            .order_by(MaternalHealthAssessment.created_at.desc())
+        ).first()
+
+        has_maternal = gdm or anemia or preeclampsia
+        if has_maternal and fetal:
+            assessment_type = "Complete"
+        elif has_maternal:
+            assessment_type = "Maternal"
+        else:
+            assessment_type = "Fetal"
+
+        timestamps = [x.created_at for x in [gdm, anemia, fetal, preeclampsia] if x]
+        run_at = max(timestamps).isoformat() if timestamps else str(visit.visit_date)
+
+        results.append({
+            "visit_id": vid,
+            "patient_name": patient.name,
+            "patient_identifier": patient.patient_identifier,
+            "run_at": run_at,
+            "assessment_type": assessment_type,
+            "gdm": {"risk_level": gdm.risk_level, "confidence": gdm.confidence, "ai_report": gdm.ai_report} if gdm else None,
+            "anemia": {"diagnosis": anemia.diagnosis, "confidence": anemia.confidence, "ai_report": anemia.ai_report} if anemia else None,
+            "fetal": {"status": fetal.status, "confidence": fetal.confidence, "ai_report": fetal.ai_report} if fetal else None,
+            "preeclampsia": {
+                "risk_level": preeclampsia.risk_level,
+                "confidence": preeclampsia.confidence,
+                "ai_report": preeclampsia.ai_report,
+            } if preeclampsia else None,
+        })
+
+    results.sort(key=lambda x: x["run_at"], reverse=True)
+    return results

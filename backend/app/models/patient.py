@@ -23,10 +23,17 @@ class Patient(SQLModel, table=True):
     
     # Clinical Information
     clinical_notes: Optional[str] = Field(default=None, description="Clinical notes and history")
-    risk_level: str = Field(default="low", description="Overall risk level: low, medium, high")
+    risk_level: str = Field(
+        default="unassessed",
+        description="Overall risk level: unassessed, low, medium, high",
+    )
     
     # Static Medical History
     number_of_pregnancies: Optional[int] = Field(default=None, description="Total number of pregnancies")
+    gestation_in_previous_pregnancy: Optional[int] = Field(
+        default=None,
+        description="Gestation length of the previous pregnancy in weeks",
+    )
     bmi_category: Optional[int] = Field(default=None, description="BMI category")
     family_history: Optional[bool] = Field(default=None, description="Family history of diabetes")
     pcos: Optional[bool] = Field(default=None, description="Polycystic ovary syndrome")
@@ -65,8 +72,9 @@ class Visit(SQLModel, table=True):
     gdm_assessment: Optional["GDMAssessment"] = Relationship(back_populates="visit")
     anemia_assessment: Optional["AnemiaAssessment"] = Relationship(back_populates="visit")
     fetal_health_assessment: Optional["FetalHealthAssessment"] = Relationship(back_populates="visit")
+    maternal_health_assessment: Optional["MaternalHealthAssessment"] = Relationship(back_populates="visit")
     ultrasound_images: list["UltrasoundImage"] = Relationship(back_populates="visit")
 
 
 # Import here to avoid circular imports
-from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment, UltrasoundImage
+from app.models.assessments import GDMAssessment, AnemiaAssessment, FetalHealthAssessment, MaternalHealthAssessment, UltrasoundImage

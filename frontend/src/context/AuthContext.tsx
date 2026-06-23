@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 type Tokens = { accessToken: string; refreshToken: string };
 
@@ -7,6 +8,7 @@ interface User {
   email: string;
   full_name?: string;
   role: 'doctor' | 'patient';
+  is_admin?: boolean;
   patient_id?: number;
   patient_info?: {
     patient_identifier: string;
@@ -24,6 +26,7 @@ interface AuthContextType {
   logout: () => void;
   isDoctor: boolean;
   isPatient: boolean;
+  isAdmin: boolean;
   tokens: Tokens | null;
   setTokens: (t: Tokens | null) => void;
 }
@@ -43,6 +46,7 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(() => {
     const storedUser = localStorage.getItem('auth_user');
     if (!storedUser) return null;
@@ -72,37 +76,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(user));
 
-  // Load authentication state from localStorage on mount
-  useEffect(() => {
-    const storedUser = localStorage.getItem('auth_user');
-    const storedTokens = localStorage.getItem('auth_tokens');
-    
-    if (storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
-        setIsAuthenticated(true);
-      } catch (error) {
-        console.error('Failed to parse stored user:', error);
-        logout();
-      }
-    }
-
-    if (storedTokens) {
-      try {
-        const parsedTokens = JSON.parse(storedTokens);
-        if (parsedTokens?.accessToken && parsedTokens?.refreshToken) {
-          setTokensState(parsedTokens);
-        }
-      } catch (error) {
-        console.error('Failed to parse stored tokens:', error);
-        // don't force logout; user might re-login
-        localStorage.removeItem('auth_tokens');
-      }
-    }
-  }, []);
-
   const login = (payload: { user: User; accessToken: string; refreshToken: string }) => {
+    queryClient.clear();
     setUser(payload.user);
     setIsAuthenticated(true);
     setTokensState({ accessToken: payload.accessToken, refreshToken: payload.refreshToken });
@@ -113,6 +88,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const logout = useCallback(() => {
+    queryClient.clear();
     setUser(null);
     setIsAuthenticated(false);
     setTokensState(null);
@@ -120,7 +96,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     // Clear localStorage
     localStorage.removeItem('auth_user');
     localStorage.removeItem('auth_tokens');
-  }, []);
+  }, [queryClient]);
 
   const setTokens = useCallback((t: Tokens | null) => {
     setTokensState(t);
@@ -135,6 +111,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     logout,
     isDoctor: user?.role === 'doctor',
     isPatient: user?.role === 'patient',
+    isAdmin: !!user?.is_admin,
     tokens,
     setTokens,
   };

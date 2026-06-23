@@ -131,12 +131,28 @@ BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 
 
+from app.core.redact import redact_message
+
+class RedactingFormatter(logging.Formatter):
+    def format(self, record):
+        original_msg = record.msg
+        if isinstance(original_msg, str):
+            record.msg = redact_message(original_msg, max_len=2000)
+        return super().format(record)
+
 def setup_logging():
     """Configure logging."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers to avoid duplicates
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        
+    handler = logging.StreamHandler()
+    formatter = RedactingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
     
     # Reduce verbose logging to prevent terminal overflow
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

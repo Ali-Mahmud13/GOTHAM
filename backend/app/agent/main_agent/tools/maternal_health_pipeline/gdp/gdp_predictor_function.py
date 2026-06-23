@@ -12,26 +12,36 @@ from .model_loader import load_gdp_model
 from .feature_scaler import normalize_features, FEATURE_RANGES
 import asyncio
 from pathlib import Path
+import time
+from ...helper.benchmark import record
 warnings.filterwarnings('ignore')
 
 # Feature names as per the model
 FEATURE_NAMES = [
-    'Age',
-    'BMI',
-    'Dia BP',
-    'HDL',
-    'Hemoglobin',
-    'No of Pregnancy',
-    'OGTT',
-    'Sys BP',
-    'Gestation in previous Pregnancy',
-    'Family History',
-    'unexplained prenetal loss',
-    'Large Child or Birth Default',
-    'PCOS',
-    'Sedentary Lifestyle',
-    'Prediabetes'
+    'Age', 'BMI', 'Dia BP', 'HDL', 'Hemoglobin',
+    'No of Pregnancy', 'OGTT', 'Sys BP',
+    'Gestation in previous Pregnancy', 'Family History',
+    'unexplained prenetal loss', 'Large Child or Birth Default',
+    'PCOS', 'Sedentary Lifestyle', 'Prediabetes'
 ]
+
+# ── Singleton cache ──────────────────────────────────────────
+# Model is loaded once on first prediction call. Eliminates ~1.24s pkl load per request.
+_gdm_model = None
+
+
+def _get_gdm_model():
+    """Return the cached GDM model, loading it on first call."""
+    global _gdm_model
+    if _gdm_model is None:
+        current_file = Path(__file__)
+        model_path = str(current_file.parent / "GDP_model.pkl")
+        _t0 = time.perf_counter()
+        _gdm_model = load_gdp_model(model_path)
+        record("Model Load: GDM (pkl) [COLD]", time.perf_counter() - _t0)
+    else:
+        record("Model Load: GDM (pkl) [WARM]", 0.0)
+    return _gdm_model
 
 
 async def predict_gdm(
@@ -52,12 +62,9 @@ async def predict_gdm(
     prediabetes
 ):
     
-    # Construct model path relative to this file
-    current_file = Path(__file__)
-    model_path = str(current_file.parent / "GDP_model.pkl")
-    
-    # Load model
-    model = await asyncio.to_thread(load_gdp_model, model_path)
+    # Get cached model (loads on first call only)
+    model = await asyncio.to_thread(_get_gdm_model)
+    record("Model Load: GDM (pkl)", 0.0)  # Already tracked inside _get_gdm_model
     
     # Create input DataFrame with RAW values
     input_data = {
@@ -143,11 +150,11 @@ async def predict_gdm(
                 perturbed = input_df_raw.copy()
                 for col in input_df_raw.columns:
                     # Add random noise (±20% for continuous, flip for binary)
-                    if input_df[col].iloc[0] in [0, 1]:  # Binary feature
+                    if input_df_raw[col].iloc[0] in [0, 1]:  # Binary feature
                         perturbed[col] = np.random.choice([0, 1])
                     else:  # Continuous feature
                         noise = np.random.uniform(0.8, 1.2)
-                        perturbed[col] = input_df[col] * noise
+                        perturbed[col] = input_df_raw[col] * noise
                 background_data.append(perturbed)
             
             background_df = pd.concat(background_data, ignore_index=True)
@@ -200,7 +207,7 @@ async def predict_gdm(
                 for _ in range(100):
                     sample = {}
                     for feature in FEATURE_NAMES:
-                        if input_df[feature].iloc[0] in [0, 1]:  # Binary
+                        if input_df_raw[feature].iloc[0] in [0, 1]:  # Binary
                             sample[feature] = np.random.choice([0, 1])
                         else:  # Continuous
                             # Use reasonable ranges based on feature
@@ -217,7 +224,7 @@ async def predict_gdm(
                             elif feature == 'OGTT':
                                 sample[feature] = np.random.uniform(70, 200)
                             else:
-                                sample[feature] = input_df[feature].iloc[0] * np.random.uniform(0.5, 1.5)
+                                sample[feature] = input_df_raw[feature].iloc[0] * np.random.uniform(0.5, 1.5)
                     background_data.append(sample)
                 
                 background_array = pd.DataFrame(background_data).values
@@ -394,7 +401,7 @@ async def predict_gdp(
     sedentary_lifestyle,
     prediabetes
 ):
-    """Wrapper that calls predict_gdm and formats the result for LLM consumption."""
+    """Return the model outcome and its human-readable report."""
 
     result = await predict_gdm(
         age=age,
@@ -415,4 +422,14 @@ async def predict_gdp(
     )
 
     formatted_report = await format_result_for_llm(result)
-    return formatted_report
+    probabilities = result["confidence_scores"]
+    predicted_class = result["prediction"]
+    return {
+        "status": "completed",
+        "outcome": result["prediction_label"],
+        "severity": "high" if predicted_class == "positive" else "low",
+        "predicted_class": predicted_class,
+        "confidence": max(probabilities.values()),
+        "probabilities": probabilities,
+        "report": formatted_report,
+    }
