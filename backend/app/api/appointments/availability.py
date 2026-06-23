@@ -1,24 +1,55 @@
+from datetime import datetime
 from typing import List, Optional
-from datetime import date, datetime
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session, select
-from sqlalchemy.exc import IntegrityError
 
-from app.db.session import get_session
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+
 from app.core.security import get_current_user_compat
+from app.db.session import get_session
+from app.models.appointments import (
+    Appointment,
+    DoctorAvailability,
+    DoctorScheduleException,
+)
 from app.models.auth import AuthUser
-from app.models.appointments import DoctorAvailability, DoctorScheduleException, Appointment
 
 from .schemas import (
-    AvailabilitySlotOut, SetAvailabilityRequest, ScheduleExceptionIn,
-    ScheduleExceptionOut, ScheduleExceptionCreatedOut, BookingConfigOut
+    AvailabilityConflictOut,
+    AvailabilitySlotIn,
+    AvailabilitySlotOut,
+    BookingConfigOut,
+    ScheduleExceptionCreatedOut,
+    ScheduleExceptionIn,
+    ScheduleExceptionOut,
+    SetAvailabilityRequest,
 )
 from .utils import (
-    _require_doctor, _parse_hhmm, _hhmm_to_mins, _collect_future_appointment_conflicts_for_recurring_change,
-    _validate_custom_windows_no_overlap, BOOKING_HORIZON_DAYS, MIN_BOOKING_LEAD_HOURS
+    ACTIVE_APPOINTMENT_STATUSES,
+    BOOKING_HORIZON_DAYS,
+    MIN_BOOKING_LEAD_HOURS,
+    _appointment_is_future,
+    _appointment_matches_effective_schedule,
+    _collect_future_appointment_conflicts_for_recurring_change,
+    _conflict_out,
+    _hhmm_to_mins,
+    _require_doctor,
+    _validate_custom_windows_no_overlap,
 )
 
 router = APIRouter()
+
+
+def _availability_out(row: DoctorAvailability) -> AvailabilitySlotOut:
+    return AvailabilitySlotOut(
+        id=row.id,
+        day_of_week=row.day_of_week,
+        start_time=row.start_time,
+        end_time=row.end_time,
+        timezone=row.timezone,
+        slot_duration_minutes=row.slot_duration_minutes,
+        is_active=row.is_active,
+    )
+
 
 def _schedule_exception_to_out(row: DoctorScheduleException) -> ScheduleExceptionOut:
     return ScheduleExceptionOut(
@@ -35,9 +66,24 @@ def _schedule_exception_to_out(row: DoctorScheduleException) -> ScheduleExceptio
     )
 
 
+def _conflict_detail(conflicts: list[AvailabilityConflictOut]) -> dict:
+    return {
+        "message": "Schedule change conflicts with future appointments.",
+        "conflicts": [conflict.model_dump() for conflict in conflicts],
+    }
+
+
+def _doctor_schedule_timezone(session: Session, doctor_id: int) -> Optional[str]:
+    slot = session.exec(
+        select(DoctorAvailability)
+        .where(DoctorAvailability.doctor_id == doctor_id)
+        .where(DoctorAvailability.is_active == True)
+    ).first()
+    return slot.timezone if slot else None
+
+
 @router.get("/booking-config", response_model=BookingConfigOut)
 def get_booking_config():
-    """Public: patient booking horizon and minimum lead time."""
     return BookingConfigOut(
         booking_horizon_days=BOOKING_HORIZON_DAYS,
         min_booking_lead_hours=MIN_BOOKING_LEAD_HOURS,
@@ -49,28 +95,14 @@ def get_my_availability(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Return the authenticated doctor's availability slots."""
     _require_doctor(user)
-
-    slots = session.exec(
+    rows = session.exec(
         select(DoctorAvailability)
         .where(DoctorAvailability.doctor_id == user.id)
         .where(DoctorAvailability.is_active == True)
         .order_by(DoctorAvailability.day_of_week, DoctorAvailability.start_time)
     ).all()
-
-    return [
-        AvailabilitySlotOut(
-            id=s.id,
-            day_of_week=s.day_of_week,
-            start_time=s.start_time,
-            end_time=s.end_time,
-            timezone=s.timezone,
-            slot_duration_minutes=s.slot_duration_minutes,
-            is_active=s.is_active,
-        )
-        for s in slots
-    ]
+    return [_availability_out(row) for row in rows]
 
 
 @router.post("/availability", response_model=List[AvailabilitySlotOut])
@@ -79,37 +111,31 @@ def set_availability(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Replace a doctor's full availability schedule."""
     _require_doctor(user)
-
-    normalized_by_day = {d: [] for d in range(7)}
+    by_day = {day: [] for day in range(7)}
     for slot in request.slots:
-        try:
-            sh, sm = _parse_hhmm(slot.start_time)
-            eh, em = _parse_hhmm(slot.end_time)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid time format.")
-        if sh * 60 + sm >= eh * 60 + em:
-            raise HTTPException(status_code=400, detail="start_time must be before end_time")
-        normalized_by_day[slot.day_of_week].append((_hhmm_to_mins(slot.start_time), _hhmm_to_mins(slot.end_time)))
-
-    for dow, windows in normalized_by_day.items():
+        by_day[slot.day_of_week].append(
+            (_hhmm_to_mins(slot.start_time), _hhmm_to_mins(slot.end_time))
+        )
+    for windows in by_day.values():
         _validate_custom_windows_no_overlap(windows)
 
-    conflicts = _collect_future_appointment_conflicts_for_recurring_change(session, user.id, request.slots)
+    conflicts = _collect_future_appointment_conflicts_for_recurring_change(
+        session, user.id, request.slots
+    )
     if conflicts:
-        raise HTTPException(status_code=409, detail="Conflicts detected.")
+        raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
 
     old_slots = session.exec(
         select(DoctorAvailability).where(DoctorAvailability.doctor_id == user.id)
     ).all()
-    for s in old_slots:
-        s.is_active = False
-        session.add(s)
+    for row in old_slots:
+        row.is_active = False
+        session.add(row)
 
-    created = []
+    created: list[DoctorAvailability] = []
     for slot in request.slots:
-        new_slot = DoctorAvailability(
+        row = DoctorAvailability(
             doctor_id=user.id,
             day_of_week=slot.day_of_week,
             start_time=slot.start_time,
@@ -118,25 +144,12 @@ def set_availability(
             slot_duration_minutes=slot.slot_duration_minutes,
             is_active=True,
         )
-        session.add(new_slot)
-        created.append(new_slot)
-
+        session.add(row)
+        created.append(row)
     session.commit()
-    for s in created:
-        session.refresh(s)
-
-    return [
-        AvailabilitySlotOut(
-            id=s.id,
-            day_of_week=s.day_of_week,
-            start_time=s.start_time,
-            end_time=s.end_time,
-            timezone=s.timezone,
-            slot_duration_minutes=s.slot_duration_minutes,
-            is_active=s.is_active,
-        )
-        for s in created
-    ]
+    for row in created:
+        session.refresh(row)
+    return [_availability_out(row) for row in created]
 
 
 @router.delete("/availability/{slot_id}", status_code=204)
@@ -145,11 +158,32 @@ def delete_availability_slot(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Soft-delete a single availability slot."""
     _require_doctor(user)
     slot = session.get(DoctorAvailability, slot_id)
-    if not slot or slot.doctor_id != user.id:
+    if not slot or slot.doctor_id != user.id or not slot.is_active:
         raise HTTPException(status_code=404, detail="Slot not found")
+
+    remaining_rows = session.exec(
+        select(DoctorAvailability)
+        .where(DoctorAvailability.doctor_id == user.id)
+        .where(DoctorAvailability.is_active == True)
+        .where(DoctorAvailability.id != slot.id)
+    ).all()
+    remaining = [
+        AvailabilitySlotIn(
+            day_of_week=row.day_of_week,
+            start_time=row.start_time,
+            end_time=row.end_time,
+            timezone=row.timezone,
+            slot_duration_minutes=row.slot_duration_minutes,
+        )
+        for row in remaining_rows
+    ]
+    conflicts = _collect_future_appointment_conflicts_for_recurring_change(
+        session, user.id, remaining
+    )
+    if conflicts:
+        raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
     slot.is_active = False
     session.add(slot)
     session.commit()
@@ -161,68 +195,68 @@ def create_schedule_exception(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Create a per-date schedule exception. Returns any impacted appointments on blocked dates."""
     _require_doctor(user)
-    kind = body.kind.strip().lower()
-    if kind not in ("blocked", "custom"):
-        raise HTTPException(status_code=400, detail="kind must be 'blocked' or 'custom'")
-
-    if kind == "blocked":
-        row = DoctorScheduleException(
-            doctor_id=user.id,
-            exception_date=body.exception_date,
-            kind="blocked",
-            timezone=body.timezone,
-            notes=body.notes,
-        )
-        session.add(row)
-        session.commit()
-        session.refresh(row)
-
-        # Find existing booked/pending appointments on this date so the doctor is warned.
-        from app.models.appointments import Appointment
-        from sqlmodel import select as sq_select
-        from app.models.auth import AuthUser as _AuthUser
-        impacted = session.exec(
-            sq_select(Appointment)
-            .where(Appointment.doctor_id == user.id)
-            .where(Appointment.appointment_date == body.exception_date)
-            .where(Appointment.status.in_(["booked", "pending_approval"]))
-        ).all()
-        from .schemas import AvailabilityConflictOut
-        impacted_out = [
-            AvailabilityConflictOut(
-                appointment_id=a.id,
-                appointment_date=a.appointment_date,
-                start_time=a.start_time,
-                end_time=a.end_time,
-                patient_id=a.patient_id,
-                patient_name=(
-                    (session.get(_AuthUser, a.patient_id) or _AuthUser()).full_name or "Unknown"
-                ),
-            )
-            for a in impacted
-        ]
-        return ScheduleExceptionCreatedOut(
-            exception=_schedule_exception_to_out(row),
-            impacted_appointments=impacted_out,
+    schedule_timezone = _doctor_schedule_timezone(session, user.id)
+    if schedule_timezone and body.timezone != schedule_timezone:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Schedule exceptions must use the schedule timezone ({schedule_timezone}).",
         )
 
-    # custom logic
-    if not body.start_time or not body.end_time:
-        raise HTTPException(status_code=400, detail="start/end required for custom")
+    duplicate = session.exec(
+        select(DoctorScheduleException)
+        .where(DoctorScheduleException.doctor_id == user.id)
+        .where(DoctorScheduleException.exception_date == body.exception_date)
+        .where(DoctorScheduleException.kind == body.kind)
+        .where(DoctorScheduleException.start_time == body.start_time)
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="This schedule exception already exists.")
 
     row = DoctorScheduleException(
         doctor_id=user.id,
         exception_date=body.exception_date,
-        kind="custom",
+        kind=body.kind,
         start_time=body.start_time,
         end_time=body.end_time,
-        slot_duration_minutes=body.slot_duration_minutes,
+        slot_duration_minutes=body.slot_duration_minutes if body.kind == "custom" else None,
         timezone=body.timezone,
         notes=body.notes,
     )
     session.add(row)
+    session.flush()
+
+    if body.kind == "custom":
+        custom_rows = session.exec(
+            select(DoctorScheduleException)
+            .where(DoctorScheduleException.doctor_id == user.id)
+            .where(DoctorScheduleException.exception_date == body.exception_date)
+            .where(DoctorScheduleException.kind == "custom")
+        ).all()
+        _validate_custom_windows_no_overlap(
+            [
+                (_hhmm_to_mins(item.start_time), _hhmm_to_mins(item.end_time))
+                for item in custom_rows
+                if item.start_time and item.end_time
+            ]
+        )
+
+    appointments = session.exec(
+        select(Appointment)
+        .where(Appointment.doctor_id == user.id)
+        .where(Appointment.appointment_date == body.exception_date)
+        .where(Appointment.status.in_(ACTIVE_APPOINTMENT_STATUSES))
+    ).all()
+    conflicts = [
+        _conflict_out(session, appointment)
+        for appointment in appointments
+        if _appointment_is_future(appointment)
+        and not _appointment_matches_effective_schedule(session, user.id, appointment)
+    ]
+    if conflicts:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
+
     session.commit()
     session.refresh(row)
     return ScheduleExceptionCreatedOut(
@@ -236,11 +270,13 @@ def list_my_schedule_exceptions(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """List my exceptions."""
     _require_doctor(user)
-    q = select(DoctorScheduleException).where(DoctorScheduleException.doctor_id == user.id)
-    rows = session.exec(q).all()
-    return [_schedule_exception_to_out(r) for r in rows]
+    rows = session.exec(
+        select(DoctorScheduleException)
+        .where(DoctorScheduleException.doctor_id == user.id)
+        .order_by(DoctorScheduleException.exception_date, DoctorScheduleException.start_time)
+    ).all()
+    return [_schedule_exception_to_out(row) for row in rows]
 
 
 @router.delete("/exceptions/{exception_id}", status_code=204)
@@ -249,12 +285,28 @@ def delete_schedule_exception(
     user: AuthUser = Depends(get_current_user_compat),
     session: Session = Depends(get_session),
 ):
-    """Delete an exception."""
     _require_doctor(user)
     row = session.get(DoctorScheduleException, exception_id)
     if not row or row.doctor_id != user.id:
         raise HTTPException(status_code=404, detail="Not found")
+    exception_date = row.exception_date
     session.delete(row)
+    session.flush()
+    appointments = session.exec(
+        select(Appointment)
+        .where(Appointment.doctor_id == user.id)
+        .where(Appointment.appointment_date == exception_date)
+        .where(Appointment.status.in_(ACTIVE_APPOINTMENT_STATUSES))
+    ).all()
+    conflicts = [
+        _conflict_out(session, appointment)
+        for appointment in appointments
+        if _appointment_is_future(appointment)
+        and not _appointment_matches_effective_schedule(session, user.id, appointment)
+    ]
+    if conflicts:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
     session.commit()
 
 
@@ -263,25 +315,13 @@ def get_doctor_availability(
     doctor_id: int,
     session: Session = Depends(get_session),
 ):
-    """Public: Return a doctor's regular availability slots."""
-    slots = session.exec(
+    rows = session.exec(
         select(DoctorAvailability)
         .where(DoctorAvailability.doctor_id == doctor_id)
         .where(DoctorAvailability.is_active == True)
         .order_by(DoctorAvailability.day_of_week, DoctorAvailability.start_time)
     ).all()
-    return [
-        AvailabilitySlotOut(
-            id=s.id,
-            day_of_week=s.day_of_week,
-            start_time=s.start_time,
-            end_time=s.end_time,
-            timezone=s.timezone,
-            slot_duration_minutes=s.slot_duration_minutes,
-            is_active=s.is_active,
-        )
-        for s in slots
-    ]
+    return [_availability_out(row) for row in rows]
 
 
 @router.get("/doctors/{doctor_id}/exceptions", response_model=List[ScheduleExceptionOut])
@@ -291,12 +331,25 @@ def get_doctor_exceptions(
     date_to: Optional[str] = None,
     session: Session = Depends(get_session),
 ):
-    """Public: Return a doctor's schedule exceptions within a date range."""
-    q = select(DoctorScheduleException).where(DoctorScheduleException.doctor_id == doctor_id)
+    statement = select(DoctorScheduleException).where(
+        DoctorScheduleException.doctor_id == doctor_id
+    )
     if date_from:
-        q = q.where(DoctorScheduleException.exception_date >= date_from)
+        try:
+            datetime.strptime(date_from, "%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="date_from must use YYYY-MM-DD") from exc
+        statement = statement.where(DoctorScheduleException.exception_date >= date_from)
     if date_to:
-        q = q.where(DoctorScheduleException.exception_date <= date_to)
-    
-    rows = session.exec(q.order_by(DoctorScheduleException.exception_date)).all()
-    return [_schedule_exception_to_out(r) for r in rows]
+        try:
+            datetime.strptime(date_to, "%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="date_to must use YYYY-MM-DD") from exc
+        statement = statement.where(DoctorScheduleException.exception_date <= date_to)
+    rows = session.exec(
+        statement.order_by(
+            DoctorScheduleException.exception_date,
+            DoctorScheduleException.start_time,
+        )
+    ).all()
+    return [_schedule_exception_to_out(row) for row in rows]

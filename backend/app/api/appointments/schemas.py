@@ -1,13 +1,49 @@
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _validate_hhmm(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value, "%H:%M")
+    except ValueError as exc:
+        raise ValueError("Time must use 24-hour HH:MM format") from exc
+    return parsed.strftime("%H:%M")
+
+
+def _validate_timezone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError("Timezone must be a valid IANA timezone") from exc
+    return value
+
+
+def _validate_date(value: str) -> str:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date().isoformat()
+    except ValueError as exc:
+        raise ValueError("Date must use YYYY-MM-DD format") from exc
+
 
 class AvailabilitySlotIn(BaseModel):
-    day_of_week: int          # 0=Monday … 6=Sunday
-    start_time: str           # "HH:MM"
-    end_time: str             # "HH:MM"
+    day_of_week: int = Field(ge=0, le=6)
+    start_time: str
+    end_time: str
     timezone: str = "UTC"
-    slot_duration_minutes: int = 30
+    slot_duration_minutes: int = Field(default=30, ge=5, le=480)
+
+    _start = field_validator("start_time")(_validate_hhmm)
+    _end = field_validator("end_time")(_validate_hhmm)
+    _timezone = field_validator("timezone")(_validate_timezone)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.start_time >= self.end_time:
+            raise ValueError("start_time must be before end_time")
+        return self
 
 
 class AvailabilitySlotOut(BaseModel):
@@ -21,8 +57,14 @@ class AvailabilitySlotOut(BaseModel):
 
 
 class SetAvailabilityRequest(BaseModel):
-    """Replace the doctor's entire availability schedule."""
     slots: List[AvailabilitySlotIn]
+
+    @model_validator(mode="after")
+    def validate_single_timezone(self):
+        timezones = {slot.timezone for slot in self.slots}
+        if len(timezones) > 1:
+            raise ValueError("All recurring availability must use one timezone")
+        return self
 
 
 class AvailabilityConflictOut(BaseModel):
@@ -44,7 +86,6 @@ class DoctorOut(BaseModel):
 
 
 class PatientRegistrationRequestOut(BaseModel):
-    """Registration request as seen by the patient — names refer to the doctor."""
     id: int
     patient_id: int
     doctor_id: int
@@ -61,16 +102,27 @@ class TimeSlotOut(BaseModel):
     start_time: str
     end_time: str
     available: bool
+    schedule_timezone: str
+    start_at_utc: datetime
+    end_at_utc: datetime
 
 
 class BookingRequest(BaseModel):
     doctor_id: int
-    appointment_date: str   # "YYYY-MM-DD"
-    start_time: str         # "HH:MM"
-    end_time: str           # "HH:MM"
-    timezone: str = "UTC"
+    appointment_date: str
+    start_time: str
+    end_time: str
     notes: Optional[str] = None
-    request_registration: bool = False
+
+    _date = field_validator("appointment_date")(_validate_date)
+    _start = field_validator("start_time")(_validate_hhmm)
+    _end = field_validator("end_time")(_validate_hhmm)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.start_time >= self.end_time:
+            raise ValueError("start_time must be before end_time")
+        return self
 
 
 class AppointmentOut(BaseModel):
@@ -83,19 +135,46 @@ class AppointmentOut(BaseModel):
     start_time: str
     end_time: str
     timezone: str
+    schedule_timezone: str
+    start_at_utc: datetime
+    end_at_utc: datetime
     status: str
     notes: Optional[str]
     created_at: datetime
     is_registered: bool = False
     rescheduled_by: Optional[str] = None
     cancelled_by: Optional[str] = None
+    cancellation_reason: Optional[str] = None
+    outcome_recorded_at: Optional[datetime] = None
+    outcome_recorded_by: Optional[int] = None
 
 
 class RescheduleRequest(BaseModel):
-    appointment_date: str   # new date "YYYY-MM-DD"
-    start_time: str         # new start "HH:MM"
-    end_time: str           # new end "HH:MM"
-    timezone: str = "UTC"
+    appointment_date: str
+    start_time: str
+    end_time: str
+
+    _date = field_validator("appointment_date")(_validate_date)
+    _start = field_validator("start_time")(_validate_hhmm)
+    _end = field_validator("end_time")(_validate_hhmm)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.start_time >= self.end_time:
+            raise ValueError("start_time must be before end_time")
+        return self
+
+
+class AppointmentOutcomeRequest(BaseModel):
+    outcome: str
+
+    @field_validator("outcome")
+    @classmethod
+    def validate_outcome(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"completed", "no_show"}:
+            raise ValueError("outcome must be completed or no_show")
+        return normalized
 
 
 class RegistrationRequestOut(BaseModel):
@@ -112,18 +191,37 @@ class RegistrationRequestOut(BaseModel):
 
 
 class StandaloneRegistrationRequest(BaseModel):
-    """Body for POST /appointments/register — no appointment needed."""
     doctor_id: int
 
 
 class ScheduleExceptionIn(BaseModel):
-    exception_date: str  # YYYY-MM-DD
-    kind: str  # blocked | custom
+    exception_date: str
+    kind: str
     start_time: Optional[str] = None
     end_time: Optional[str] = None
-    slot_duration_minutes: Optional[int] = 30
+    slot_duration_minutes: Optional[int] = Field(default=30, ge=5, le=480)
     timezone: str = "UTC"
     notes: Optional[str] = None
+
+    _date = field_validator("exception_date")(_validate_date)
+    _timezone = field_validator("timezone")(_validate_timezone)
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_optional_time(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_hhmm(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_exception(self):
+        self.kind = self.kind.strip().lower()
+        if self.kind not in {"blocked", "blocked_interval", "custom"}:
+            raise ValueError("kind must be blocked, blocked_interval, or custom")
+        if self.kind in {"blocked_interval", "custom"}:
+            if not self.start_time or not self.end_time:
+                raise ValueError("start_time and end_time are required")
+            if self.start_time >= self.end_time:
+                raise ValueError("start_time must be before end_time")
+        return self
 
 
 class ScheduleExceptionOut(BaseModel):
@@ -140,7 +238,6 @@ class ScheduleExceptionOut(BaseModel):
 
 
 class ScheduleExceptionCreatedOut(BaseModel):
-    """Response for POST /exceptions — includes impacted bookings when blocking a date."""
     exception: ScheduleExceptionOut
     impacted_appointments: List[AvailabilityConflictOut] = []
 

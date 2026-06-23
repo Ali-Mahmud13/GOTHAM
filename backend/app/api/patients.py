@@ -287,7 +287,7 @@ def delete_patient(
     user: AuthUser = Depends(require_role("doctor")),
     session: Session = Depends(get_session),
 ):
-    """Delete a patient (doctor only, assigned patients)."""
+    """Hard deletion is disabled; doctors must unregister patients instead."""
     statement = select(Patient).where(Patient.patient_identifier == patient_identifier)
     patient = session.exec(statement).first()
 
@@ -297,7 +297,7 @@ def delete_patient(
     if patient.doctor_id != user.id:
         raise HTTPException(status_code=403, detail="You may only delete patients registered with you")
 
-    session.delete(patient)
-    session.commit()
-
-    return {"message": "Patient deleted successfully"}
+    raise HTTPException(
+        status_code=405,
+        detail="Patient records cannot be permanently deleted by doctors. Unregister the patient instead.",
+    )

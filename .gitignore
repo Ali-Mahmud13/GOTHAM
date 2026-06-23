@@ -82,7 +82,13 @@ INTEGRATION_COMPLETE.md
 INNGEST_SETUP.md
 backend/DATABASE_MIGRATION.md
 backend/PERFORMANCE_OPTIMIZATION_TODO.md
-docs
+
+# Local documentation and evaluation helper artifacts
+docs/
+outputs/
+*.md
+!README.md
+!backend/alembic/README
 TECHNICAL_DETAILS.md
 RISK_ASSESSMENT_VERIFICATION.md
 ML_PREDICTION_PIPELINE_ANALYSIS.md

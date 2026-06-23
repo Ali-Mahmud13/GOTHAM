@@ -21,7 +21,6 @@ import { DoctorSchedulePage } from "./pages/DoctorSchedulePage";
 import { BookAppointmentPage } from "./pages/BookAppointmentPage";
 import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthProvider } from "./context/AuthContext";
-import { PatientAuthProvider } from "./context/PatientAuthContext";
 import { GothamWelcomePage } from "./pages/GothamWelcomePage";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { FindDoctorPage } from "./pages/FindDoctorPage";
@@ -31,6 +30,14 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 30,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      retry: 1,
+    },
+    mutations: {
+      retry: 0,
     },
   },
 });
@@ -60,7 +67,6 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <PatientAuthProvider>
           <Toaster />
           <Sonner />
           <BrowserRouter>
@@ -98,7 +104,6 @@ function App() {
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
-        </PatientAuthProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

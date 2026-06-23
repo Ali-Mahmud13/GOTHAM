@@ -11,9 +11,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "@/lib/apiClient";
-
-const API_URL = "http://localhost:8000";
+import { useApiMutation, useApiQuery, useSessionCache } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RegRequest {
   id: number;
@@ -27,6 +26,7 @@ interface RescheduleNotif {
   patient_name: string;
   appointment_date: string;
   start_time: string;
+  start_at_utc: string;
 }
 
 interface NewBookingNotif {
@@ -34,18 +34,70 @@ interface NewBookingNotif {
   patient_name: string;
   appointment_date: string;
   start_time: string;
+  start_at_utc: string;
   status: string;
 }
 
 export const Navbar = () => {
-  const { user, logout, tokens, setTokens, isAdmin } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [regRequests, setRegRequests] = useState<RegRequest[]>([]);
   const [seenReqIds, setSeenReqIds] = useState<Set<number>>(new Set());
-  const [rescheduleNotifs, setRescheduleNotifs] = useState<RescheduleNotif[]>([]);
-  const [cancelNotifs, setCancelNotifs] = useState<RescheduleNotif[]>([]);
   const [regActionLoading, setRegActionLoading] = useState<number | null>(null);
-  const [newBookings, setNewBookings] = useState<NewBookingNotif[]>([]);
+  const { queryClient, key } = useSessionCache();
+  const isDoctor = user?.role === "doctor";
+  const pollingOptions = {
+    enabled: isDoctor,
+    refetchInterval: 60_000,
+    staleTime: 60_000,
+    refetchOnMount: false as const,
+  };
+  const regRequestsQuery = useApiQuery<RegRequest[]>(
+    queryKeys.registration.doctorRequests,
+    "/appointments/registration-requests",
+    pollingOptions,
+  );
+  const rescheduleQuery = useApiQuery<RescheduleNotif[]>(
+    queryKeys.notifications.reschedule,
+    "/appointments/reschedule-notifications",
+    pollingOptions,
+  );
+  const cancelQuery = useApiQuery<RescheduleNotif[]>(
+    queryKeys.notifications.cancellation,
+    "/appointments/cancel-notifications",
+    pollingOptions,
+  );
+  const newBookingsQuery = useApiQuery<NewBookingNotif[]>(
+    queryKeys.notifications.newBookings,
+    "/appointments/new-booking-notifications",
+    pollingOptions,
+  );
+  const regRequests = regRequestsQuery.data ?? [];
+  const rescheduleNotifs = rescheduleQuery.data ?? [];
+  const cancelNotifs = cancelQuery.data ?? [];
+  const newBookings = newBookingsQuery.data ?? [];
+  const dismissNotification = useApiMutation<void, "new" | "reschedule" | "cancel">({
+    mutationFn: (kind, request) =>
+      request<void>(
+        kind === "new"
+          ? "/appointments/dismiss-new-booking-notifications"
+          : kind === "reschedule"
+            ? "/appointments/dismiss-reschedule-notifications"
+            : "/appointments/dismiss-cancel-notifications",
+        { method: "PUT" },
+      ),
+  });
+  const registrationAction = useApiMutation<void, { id: number; action: "approve" | "decline" }>({
+    invalidate: [
+      queryKeys.registration.doctorRequests,
+      queryKeys.patients.all,
+      queryKeys.dashboard.stats,
+      queryKeys.appointments.all,
+    ],
+    mutationFn: ({ id, action }, request) =>
+      request<void>(`/appointments/registration-requests/${id}/${action}`, {
+        method: "PUT",
+      }),
+  });
 
   // Load persisted seen IDs from localStorage
   useEffect(() => {
@@ -54,87 +106,6 @@ export const Navbar = () => {
       if (stored) setSeenReqIds(new Set(JSON.parse(stored)));
     }
   }, [user?.email]);
-
-  useEffect(() => {
-    if (user?.email && user?.role === "doctor") {
-      fetchRegRequests();
-      fetchRescheduleNotifs();
-      fetchCancelNotifs();
-      fetchNewBookings();
-      const interval = setInterval(() => {
-        fetchRegRequests();
-        fetchRescheduleNotifs();
-        fetchCancelNotifs();
-        fetchNewBookings();
-      }, 60000);
-      return () => clearInterval(interval);
-    }
-  }, [user?.email]);
-
-  const fetchRegRequests = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/registration-requests`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data: RegRequest[] = await res.json();
-        setRegRequests(data);
-      }
-    } catch {
-      // silently fail
-    }
-  };
-
-  const fetchRescheduleNotifs = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/reschedule-notifications`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setRescheduleNotifs(data);
-      }
-    } catch { }
-  };
-
-  const fetchCancelNotifs = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/cancel-notifications`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setCancelNotifs(data);
-      }
-    } catch { }
-  };
-
-  const fetchNewBookings = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/new-booking-notifications`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        setNewBookings(await res.json());
-      }
-    } catch { }
-  };
 
   const handleNotifOpen = async (open: boolean) => {
     if (open) {
@@ -145,41 +116,29 @@ export const Navbar = () => {
       // Dismiss new-booking-notifications
       if (newBookings.length > 0) {
         try {
-          await apiFetch(
-            `/appointments/dismiss-new-booking-notifications`,
-            { method: "PUT" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          setNewBookings([]);
-        } catch { }
+          queryClient.setQueryData(key(queryKeys.notifications.newBookings), []);
+          await dismissNotification.mutateAsync("new");
+        } catch (error) {
+          console.error("Failed to dismiss new-booking notifications:", error);
+        }
       }
     } else {
       // Dismiss reschedule and cancel notifications server-side when closing
       if (rescheduleNotifs.length > 0) {
         try {
-          await apiFetch(
-            `/appointments/dismiss-reschedule-notifications`,
-            { method: "PUT" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          setRescheduleNotifs([]);
-        } catch { }
+          queryClient.setQueryData(key(queryKeys.notifications.reschedule), []);
+          await dismissNotification.mutateAsync("reschedule");
+        } catch (error) {
+          console.error("Failed to dismiss reschedule notifications:", error);
+        }
       }
       if (cancelNotifs.length > 0) {
         try {
-          await apiFetch(
-            `/appointments/dismiss-cancel-notifications`,
-            { method: "PUT" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          setCancelNotifs([]);
-        } catch { }
+          queryClient.setQueryData(key(queryKeys.notifications.cancellation), []);
+          await dismissNotification.mutateAsync("cancel");
+        } catch (error) {
+          console.error("Failed to dismiss cancellation notifications:", error);
+        }
       }
     }
   };
@@ -187,20 +146,15 @@ export const Navbar = () => {
   const handleRegAction = async (reqId: number, action: 'approve' | 'decline') => {
     setRegActionLoading(reqId);
     try {
-      const res = await apiFetch(
-        `/appointments/registration-requests/${reqId}/${action}`,
-        { method: 'PUT' },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        setRegRequests(prev => prev.filter(r => r.id !== reqId));
-        const newSeen = new Set(seenReqIds);
-        newSeen.delete(reqId);
-        setSeenReqIds(newSeen);
-      }
-    } catch { } finally { setRegActionLoading(null); }
+      await registrationAction.mutateAsync({ id: reqId, action });
+      const newSeen = new Set(seenReqIds);
+      newSeen.delete(reqId);
+      setSeenReqIds(newSeen);
+    } catch (error) {
+      console.error(`Failed to ${action} registration request:`, error);
+    } finally {
+      setRegActionLoading(null);
+    }
   };
 
   const handleLogout = () => {
@@ -304,7 +258,7 @@ export const Navbar = () => {
                             <p className="font-medium text-sm">Appointment Cancelled</p>
                             <p className="text-xs text-muted-foreground">
                               {n.patient_name} cancelled on{' '}
-                              {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                              {new Date(n.start_at_utc).toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {new Date(n.start_at_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </p>
                           </div>
                         </div>
@@ -318,7 +272,7 @@ export const Navbar = () => {
                             <p className="font-medium text-sm">Appointment Rescheduled</p>
                             <p className="text-xs text-muted-foreground">
                               {n.patient_name} moved to{' '}
-                              {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                              {new Date(n.start_at_utc).toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {new Date(n.start_at_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </p>
                           </div>
                         </div>
@@ -338,7 +292,7 @@ export const Navbar = () => {
                             </p>
                             <p className="text-xs text-muted-foreground">
                               {n.patient_name} ·{' '}
-                              {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                              {new Date(n.start_at_utc).toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {new Date(n.start_at_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </p>
                           </div>
                         </div>

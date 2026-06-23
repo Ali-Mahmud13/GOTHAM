@@ -40,7 +40,7 @@ def verify_stored_password(plain: str, stored: str) -> bool:
     return False
 
 
-def create_access_token(*, user_id: int, email: str, role: str) -> str:
+def create_access_token(*, user_id: int, email: str, role: str, token_version: int = 0) -> str:
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=config.JWT_ACCESS_MINUTES)
     return jwt.encode(
@@ -48,6 +48,7 @@ def create_access_token(*, user_id: int, email: str, role: str) -> str:
             "sub": str(user_id),
             "email": email,
             "role": role,
+            "ver": token_version,
             "typ": "access",
             "iat": now,
             "exp": exp,
@@ -57,7 +58,7 @@ def create_access_token(*, user_id: int, email: str, role: str) -> str:
     )
 
 
-def create_refresh_token(*, user_id: int, email: str, role: str) -> str:
+def create_refresh_token(*, user_id: int, email: str, role: str, token_version: int = 0) -> str:
     now = datetime.now(timezone.utc)
     exp = now + timedelta(days=config.JWT_REFRESH_DAYS)
     return jwt.encode(
@@ -65,6 +66,7 @@ def create_refresh_token(*, user_id: int, email: str, role: str) -> str:
             "sub": str(user_id),
             "email": email,
             "role": role,
+            "ver": token_version,
             "typ": "refresh",
             "iat": now,
             "exp": exp,
@@ -119,6 +121,8 @@ def get_current_user(
     user = session.get(AuthUser, uid)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if int(payload.get("ver", 0)) != user.token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
     return user
 
 

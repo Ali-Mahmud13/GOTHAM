@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Users, Bot, FileInput, AlertTriangle, BrainCircuit, Calendar, CalendarPlus, UserCheck, UserX, Clock, X, ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
@@ -15,9 +15,8 @@ import { RiskTrendChart } from "@/components/RiskTrendChart";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
-import { apiFetch } from "@/lib/apiClient";
-
-const API_URL = "http://localhost:8000";
+import { useApiMutation, useApiQuery } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface DashboardStats {
   user_role?: string;
@@ -52,6 +51,8 @@ interface Appointment {
   appointment_date: string;
   start_time: string;
   end_time: string;
+  start_at_utc: string;
+  end_at_utc: string;
   status: string;
   notes: string | null;
 }
@@ -65,6 +66,7 @@ interface WeeklyAssessmentRun {
   gdm: { risk_level: number | null; confidence: number | null; ai_report: string | null } | null;
   anemia: { diagnosis: string | null; confidence: number | null; ai_report: string | null } | null;
   fetal: { status: number | null; confidence: number | null; ai_report: string | null } | null;
+  preeclampsia: { risk_level: number | null; confidence: number | null; ai_report: string | null } | null;
 }
 
 interface RegistrationRequest {
@@ -85,155 +87,68 @@ const formatApptDate = (d: string) =>
 
 const Index = () => {
   const navigate = useNavigate();
-  const { user, tokens, setTokens, logout } = useAuth();
+  const { user } = useAuth();
   const [showChat, setShowChat] = useState(false);
   const [showReport, setShowReport] = useState(false);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [apptLoading, setApptLoading] = useState(true);
-  const [newBookingCount, setNewBookingCount] = useState(0);
   const [showAssessmentModal, setShowAssessmentModal] = useState(false);
-  const [weeklyAssessments, setWeeklyAssessments] = useState<WeeklyAssessmentRun[]>([]);
-  const [assessmentModalLoading, setAssessmentModalLoading] = useState(false);
   const [selectedRun, setSelectedRun] = useState<WeeklyAssessmentRun | null>(null);
-  const [regRequests, setRegRequests] = useState<RegistrationRequest[]>([]);
-  const [regRequestsLoading, setRegRequestsLoading] = useState(true);
   const [regRequestActionId, setRegRequestActionId] = useState<number | null>(null);
+  const statsQuery = useApiQuery<DashboardStats>(
+    queryKeys.dashboard.stats,
+    "/api/dashboard/stats",
+  );
+  const appointmentsQuery = useApiQuery<Appointment[]>(
+    queryKeys.appointments.upcoming,
+    "/appointments/upcoming",
+  );
+  const regRequestsQuery = useApiQuery<RegistrationRequest[]>(
+    queryKeys.registration.doctorRequests,
+    "/appointments/registration-requests",
+  );
+  const newBookingsQuery = useApiQuery<Array<{ id: number }>>(
+    queryKeys.notifications.newBookings,
+    "/appointments/new-booking-notifications",
+  );
+  const weeklyAssessmentsQuery = useApiQuery<WeeklyAssessmentRun[]>(
+    queryKeys.dashboard.weeklyAssessments,
+    "/api/dashboard/assessments/week",
+    { enabled: showAssessmentModal },
+  );
+  const stats = statsQuery.data ?? null;
+  const appointments = appointmentsQuery.data ?? [];
+  const regRequests = regRequestsQuery.data ?? [];
+  const weeklyAssessments = weeklyAssessmentsQuery.data ?? [];
+  const newBookingCount = newBookingsQuery.data?.length ?? 0;
+  const registrationAction = useApiMutation<void, { id: number; action: "approve" | "decline" }>({
+    invalidate: [
+      queryKeys.registration.doctorRequests,
+      queryKeys.appointments.all,
+      queryKeys.patients.all,
+      queryKeys.dashboard.stats,
+    ],
+    mutationFn: ({ id, action }, request) =>
+      request<void>(`/appointments/registration-requests/${id}/${action}`, {
+        method: "PUT",
+      }),
+  });
+  const dismissNewBookings = useApiMutation<void, void>({
+    invalidate: [queryKeys.notifications.newBookings],
+    mutationFn: (_, request) =>
+      request<void>("/appointments/dismiss-new-booking-notifications", {
+        method: "PUT",
+      }),
+  });
 
-  useEffect(() => {
-    if (user?.email) {
-      fetchDashboardStats();
-      fetchUpcomingAppointments();
-      fetchRegistrationRequests();
-      fetchNewBookingNotifications();
-    }
-  }, [user?.email]);
-
-  const fetchDashboardStats = async () => {
-    try {
-      const response = await apiFetch(
-        `/api/dashboard/stats`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setStats(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch dashboard stats:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchUpcomingAppointments = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/upcoming`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data: Appointment[] = await res.json();
-        setAppointments(data);
-      }
-    } catch {
-      // silently fail, appointments section will show nothing
-    } finally {
-      setApptLoading(false);
-    }
-  };
-
-  const fetchNewBookingNotifications = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/new-booking-notifications`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setNewBookingCount(Array.isArray(data) ? data.length : (data.count || 0));
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const fetchWeeklyAssessments = async () => {
-    setAssessmentModalLoading(true);
-    try {
-      const res = await apiFetch('/api/dashboard/assessments/week', { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) setWeeklyAssessments(await res.json());
-    } catch { } finally {
-      setAssessmentModalLoading(false);
-    }
-  };
-
-  const dismissNewBookingNotifications = async () => {
-    try {
-      await apiFetch(
-        `/appointments/dismiss-new-booking-notifications`,
-        { method: "PUT" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      setNewBookingCount(0);
-    } catch {
-      // ignore
-    }
-  };
-
-  const fetchRegistrationRequests = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/registration-requests`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data: RegistrationRequest[] = await res.json();
-        setRegRequests(data);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setRegRequestsLoading(false);
-    }
-  };
+  const dismissNewBookingNotifications = () => dismissNewBookings.mutateAsync();
 
   const approveRequest = async (id: number) => {
     if (regRequestActionId) return;
     setRegRequestActionId(id);
     try {
-      const res = await apiFetch(
-        `/appointments/registration-requests/${id}/approve`,
-        { method: "PUT" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast({ variant: "destructive", title: "Approve failed", description: err.detail || "Could not approve request." });
-        return;
-      }
-      fetchRegistrationRequests();
-      fetchUpcomingAppointments();
+      await registrationAction.mutateAsync({ id, action: "approve" });
       toast({ title: "Approved", description: "Registration request approved." });
-    } catch {
-      toast({ variant: "destructive", title: "Network error", description: "Could not approve request." });
+    } catch (error) {
+      toast({ variant: "destructive", title: "Approve failed", description: error instanceof Error ? error.message : "Could not approve request." });
     } finally {
       setRegRequestActionId(null);
     }
@@ -243,22 +158,10 @@ const Index = () => {
     if (regRequestActionId) return;
     setRegRequestActionId(id);
     try {
-      const res = await apiFetch(
-        `/appointments/registration-requests/${id}/decline`,
-        { method: "PUT" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast({ variant: "destructive", title: "Decline failed", description: err.detail || "Could not decline request." });
-        return;
-      }
-      fetchRegistrationRequests();
+      await registrationAction.mutateAsync({ id, action: "decline" });
       toast({ title: "Declined", description: "Registration request declined." });
-    } catch {
-      toast({ variant: "destructive", title: "Network error", description: "Could not decline request." });
+    } catch (error) {
+      toast({ variant: "destructive", title: "Decline failed", description: error instanceof Error ? error.message : "Could not decline request." });
     } finally {
       setRegRequestActionId(null);
     }
@@ -294,7 +197,7 @@ const Index = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <MetricsCard
                 title="Total Active Patients"
-                value={loading ? "..." : String(stats?.total_patients || 0)}
+                value={statsQuery.isPending ? "..." : String(stats?.total_patients || 0)}
                 subtext="active in system"
                 icon={Users}
                 trend="up"
@@ -303,7 +206,7 @@ const Index = () => {
               />
               <MetricsCard
                 title="High-Risk Alerts"
-                value={loading ? "..." : String(stats?.high_risk_count || 0)}
+                value={statsQuery.isPending ? "..." : String(stats?.high_risk_count || 0)}
                 subtext="need attention"
                 icon={AlertTriangle}
                 trend="down"
@@ -312,18 +215,18 @@ const Index = () => {
               />
               <MetricsCard
                 title="AI Assessments"
-                value={loading ? "..." : String(stats?.assessments_this_week || 0)}
+                value={statsQuery.isPending ? "..." : String(stats?.assessments_this_week || 0)}
                 subtext="this week"
                 icon={BrainCircuit}
                 trend="up"
                 trendValue=""
                 color="purple"
-                onClick={() => { setShowAssessmentModal(true); fetchWeeklyAssessments(); }}
+                onClick={() => setShowAssessmentModal(true)}
               />
             </div>
 
             {/* Empty State for No Patients */}
-            {!loading && stats && stats.total_patients === 0 && (
+            {!statsQuery.isPending && stats && stats.total_patients === 0 && (
               <div className="bg-gradient-to-br from-medical-pink/10 via-medical-blue/10 to-purple-500/10 rounded-2xl p-12 text-center mb-12 border border-medical-pink/20">
                 <div className="max-w-md mx-auto">
                   <Users className="w-16 h-16 mx-auto mb-4 text-medical-blue" />
@@ -401,7 +304,7 @@ const Index = () => {
                 }}
               >
                 <div className="space-y-2">
-                  {apptLoading ? (
+                  {appointmentsQuery.isPending ? (
                     <p className="text-sm text-gray-500">Loading...</p>
                   ) : appointments.length === 0 ? (
                     <div className="text-center py-4">
@@ -429,7 +332,9 @@ const Index = () => {
                           </div>
                           <p className="text-sm text-muted-foreground">{appt.notes || "Appointment"}</p>
                         </div>
-                        <p className="text-sm font-medium text-muted-foreground whitespace-nowrap">{appt.start_time} · {formatApptDate(appt.appointment_date)}</p>
+                        <p className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                          {new Date(appt.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {new Date(appt.start_at_utc).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </p>
                       </div>
                     ))
                   )}
@@ -438,7 +343,7 @@ const Index = () => {
 
               <SummaryPanel title="High-Risk Cases" gradient="pink">
                 <div className="space-y-2">
-                  {loading ? (
+                  {statsQuery.isPending ? (
                     <p className="text-sm text-gray-500">Loading...</p>
                   ) : stats && stats.high_risk_patients.length > 0 ? (
                     stats.high_risk_patients.slice(0, 3).map((patient) => (
@@ -457,7 +362,7 @@ const Index = () => {
 
               <SummaryPanel title="Recent Patients" gradient="neutral">
                 <div className="space-y-2">
-                  {loading ? (
+                  {statsQuery.isPending ? (
                     <p className="text-sm text-gray-500">Loading...</p>
                   ) : stats && stats.recent_patients.length > 0 ? (
                     stats.recent_patients.slice(0, 3).map((patient) => (
@@ -475,7 +380,7 @@ const Index = () => {
             </div>
 
             {/* Registration Requests */}
-            {(regRequestsLoading || regRequests.length > 0) && (
+            {(regRequestsQuery.isPending || regRequests.length > 0) && (
               <div className="mt-8">
                 <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                   <UserCheck className="h-5 w-5 text-medical-blue" />
@@ -484,7 +389,7 @@ const Index = () => {
                     <span className="ml-2 bg-medical-pink text-white text-xs px-2 py-0.5 rounded-full font-semibold">{regRequests.length}</span>
                   )}
                 </h3>
-                {regRequestsLoading ? (
+                {regRequestsQuery.isPending ? (
                   <p className="text-sm text-gray-500">Loading...</p>
                 ) : (
                   <div className="space-y-3">
@@ -590,14 +495,31 @@ const Index = () => {
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-6">
               {!selectedRun && (
-                assessmentModalLoading ? (
+                weeklyAssessmentsQuery.isLoading ? (
                   <div className="flex justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-medical-blue" />
+                  </div>
+                ) : weeklyAssessmentsQuery.isError ? (
+                  <div className="text-center py-12">
+                    <AlertTriangle className="h-10 w-10 mx-auto text-destructive mb-3" />
+                    <p className="text-sm font-semibold text-foreground">Could not load assessments.</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {weeklyAssessmentsQuery.error?.message || "Please try again in a moment."}
+                    </p>
+                    <button
+                      onClick={() => weeklyAssessmentsQuery.refetch()}
+                      className="mt-4 px-4 py-2 rounded-lg bg-gradient-to-r from-medical-pink to-medical-blue text-white text-xs font-semibold hover:opacity-90 transition-opacity"
+                    >
+                      Retry
+                    </button>
                   </div>
                 ) : weeklyAssessments.length === 0 ? (
                   <p className="text-center text-muted-foreground py-12 text-sm">No assessments run this week.</p>
                 ) : (
                   <div className="space-y-3">
+                    {weeklyAssessmentsQuery.isFetching && (
+                      <p className="text-xs text-muted-foreground text-right">Updating...</p>
+                    )}
                     {weeklyAssessments.map(run => (
                       <button key={run.visit_id} onClick={() => setSelectedRun(run)}
                         className="w-full text-left p-4 rounded-xl bg-background/50 border border-border/50 hover:border-medical-blue/40 hover:bg-muted/30 transition-all group">
@@ -663,6 +585,19 @@ const Index = () => {
                       )}
                       {selectedRun.fetal.ai_report && (
                         <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{selectedRun.fetal.ai_report}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedRun.preeclampsia && (
+                    <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/60">
+                      <p className="text-xs font-bold uppercase tracking-wide text-amber-700 mb-2">Preeclampsia Assessment</p>
+                      <p className="text-sm font-semibold">Result: {['Low', 'Medium', 'High'][selectedRun.preeclampsia.risk_level ?? 0] ?? '—'}</p>
+                      {selectedRun.preeclampsia.confidence != null && (
+                        <p className="text-xs text-muted-foreground">Confidence: {(selectedRun.preeclampsia.confidence * 100).toFixed(1)}%</p>
+                      )}
+                      {selectedRun.preeclampsia.ai_report && (
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{selectedRun.preeclampsia.ai_report}</p>
                       )}
                     </div>
                   )}

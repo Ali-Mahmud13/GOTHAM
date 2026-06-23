@@ -594,14 +594,14 @@ RESPONSE STRUCTURE (Use markdown):
 
 ## Management Recommendations
 [Provide recommendations ONLY from {rag_context}]
-[Format for each: "• [Recommendation] [Source: Retrieved Guidance]"]
+[Format each item as a plain bullet recommendation. Do not include visible source labels, citations, or parenthetical "Source:" text.]
 [If no relevant guidance: "Specific management guidance is not available in the provided context."]
 
 ## Follow-up Plan
 [Based on {rag_context} and assessment findings]
 
 ## Clinical Notes
-- All recommendations are based on retrieved medical literature only
+- Recommendations are grounded in retrieved medical guidance, but visible source labels are omitted for readability
 - Consult healthcare providers for personalized care decisions
 - [Any specific limitations noted in reports]
 

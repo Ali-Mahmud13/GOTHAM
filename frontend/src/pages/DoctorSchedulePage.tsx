@@ -5,9 +5,9 @@ import { Navbar } from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch } from '@/lib/apiClient';
-
-const API_URL = 'http://localhost:8000';
+import { ApiError } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -53,15 +53,6 @@ function todayLocalISO(): string {
   return `${y}-${mo}-${da}`;
 }
 
-function tomorrowLocalISO(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const da = String(d.getDate()).padStart(2, '0');
-  return `${y}-${mo}-${da}`;
-}
-
 function addDaysISO(base: string, days: number): string {
   const d = new Date(base + 'T12:00:00');
   d.setDate(d.getDate() + days);
@@ -72,17 +63,14 @@ function addDaysISO(base: string, days: number): string {
 }
 
 export const DoctorSchedulePage = () => {
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState<'weekly' | 'exceptions'>('weekly');
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [conflicts, setConflicts] = useState<AvailabilityConflict[] | null>(null);
 
-  const [exceptions, setExceptions] = useState<ScheduleException[]>([]);
-  const [excLoading, setExcLoading] = useState(false);
   const [excSaving, setExcSaving] = useState(false);
   const [impactedAppointments, setImpactedAppointments] = useState<Array<{
     appointment_id: number;
@@ -94,7 +82,7 @@ export const DoctorSchedulePage = () => {
   }>>([]);
   const [excForm, setExcForm] = useState({
     exception_date: '',
-    kind: 'blocked' as 'blocked' | 'custom',
+    kind: 'blocked' as 'blocked' | 'blocked_interval' | 'custom',
     start_time: '09:00',
     end_time: '17:00',
     slot_duration_minutes: 30,
@@ -105,60 +93,59 @@ export const DoctorSchedulePage = () => {
       navigate('/doctor/login');
       return;
     }
-    fetchAvailability();
-    fetchExceptions();
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, navigate, user]);
+  const enabled = isAuthenticated && user?.role === "doctor";
+  const fromDate = todayLocalISO();
+  const toDate = addDaysISO(fromDate, 400);
+  const availabilityQuery = useApiQuery<AvailabilitySlot[]>(
+    queryKeys.schedule.mine,
+    "/appointments/availability/my",
+    { enabled },
+  );
+  const exceptionsQuery = useApiQuery<ScheduleException[]>(
+    queryKeys.schedule.exceptions,
+    `/appointments/exceptions/my?date_from=${encodeURIComponent(fromDate)}&date_to=${encodeURIComponent(toDate)}`,
+    { enabled },
+  );
+  const exceptions = exceptionsQuery.data ?? [];
+  const loading = availabilityQuery.isPending;
+  const excLoading = exceptionsQuery.isPending;
+  const saveAvailability = useApiMutation<AvailabilitySlot[], AvailabilitySlot[]>({
+    invalidate: [queryKeys.schedule.all, queryKeys.appointments.availability(user?.id ?? "me")],
+    mutationFn: (nextSlots, request) =>
+      request<AvailabilitySlot[]>("/appointments/availability", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slots: nextSlots }),
+      }),
+  });
+  const saveException = useApiMutation<{
+    exception: ScheduleException;
+    impacted_appointments?: typeof impactedAppointments;
+  }, Record<string, unknown>>({
+    invalidate: [queryKeys.schedule.exceptions, queryKeys.appointments.all],
+    mutationFn: (body, request) =>
+      request("/appointments/exceptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+  });
+  const removeException = useApiMutation<void, number>({
+    invalidate: [queryKeys.schedule.exceptions, queryKeys.appointments.all],
+    mutationFn: (id, request) =>
+      request<void>(`/appointments/exceptions/${id}`, { method: "DELETE" }),
+  });
 
-  const fetchAvailability = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/availability/my`,
-        { method: 'GET' },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data: AvailabilitySlot[] = await res.json();
-        setSlots(data.length > 0 ? data : []);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setMessage({ type: 'error', text: err.detail || 'Failed to load your schedule.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error while loading schedule.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchExceptions = async () => {
-    setExcLoading(true);
-    try {
-      const from = todayLocalISO();
-      const to = addDaysISO(from, 400);
-      const res = await apiFetch(
-        `/appointments/exceptions/my?date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}`,
-        { method: 'GET' },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data: ScheduleException[] = await res.json();
-        setExceptions(data);
-      }
-    } catch {
-      // non-fatal
-    } finally {
-      setExcLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (availabilityQuery.data) setSlots(availabilityQuery.data);
+  }, [availabilityQuery.data]);
 
   const addSlot = () => {
+    const scheduleTimezone = slots[0]?.timezone || DEFAULT_TIMEZONE;
     setSlots(prev => [
       ...prev,
-      { day_of_week: 0, start_time: '09:00', end_time: '17:00', timezone: DEFAULT_TIMEZONE, slot_duration_minutes: 30 },
+      { day_of_week: 0, start_time: '09:00', end_time: '17:00', timezone: scheduleTimezone, slot_duration_minutes: 30 },
     ]);
   };
 
@@ -186,36 +173,22 @@ export const DoctorSchedulePage = () => {
     }
 
     try {
-      const res = await apiFetch(
-        `/appointments/availability`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slots }),
-        },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setSlots(data);
-        setMessage({ type: 'success', text: 'Schedule saved successfully!' });
+      const data = await saveAvailability.mutateAsync(slots);
+      setSlots(data);
+      setMessage({ type: 'success', text: 'Schedule saved successfully!' });
+    } catch (error) {
+      const detail = error instanceof ApiError
+        ? (error.data as { detail?: { message?: string; conflicts?: AvailabilityConflict[] } | string } | undefined)?.detail
+        : undefined;
+      if (typeof detail === "object" && detail?.message && Array.isArray(detail.conflicts)) {
+        setConflicts(detail.conflicts);
+        setMessage({
+          type: "error",
+          text: `${detail.message} (${detail.conflicts.length} conflict${detail.conflicts.length === 1 ? "" : "s"}).`,
+        });
       } else {
-        const err = await res.json().catch(() => ({}));
-        const detail = err.detail;
-        if (detail?.message && Array.isArray(detail?.conflicts)) {
-          setConflicts(detail.conflicts);
-          setMessage({
-            type: 'error',
-            text: `${detail.message} (${detail.conflicts.length} conflict${detail.conflicts.length === 1 ? '' : 's'}).`,
-          });
-        } else {
-          setMessage({ type: 'error', text: detail || 'Failed to save schedule.' });
-        }
+        setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error. Please try again.' });
       }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error. Please try again.' });
     } finally {
       setSaving(false);
     }
@@ -234,54 +207,29 @@ export const DoctorSchedulePage = () => {
       const body: Record<string, unknown> = {
         exception_date: excForm.exception_date,
         kind: excForm.kind,
-        timezone: DEFAULT_TIMEZONE,
+        timezone: slots[0]?.timezone || DEFAULT_TIMEZONE,
       };
-      if (excForm.kind === 'custom') {
+      if (excForm.kind !== 'blocked') {
         body.start_time = excForm.start_time;
         body.end_time = excForm.end_time;
+      }
+      if (excForm.kind === 'custom') {
         body.slot_duration_minutes = excForm.slot_duration_minutes;
       }
-      const res = await apiFetch(
-        `/appointments/exceptions`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        // data is now { exception: {...}, impacted_appointments: [...] }
-        const impacted = data.impacted_appointments ?? [];
-        if (impacted.length > 0) {
-          setImpactedAppointments(impacted);
-          setMessage({
-            type: 'error',
-            text: `Date blocked, but ${impacted.length} existing appointment${impacted.length === 1 ? '' : 's'} will be affected. Please cancel or reschedule them.`,
-          });
-        } else {
-          setMessage({ type: 'success', text: 'Exception saved.' });
-        }
-        setExcForm(prev => ({ ...prev, exception_date: '' }));
-        fetchExceptions();
+      const data = await saveException.mutateAsync(body);
+      const impacted = data.impacted_appointments ?? [];
+      if (impacted.length > 0) {
+        setImpactedAppointments(impacted);
+        setMessage({
+          type: 'error',
+          text: `Date blocked, but ${impacted.length} existing appointment${impacted.length === 1 ? '' : 's'} will be affected. Please cancel or reschedule them.`,
+        });
       } else {
-        const err = await res.json().catch(() => ({}));
-        const detail = err.detail;
-        if (detail?.message && Array.isArray(detail?.conflicts)) {
-          setConflicts(detail.conflicts);
-          setMessage({
-            type: 'error',
-            text: `${detail.message} (${detail.conflicts.length} conflict${detail.conflicts.length === 1 ? '' : 's'}).`,
-          });
-        } else {
-          setMessage({ type: 'error', text: typeof detail === 'string' ? detail : detail?.message || 'Failed to save exception.' });
-        }
+        setMessage({ type: 'success', text: 'Exception saved.' });
       }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error.' });
+      setExcForm(prev => ({ ...prev, exception_date: '' }));
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error.' });
     } finally {
       setExcSaving(false);
     }
@@ -289,22 +237,10 @@ export const DoctorSchedulePage = () => {
 
   const deleteException = async (id: number) => {
     try {
-      const res = await apiFetch(
-        `/appointments/exceptions/${id}`,
-        { method: 'DELETE' },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Exception removed.' });
-        fetchExceptions();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setMessage({ type: 'error', text: err.detail || 'Could not delete exception.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error.' });
+      await removeException.mutateAsync(id);
+      setMessage({ type: 'success', text: 'Exception removed.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error.' });
     }
   };
 
@@ -523,7 +459,7 @@ export const DoctorSchedulePage = () => {
                 One-off date changes
               </h2>
               <p className="text-sm text-muted-foreground mb-4">
-                Block a full day (vacation) or set custom hours for a single date. These override your weekly template for that date only.
+                Block a full day, block part of a day, or replace the weekly template with custom hours for one date.
               </p>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -532,7 +468,7 @@ export const DoctorSchedulePage = () => {
                   <input
                     type="date"
                     value={excForm.exception_date}
-                    min={tomorrowLocalISO()}
+                    min={todayLocalISO()}
                     onChange={e => setExcForm(prev => ({ ...prev, exception_date: e.target.value }))}
                     className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm"
                   />
@@ -541,16 +477,17 @@ export const DoctorSchedulePage = () => {
                   <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
                   <select
                     value={excForm.kind}
-                    onChange={e => setExcForm(prev => ({ ...prev, kind: e.target.value as 'blocked' | 'custom' }))}
+                    onChange={e => setExcForm(prev => ({ ...prev, kind: e.target.value as 'blocked' | 'blocked_interval' | 'custom' }))}
                     className="w-full h-10 px-3 rounded-lg border border-gray-300 text-sm"
                   >
                     <option value="blocked">Block entire day</option>
-                    <option value="custom">Block specific hours</option>
+                    <option value="blocked_interval">Block specific hours</option>
+                    <option value="custom">Custom replacement hours</option>
                   </select>
                 </div>
               </div>
 
-              {excForm.kind === 'custom' && (
+              {excForm.kind !== 'blocked' && (
                 <div className="grid gap-4 sm:grid-cols-3 mt-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
@@ -596,8 +533,11 @@ export const DoctorSchedulePage = () => {
                         <span className="font-medium">{ex.exception_date}</span>
                         {' — '}
                         <span className="text-gray-600">
-                          {ex.kind === 'blocked' ? 'Blocked (Full Day)' 
-                           : `Blocked Hours: ${ex.start_time}–${ex.end_time}`}
+                          {ex.kind === 'blocked'
+                            ? 'Blocked (Full Day)'
+                            : ex.kind === 'blocked_interval'
+                              ? `Blocked hours: ${ex.start_time} - ${ex.end_time}`
+                              : `Replacement hours: ${ex.start_time} - ${ex.end_time}`}
                         </span>
                       </div>
                       <Button variant="outline" size="sm" onClick={() => deleteException(ex.id)} className="h-8 text-red-600 border-red-200">

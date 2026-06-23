@@ -11,9 +11,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "@/lib/apiClient";
-
-const API_URL = "http://localhost:8000";
+import { useApiMutation, useApiQuery, useSessionCache } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RegResult {
   id: number;
@@ -29,6 +28,7 @@ interface RescheduleNotif {
   doctor_name: string;
   appointment_date: string;
   start_time: string;
+  start_at_utc: string;
 }
 
 interface CancelNotif {
@@ -36,15 +36,48 @@ interface CancelNotif {
   doctor_name: string;
   appointment_date: string;
   start_time: string;
+  start_at_utc: string;
 }
 
 export const PatientNavbar = () => {
-  const { user, logout, tokens, setTokens } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [regResults, setRegResults] = useState<RegResult[]>([]);
   const [seenResultIds, setSeenResultIds] = useState<Set<number>>(new Set());
-  const [rescheduleNotifs, setRescheduleNotifs] = useState<RescheduleNotif[]>([]);
-  const [cancelNotifs, setCancelNotifs] = useState<CancelNotif[]>([]);
+  const { queryClient, key } = useSessionCache();
+  const isPatient = user?.role === "patient";
+  const pollingOptions = {
+    enabled: isPatient,
+    refetchInterval: 60_000,
+    staleTime: 60_000,
+    refetchOnMount: false as const,
+  };
+  const regResultsQuery = useApiQuery<RegResult[]>(
+    queryKeys.registration.patientRequests,
+    "/appointments/my-registration-requests",
+    pollingOptions,
+  );
+  const rescheduleQuery = useApiQuery<RescheduleNotif[]>(
+    queryKeys.notifications.reschedule,
+    "/appointments/reschedule-notifications",
+    pollingOptions,
+  );
+  const cancelQuery = useApiQuery<CancelNotif[]>(
+    queryKeys.notifications.cancellation,
+    "/appointments/cancel-notifications",
+    pollingOptions,
+  );
+  const regResults = regResultsQuery.data ?? [];
+  const rescheduleNotifs = rescheduleQuery.data ?? [];
+  const cancelNotifs = cancelQuery.data ?? [];
+  const dismissNotification = useApiMutation<void, "reschedule" | "cancel">({
+    mutationFn: (kind, request) =>
+      request<void>(
+        kind === "reschedule"
+          ? "/appointments/dismiss-reschedule-notifications"
+          : "/appointments/dismiss-cancel-notifications",
+        { method: "PUT" },
+      ),
+  });
 
   const patientName = user?.patient_info?.name || user?.full_name || user?.email || 'Patient';
 
@@ -55,66 +88,6 @@ export const PatientNavbar = () => {
       if (stored) setSeenResultIds(new Set(JSON.parse(stored)));
     }
   }, [user?.email]);
-
-  useEffect(() => {
-    if (user?.email && user?.role === "patient") {
-      fetchRegResults();
-      fetchRescheduleNotifs();
-      fetchCancelNotifs();
-      const interval = setInterval(() => { fetchRegResults(); fetchRescheduleNotifs(); fetchCancelNotifs(); }, 60000);
-      return () => clearInterval(interval);
-    }
-  }, [user?.email]);
-
-  const fetchRegResults = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/my-registration-requests`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data: RegResult[] = await res.json();
-        setRegResults(data);
-      }
-    } catch {
-      // silently fail
-    }
-  };
-
-  const fetchRescheduleNotifs = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/reschedule-notifications`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setRescheduleNotifs(data);
-      }
-    } catch { }
-  };
-
-  const fetchCancelNotifs = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/cancel-notifications`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setCancelNotifs(data);
-      }
-    } catch { }
-  };
 
   // Only show badge for actioned (approved/declined) results not yet seen, + reschedule/cancel notifs
   const actionedResults = regResults.filter(r => r.status === "approved" || r.status === "declined");
@@ -131,27 +104,19 @@ export const PatientNavbar = () => {
       // Dismiss reschedule and cancel notifications server-side when closing
       if (rescheduleNotifs.length > 0) {
         try {
-          await apiFetch(
-            `/appointments/dismiss-reschedule-notifications`,
-            { method: "PUT" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          setRescheduleNotifs([]);
-        } catch { }
+          queryClient.setQueryData(key(queryKeys.notifications.reschedule), []);
+          await dismissNotification.mutateAsync("reschedule");
+        } catch (error) {
+          console.error("Failed to dismiss reschedule notifications:", error);
+        }
       }
       if (cancelNotifs.length > 0) {
         try {
-          await apiFetch(
-            `/appointments/dismiss-cancel-notifications`,
-            { method: "PUT" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          setCancelNotifs([]);
-        } catch { }
+          queryClient.setQueryData(key(queryKeys.notifications.cancellation), []);
+          await dismissNotification.mutateAsync("cancel");
+        } catch (error) {
+          console.error("Failed to dismiss cancellation notifications:", error);
+        }
       }
     }
   };
@@ -245,7 +210,7 @@ export const PatientNavbar = () => {
                           <div>
                             <p className="font-medium text-sm">Appointment Cancelled</p>
                             <p className="text-xs text-muted-foreground">
-                              Dr. {n.doctor_name} cancelled the appointment on {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                              Dr. {n.doctor_name} cancelled the appointment on {new Date(n.start_at_utc).toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {new Date(n.start_at_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </p>
                           </div>
                         </div>
@@ -258,7 +223,7 @@ export const PatientNavbar = () => {
                           <div>
                             <p className="font-medium text-sm">Appointment Rescheduled</p>
                             <p className="text-xs text-muted-foreground">
-                              Dr. {n.doctor_name} rescheduled to {new Date(n.appointment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {n.start_time}
+                              Dr. {n.doctor_name} rescheduled to {new Date(n.start_at_utc).toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {new Date(n.start_at_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </p>
                           </div>
                         </div>

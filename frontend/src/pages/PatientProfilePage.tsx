@@ -1,5 +1,5 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft, User, Phone, Calendar, Brain, AlertCircle,
@@ -14,10 +14,13 @@ import { BatEasterEgg } from "@/components/BatEasterEgg";
 import { MicButton } from "@/components/MicButton";
 import { cn } from "@/lib/utils";
 import { insertAtCaret } from "@/lib/text";
+import { formatPakistanDate, formatPakistanDateTime } from "@/lib/dateTime";
 import type { TranscriptionLanguage } from "@/lib/transcribe";
 import ReactMarkdown from "react-markdown";
-import { apiFetch } from "@/lib/apiClient";
+import { ApiError } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
+import { useApiMutation, useApiQuery, useSessionCache } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -162,16 +165,8 @@ const PatientProfilePage = () => {
   const { patientId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, tokens, setTokens, logout } = useAuth();
-  const [patient, setPatient] = useState<PatientProfile | null>(null);
-  const [medicalData, setMedicalData] = useState<PatientMedical | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>(() => getTabFromQuery(searchParams.get('tab')));
-  const [visitStats, setVisitStats] = useState<VisitStatsResponse>({ total_visits: 0, recent_visits: [] });
-  const [visits, setVisits] = useState<VisitRecord[]>([]);
-  const [isLoadingVisits, setIsLoadingVisits] = useState(true);
-  const [visitsError, setVisitsError] = useState<string | null>(null);
   const [showBats, setShowBats] = useState(false);
   const [keySequence, setKeySequence] = useState('');
   const [isEditingNotes, setIsEditingNotes] = useState(false);
@@ -196,6 +191,59 @@ const PatientProfilePage = () => {
   const [ultrasoundToDelete, setUltrasoundToDelete] = useState<number | null>(null);
   const [isDeletingUltrasound, setIsDeletingUltrasound] = useState(false);
   const { toast } = useToast();
+  const { queryClient, key } = useSessionCache();
+  const profileKey = queryKeys.patients.detail(patientId ?? "missing");
+  const visitsKey = queryKeys.patients.visits(patientId ?? "missing");
+  const profileQuery = useApiQuery<PatientProfile>(
+    profileKey,
+    `/api/patients/${patientId ?? ""}`,
+    { enabled: Boolean(patientId), retry: false },
+  );
+  const visitsQuery = useApiQuery<VisitStatsResponse>(
+    visitsKey,
+    `/api/dashboard/patient/${patientId ?? ""}/visits`,
+    { enabled: Boolean(patientId) },
+  );
+  const patient = profileQuery.data ?? null;
+  const medicalData: PatientMedical | null = patient;
+  const loading = profileQuery.isPending;
+  const error = profileQuery.error instanceof ApiError && profileQuery.error.status === 404
+    ? "not_found"
+    : profileQuery.isError ? "error" : null;
+  const visitStats = visitsQuery.data ?? { total_visits: 0, recent_visits: [] };
+  const visits = visitStats.recent_visits ?? [];
+  const isLoadingVisits = visitsQuery.isPending;
+  const visitsError = visitsQuery.isError ? "Visit history could not be loaded." : null;
+  const unregisterPatient = useApiMutation<void, void>({
+    invalidate: [
+      queryKeys.patients.all,
+      queryKeys.dashboard.stats,
+      queryKeys.appointments.all,
+      queryKeys.registration.all,
+    ],
+    mutationFn: (_, request) =>
+      request<void>(`/appointments/unregister/patient/${patientId}`, {
+        method: "DELETE",
+      }),
+  });
+  const updateNotes = useApiMutation<PatientProfile, string>({
+    invalidate: [profileKey, queryKeys.patients.all],
+    mutationFn: (clinicalNotes, request) =>
+      request<PatientProfile>(`/api/patients/${patientId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clinical_notes: clinicalNotes }),
+      }),
+  });
+  const deleteUltrasound = useApiMutation<void, number>({
+    invalidate: [visitsKey],
+    mutationFn: (imageId, request) =>
+      request<void>(`/api/ultrasound/${imageId}`, { method: "DELETE" }),
+  });
+  const fetchPatientData = () => Promise.all([
+    profileQuery.refetch(),
+    visitsQuery.refetch(),
+  ]);
 
   useEffect(() => {
     const tabFromQuery = getTabFromQuery(searchParams.get('tab'));
@@ -208,17 +256,7 @@ const PatientProfilePage = () => {
     if (!patientId) return;
     setIsUnregistering(true);
     try {
-      const res = await apiFetch(
-        `/appointments/unregister/patient/${patientId}`,
-        { method: "DELETE" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (!res.ok) {
-        const payload = await res.json().catch(() => null);
-        throw new Error(payload?.detail || "Failed to unregister patient");
-      }
+      await unregisterPatient.mutateAsync();
       toast({
         title: "Patient unregistered",
         description: "The patient is no longer assigned to your care.",
@@ -269,27 +307,9 @@ const PatientProfilePage = () => {
 
     setIsSavingNotes(true);
     try {
-      const response = await apiFetch(
-        `/api/patients/${patientId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clinical_notes: editedNotes }),
-        },
-        tokens,
-        setTokens,
-        logout,
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to save clinical notes');
-      }
-
-      const updatedPatient = await response.json();
-      setPatient(updatedPatient);
-
+      const updatedPatient = await updateNotes.mutateAsync(editedNotes);
+      queryClient.setQueryData(key(profileKey), updatedPatient);
       setIsEditingNotes(false);
-      fetchPatientData();
       toast({
         title: "Notes saved",
         description: "The global doctor notepad has been updated.",
@@ -304,65 +324,6 @@ const PatientProfilePage = () => {
       setIsSavingNotes(false);
     }
   };
-
-  const fetchPatientData = useCallback(async () => {
-    try {
-      setLoading(true);
-      // Fetch patient data (merged schema - single endpoint)
-      const profileResponse = await apiFetch(
-        `/api/patients/${patientId}`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (profileResponse.status === 404) {
-        setPatient(null);
-        setError("not_found");
-        return;
-      }
-      if (!profileResponse.ok) {
-        throw new Error('Failed to fetch patient profile');
-      }
-      const profileData = await profileResponse.json();
-      setPatient(profileData);
-      setMedicalData(profileData);  // Medical data is in the same object now
-
-      setIsLoadingVisits(true);
-      setVisitsError(null);
-      try {
-        const visitsResponse = await apiFetch(
-          `/api/dashboard/patient/${patientId}/visits`,
-          { method: "GET" },
-          tokens,
-          setTokens,
-          logout,
-        );
-        if (!visitsResponse.ok) {
-          throw new Error("Visit history could not be loaded.");
-        }
-        const visitsData: VisitStatsResponse = await visitsResponse.json();
-        setVisitStats(visitsData);
-        setVisits(visitsData.recent_visits || []);
-      } catch (visitError) {
-        setVisitStats({ total_visits: 0, recent_visits: [] });
-        setVisits([]);
-        setVisitsError(visitError instanceof Error ? visitError.message : "Visit history could not be loaded.");
-      } finally {
-        setIsLoadingVisits(false);
-      }
-
-      setError(null);
-    } catch (err) {
-      setError('error');
-    } finally {
-      setLoading(false);
-    }
-  }, [patientId, tokens, setTokens, logout]);
-
-  useEffect(() => {
-    fetchPatientData();
-  }, [fetchPatientData]);
 
   const selectTab = (tab: TabType) => {
     setActiveTab(tab);
@@ -380,24 +341,18 @@ const PatientProfilePage = () => {
     const imageId = ultrasoundToDelete;
     setIsDeletingUltrasound(true);
     try {
-      const res = await apiFetch(
-        `/api/ultrasound/${imageId}`,
-        { method: "DELETE" },
-        tokens,
-        setTokens,
-        logout,
+      queryClient.setQueryData<VisitStatsResponse>(key(visitsKey), (previous) =>
+        previous
+          ? {
+              ...previous,
+              recent_visits: previous.recent_visits.map((visit) => ({
+                ...visit,
+                ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
+              })),
+            }
+          : previous,
       );
-      if (!res.ok) {
-        const errorPayload = await res.json();
-        throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
-      }
-
-      setVisits((prev) =>
-        prev.map((visit) => ({
-          ...visit,
-          ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
-        }))
-      );
+      await deleteUltrasound.mutateAsync(imageId);
       toast({
         title: "Ultrasound deleted",
         description: "The image has been removed from this visit.",
@@ -447,16 +402,7 @@ const PatientProfilePage = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatDate = (dateString: string) => formatPakistanDateTime(dateString);
 
   if (loading) {
     return (
@@ -559,8 +505,7 @@ const PatientProfilePage = () => {
   const latestGdmRisk = latestAvailable((visit) => visit.gdm_risk_level);
   const latestPreeclampsiaRisk = latestAvailable((visit) => visit.maternal_risk_level);
 
-  const formatMeasurementDate = (date?: string) =>
-    date ? new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No reading';
+  const formatMeasurementDate = (date?: string) => formatPakistanDate(date, 'No reading');
 
   const timelineVisits = visits.map((visit) => ({
     id: visit.id,
@@ -928,7 +873,7 @@ const PatientProfilePage = () => {
                   <p className={cn("text-3xl font-bold mb-2", riskConfig.textColor)}>{riskConfig.label}</p>
                   <p className="text-xs text-gray-500 font-semibold">
                     {patient.latest_assessment_at
-                      ? `Completed ${formatMeasurementDate(patient.latest_assessment_at)}`
+                      ? `Completed ${formatPakistanDateTime(patient.latest_assessment_at)}`
                       : 'No completed model assessment'}
                   </p>
                 </div>
@@ -951,7 +896,7 @@ const PatientProfilePage = () => {
                   <p className="text-4xl font-bold text-gray-900 mb-2">{visitStats.total_clinical_visits ?? visitHistoryVisits.length}</p>
                   <p className="text-xs text-gray-500 font-semibold">
                     {latestVisit
-                      ? `Last visit: ${new Date(latestVisit.visit_date).toLocaleDateString()}`
+                      ? `Last visit: ${formatMeasurementDate(latestVisit.visit_date)}`
                       : 'No visits yet'}
                   </p>
                 </div>
@@ -1299,7 +1244,7 @@ const PatientProfilePage = () => {
                         {labeledNotes.slice(0, 8).map((v) => (
                           <div key={v.id} className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs text-amber-700">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                              <p className="text-xs text-amber-700">{formatMeasurementDate(v.visit_date)}</p>
                               <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-100 text-amber-700">{v.noteLabel}</span>
                             </div>
                             <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{v.notes}</p>
@@ -1369,7 +1314,7 @@ const PatientProfilePage = () => {
                   <div className="bg-white/80 rounded-xl p-4 border border-violet-200">
                     <p className="text-xs uppercase tracking-wide font-semibold text-gray-500">Completed</p>
                     <p className="text-lg font-bold text-gray-900 mt-2">
-                      {patient.latest_assessment_at ? formatMeasurementDate(patient.latest_assessment_at) : 'Not assessed'}
+                      {patient.latest_assessment_at ? formatPakistanDateTime(patient.latest_assessment_at) : 'Not assessed'}
                     </p>
                     <p className="text-xs text-gray-500 mt-2">Assessment completion date</p>
                   </div>
@@ -1539,7 +1484,7 @@ const PatientProfilePage = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Unregister {patient.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the patient from your assigned list, clears doctor-owned notes, and cancels pending registration requests. Existing clinical visit data remains in the patient record.
+              This removes the patient from your assigned list, clears doctor-owned notes, cancels future appointments and pending registration requests, and preserves existing clinical and appointment history.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

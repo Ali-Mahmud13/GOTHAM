@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   User, Phone, Calendar, Heart, Activity, Clock, Stethoscope, BarChart3,
   AlertCircle, ChevronRight, Clipboard,
-  CalendarCheck, PlusCircle, ShieldAlert
+  CalendarCheck, PlusCircle, ShieldAlert, FileText
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PatientNavbar } from "@/components/PatientNavbar";
@@ -11,7 +11,9 @@ import type { VisitVitalsPoint } from "@/components/charts/VitalsChart";
 import { VisitTimeline } from "@/components/patient/VisitTimeline";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
-import { apiFetch } from "@/lib/apiClient";
+import { formatPakistanDate, formatPakistanDateTime } from "@/lib/dateTime";
+import { useApiMutation, useApiQuery, useSessionCache } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface PatientProfile {
   id: number;
@@ -52,6 +54,8 @@ interface Appointment {
   appointment_date: string;
   start_time: string;
   end_time: string;
+  start_at_utc: string;
+  end_at_utc: string;
   status: string;
   notes?: string;
 }
@@ -127,17 +131,11 @@ interface VisitStatsResponse {
 type TabType = 'overview' | 'medical' | 'notes' | 'visits' | 'vitals';
 
 export const PatientDashboard = () => {
-  const { isAuthenticated, user, logout, tokens, setTokens } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const [patient, setPatient] = useState<PatientProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [visitStats, setVisitStats] = useState<VisitStatsResponse>({ total_visits: 0, recent_visits: [] });
-  const [visits, setVisits] = useState<VisitRecord[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [pendingRegistrationDoctor, setPendingRegistrationDoctor] = useState<string | null>(null);
+  const { queryClient, key } = useSessionCache();
 
   // Get patient identifier from auth user
   const patientIdentifier = user?.patient_info?.patient_identifier;
@@ -147,112 +145,64 @@ export const PatientDashboard = () => {
       navigate('/patient/login');
       return;
     }
-    fetchPatientData();
   }, [isAuthenticated, user, patientIdentifier, navigate]);
-
-  const fetchUpcomingAppointments = async () => {
-    try {
-      const res = await apiFetch(
-        `/appointments/upcoming`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setAppointments(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch appointments:', err);
-    }
-  };
-
-  const fetchPatientData = async () => {
-    if (!patientIdentifier) return;
-
-    try {
-      // Fetch patient profile
-      const profileResponse = await apiFetch(
-        `/api/patient-portal/profile/${patientIdentifier}`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (!profileResponse.ok) {
-        throw new Error('Failed to fetch patient profile');
-      }
-      const profileData = await profileResponse.json();
-      setPatient(profileData);
-
-      if (!profileData.doctor_id) {
-        try {
-          const regRes = await apiFetch(
-            `/appointments/my-registration-requests`,
-            { method: "GET" },
-            tokens,
-            setTokens,
-            logout,
-          );
-          if (regRes.ok) {
-            const regData: RegistrationRequestResult[] = await regRes.json();
-            const pendingReq = regData.find((r) => r.status === 'pending');
-            setPendingRegistrationDoctor(pendingReq?.doctor_name || null);
-          } else {
-            setPendingRegistrationDoctor(null);
-          }
-        } catch {
-          setPendingRegistrationDoctor(null);
-        }
-      } else {
-        setPendingRegistrationDoctor(null);
-      }
-
-      // Fetch visit history with assessment metrics for trend charts and summaries
-      const visitsResponse = await apiFetch(
-        `/api/dashboard/patient/${patientIdentifier}/visits`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (visitsResponse.ok) {
-        const visitsData: VisitStatsResponse = await visitsResponse.json();
-        setVisits(visitsData.recent_visits || []);
-        setVisitStats(visitsData);
-      }
-
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching patient data:', err);
-      setError('Failed to load your profile. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-    fetchUpcomingAppointments();
-  };
+  const enabled = Boolean(isAuthenticated && patientIdentifier);
+  const profileQuery = useApiQuery<PatientProfile>(
+    queryKeys.patients.portalProfile,
+    `/api/patient-portal/profile/${patientIdentifier ?? ""}`,
+    { enabled },
+  );
+  const visitsKey = queryKeys.patients.visits(patientIdentifier ?? "self");
+  const visitsQuery = useApiQuery<VisitStatsResponse>(
+    visitsKey,
+    `/api/dashboard/patient/${patientIdentifier ?? ""}/visits`,
+    { enabled },
+  );
+  const appointmentsQuery = useApiQuery<Appointment[]>(
+    queryKeys.appointments.upcoming,
+    "/appointments/upcoming",
+    { enabled },
+  );
+  const registrationQuery = useApiQuery<RegistrationRequestResult[]>(
+    queryKeys.registration.patientRequests,
+    "/appointments/my-registration-requests",
+    { enabled },
+  );
+  const patient = profileQuery.data ?? null;
+  const visitStats = visitsQuery.data ?? { total_visits: 0, recent_visits: [] };
+  const visits = visitStats.recent_visits ?? [];
+  const appointments = appointmentsQuery.data ?? [];
+  const pendingRegistrationDoctor =
+    patient?.doctor_id
+      ? null
+      : registrationQuery.data?.find((request) => request.status === "pending")?.doctor_name ?? null;
+  const loading = profileQuery.isPending || visitsQuery.isPending;
+  const error = profileQuery.isError ? "Failed to load your profile. Please try again." : null;
+  const deleteUltrasound = useApiMutation<void, number>({
+    invalidate: [visitsKey],
+    mutationFn: (imageId, request) =>
+      request<void>(`/api/ultrasound/${imageId}`, { method: "DELETE" }),
+  });
+  const refetchPatientData = () => Promise.all([
+    profileQuery.refetch(),
+    visitsQuery.refetch(),
+    appointmentsQuery.refetch(),
+  ]);
 
   const handleDeleteUltrasound = async (imageId: number) => {
     try {
-      const res = await apiFetch(
-        `/api/ultrasound/${imageId}`,
-        { method: "DELETE" },
-        tokens,
-        setTokens,
-        logout,
+      queryClient.setQueryData<VisitStatsResponse>(key(visitsKey), (previous) =>
+        previous
+          ? {
+              ...previous,
+              recent_visits: previous.recent_visits.map((visit) => ({
+                ...visit,
+                ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
+              })),
+            }
+          : previous,
       );
-      if (!res.ok) {
-        const errorPayload = await res.json();
-        throw new Error(errorPayload.detail || 'Failed to delete ultrasound image');
-      }
-
-      setVisits((prev) =>
-        prev.map((visit) => ({
-          ...visit,
-          ultrasound_images: (visit.ultrasound_images || []).filter((img) => img.id !== imageId),
-        }))
-      );
+      await deleteUltrasound.mutateAsync(imageId);
     } catch (err) {
       console.error(err);
     }
@@ -292,14 +242,8 @@ export const PatientDashboard = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+  const formatDate = (dateString: string) => formatPakistanDateTime(dateString);
+  const formatMeasurementDate = (date?: string | null) => formatPakistanDate(date, 'No reading');
 
   const timelineVisits = visits.map((visit) => ({
     id: visit.id,
@@ -391,7 +335,7 @@ export const PatientDashboard = () => {
           <div className="text-center text-red-500">
             <p>{error || 'Failed to load your profile.'}</p>
             <button
-              onClick={fetchPatientData}
+              onClick={refetchPatientData}
               className="mt-4 px-6 py-2 bg-medical-blue text-white rounded-lg hover:bg-medical-blue/90"
             >
               Retry
@@ -607,7 +551,7 @@ export const PatientDashboard = () => {
                   <p className="text-4xl font-bold text-gray-900 mb-2">{visitStats.total_visits}</p>
                   <p className="text-xs text-gray-500 font-semibold">
                     {visitStats.recent_visits[0]
-                      ? `Last: ${new Date(visitStats.recent_visits[0].visit_date).toLocaleDateString()}`
+                      ? `Last: ${formatMeasurementDate(visitStats.recent_visits[0].visit_date)}`
                       : 'No visits yet'}
                   </p>
                 </div>
@@ -686,7 +630,7 @@ export const PatientDashboard = () => {
                           <p className="text-sm font-semibold text-gray-900">
                             {v.visit_type ? v.visit_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Clinical Visit'}
                           </p>
-                          <p className="text-xs text-gray-500">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          <p className="text-xs text-gray-500">{formatMeasurementDate(v.visit_date)}</p>
                           {v.notes && <p className="text-xs text-gray-400 mt-1 truncate">{v.notes}</p>}
                         </div>
                       </div>
@@ -769,8 +713,8 @@ export const PatientDashboard = () => {
                         <div>
                           <p className="text-sm font-semibold text-gray-900">Dr. {appt.doctor_name}</p>
                           <p className="text-xs text-gray-500">
-                            {new Date(appt.appointment_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                            {' · '}{appt.start_time} – {appt.end_time}
+                            {new Date(appt.start_at_utc).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            {' · '}{new Date(appt.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(appt.end_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
                       </div>
@@ -1060,7 +1004,7 @@ export const PatientDashboard = () => {
                   {labeledNotes.map((v) => (
                       <div key={v.id} className="rounded-xl border border-gray-200 p-4 bg-white">
                         <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs text-gray-500">{new Date(v.visit_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          <p className="text-xs text-gray-500">{formatMeasurementDate(v.visit_date)}</p>
                           <span className={cn(
                             'text-xs font-semibold px-2 py-1 rounded-full',
                             v.note_source === 'current_doctor' || v.note_source === 'doctor'

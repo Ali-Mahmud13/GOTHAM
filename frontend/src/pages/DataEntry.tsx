@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ChangeEvent } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent } from "react";
 import { ArrowLeft, Sparkles, Save, Users, CheckCircle2, AlertCircle, Search, X, Loader2, Activity } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import { MicButton } from "@/components/MicButton";
 import { insertAtCaret } from "@/lib/text";
 import type { TranscriptionLanguage } from "@/lib/transcribe";
 import { apiFetch, ApiError } from "@/lib/apiClient";
+import { useApiMutation, useApiQuery } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface Patient {
     id: string;
@@ -35,8 +37,6 @@ interface MissingField {
     category: string;
     db_field: string;
 }
-
-const API_BASE = "http://localhost:8000/api";
 
 interface FieldMetadata {
     unit?: string;
@@ -81,7 +81,6 @@ const DataEntry = () => {
     const returnTo = searchParams.get("returnTo") || "/dashboard";
     const requestedPatientId = searchParams.get("patientId") || "";
     const isPatientUser = user?.role === "patient";
-    const [patients, setPatients] = useState<Patient[]>([]);
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [showPatientSearch, setShowPatientSearch] = useState(false);
@@ -92,9 +91,18 @@ const DataEntry = () => {
     const [missingFields, setMissingFields] = useState<MissingField[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [isLoadingPatients, setIsLoadingPatients] = useState(true);
-    const [registeredDoctor, setRegisteredDoctor] = useState<{ id: number; full_name: string } | null | undefined>(undefined);
     const [ultrasoundFiles, setUltrasoundFiles] = useState<File[]>([]);
+    const patientsQuery = useApiQuery<Patient[]>(queryKeys.patients.all, "/api/patients");
+    const doctorQuery = useApiQuery<{ id: number; full_name: string } | null>(
+        queryKeys.appointments.myDoctor,
+        "/appointments/my-doctor",
+        { enabled: isPatientUser, retry: false },
+    );
+    const patients = useMemo(() => patientsQuery.data ?? [], [patientsQuery.data]);
+    const isLoadingPatients = patientsQuery.isPending;
+    const registeredDoctor = isPatientUser
+        ? doctorQuery.isPending ? undefined : doctorQuery.data ?? null
+        : undefined;
     const isRegisteredPatient = Boolean(isPatientUser && registeredDoctor);
     /** Live Web Speech preview under AI Extraction textarea (Chrome/Edge only). */
     const [interimNotes, setInterimNotes] = useState("");
@@ -253,68 +261,28 @@ const DataEntry = () => {
         });
     };
 
-    // Fetch patients on mount
     useEffect(() => {
-        const fetchPatients = async () => {
-            try {
-                const response = await apiFetch("/api/patients", {}, tokens, setTokens, logout);
-                if (response.ok) {
-                    const data = await response.json();
-                    setPatients(data);
-                    setFilteredPatients(data);
-                    if (isPatientUser && data.length === 1) {
-                        setSelectedPatient(data[0]);
-                        setShowPatientSearch(false);
-                    }
-                    if (requestedPatientId) {
-                        const requestedId = requestedPatientId.toLowerCase();
-                        const match = data.find((p: Patient) => p.id.toLowerCase() === requestedId);
-                        if (match) {
-                            setSelectedPatient(match);
-                            setShowPatientSearch(false);
-                        }
-                    }
-                } else {
-                    toast({
-                        title: "Error",
-                        description: "Failed to fetch patients",
-                        variant: "destructive",
-                    });
-                }
-            } catch (error) {
-                console.error("Error fetching patients:", error);
-                toast({
-                    title: "Error",
-                    description: "Failed to connect to server",
-                    variant: "destructive",
-                });
-            } finally {
-                setIsLoadingPatients(false);
+        if (patientsQuery.isError) {
+            toast({
+                title: "Error",
+                description: "Failed to fetch patients",
+                variant: "destructive",
+            });
+            return;
+        }
+        if (isPatientUser && patients.length === 1) {
+            setSelectedPatient(patients[0]);
+            setShowPatientSearch(false);
+        }
+        if (requestedPatientId) {
+            const requestedId = requestedPatientId.toLowerCase();
+            const match = patients.find((patient) => patient.id.toLowerCase() === requestedId);
+            if (match) {
+                setSelectedPatient(match);
+                setShowPatientSearch(false);
             }
-        };
-
-        fetchPatients();
-    }, [requestedPatientId, user?.email, isPatientUser, tokens, setTokens, logout, toast]);
-
-    useEffect(() => {
-        const loadRegisteredDoctor = async () => {
-            if (!isPatientUser || !user?.email) {
-                return;
-            }
-            try {
-                const res = await apiFetch("/appointments/my-doctor", {}, tokens, setTokens, logout);
-                if (res.ok) {
-                    setRegisteredDoctor(await res.json());
-                } else {
-                    setRegisteredDoctor(null);
-                }
-            } catch {
-                setRegisteredDoctor(null);
-            }
-        };
-
-        loadRegisteredDoctor();
-    }, [isPatientUser, user?.email, tokens, setTokens, logout]);
+        }
+    }, [isPatientUser, patients, patientsQuery.isError, requestedPatientId, toast]);
 
     // Filter patients based on search
     useEffect(() => {
@@ -429,6 +397,32 @@ const DataEntry = () => {
         const picked = Array.from(event.target.files || []);
         setUltrasoundFiles(picked);
     };
+    const visitKey = queryKeys.patients.visits(selectedPatient?.id ?? "none");
+    const createVisit = useApiMutation<{ success: boolean; visit_id?: number; message?: string }, Record<string, string | number | boolean>>({
+        invalidate: [
+            queryKeys.patients.all,
+            visitKey,
+            queryKeys.dashboard.stats,
+            queryKeys.dashboard.weeklyAssessments,
+        ],
+        mutationFn: (visitData, request) =>
+            request("/api/visits", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(visitData),
+            }),
+    });
+    const uploadUltrasounds = useApiMutation<{ uploaded?: unknown[] }, { visitId: number; files: File[] }>({
+        invalidate: [visitKey],
+        mutationFn: ({ visitId, files }, request) => {
+            const formData = new FormData();
+            files.forEach((file) => formData.append("files", file));
+            return request(`/api/visits/${visitId}/ultrasound`, {
+                method: "POST",
+                body: formData,
+            });
+        },
+    });
 
     // Save patient data as new visit
     const handleSave = async () => {
@@ -471,45 +465,21 @@ const DataEntry = () => {
                 }
             });
 
-            const response = await apiFetch(
-                "/api/visits",
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(visitData),
-                },
-                tokens,
-                setTokens,
-                logout,
-            );
+            const result = await createVisit.mutateAsync(visitData);
 
-            const result = await response.json();
-
-            if (response.ok && result.success) {
+            if (result.success) {
                 let uploadedCount = 0;
                 if (result.visit_id && ultrasoundFiles.length > 0) {
-                    const formData = new FormData();
-                    ultrasoundFiles.forEach((file) => formData.append("files", file));
-
-                    const uploadResponse = await apiFetch(
-                        `/api/visits/${result.visit_id}/ultrasound`,
-                        {
-                            method: "POST",
-                            body: formData,
-                        },
-                        tokens,
-                        setTokens,
-                        logout,
-                    );
-
-                    if (uploadResponse.ok) {
-                        const uploadResult = await uploadResponse.json();
+                    try {
+                        const uploadResult = await uploadUltrasounds.mutateAsync({
+                            visitId: result.visit_id,
+                            files: ultrasoundFiles,
+                        });
                         uploadedCount = uploadResult.uploaded?.length || 0;
-                    } else {
-                        const uploadError = await uploadResponse.json();
+                    } catch (uploadError) {
                         toast({
                             title: "Visit saved, image upload failed",
-                            description: uploadError.detail || "Failed to upload ultrasound image(s)",
+                            description: uploadError instanceof Error ? uploadError.message : "Failed to upload ultrasound image(s)",
                             variant: "destructive",
                         });
                     }

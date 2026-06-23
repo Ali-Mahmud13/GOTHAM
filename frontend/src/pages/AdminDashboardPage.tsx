@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Navbar } from '@/components/Navbar';
-import { apiFetch } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 import { Loader2, CheckCircle, XCircle, ShieldCheck, User, Mail, Hash, Building2, Stethoscope, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -18,50 +19,36 @@ interface PendingDoctor {
 }
 
 export const AdminDashboardPage = () => {
-  const { tokens, setTokens, logout, isAdmin } = useAuth();
-  const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { isAdmin } = useAuth();
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const { toast } = useToast();
-
-  const fetchPendingDoctors = async () => {
-    try {
-      const res = await apiFetch('/auth/doctors/pending', { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) {
-        const data = await res.json();
-        setDoctors(data);
-      }
-    } catch (err) {
-      console.error('Error fetching pending doctors:', err);
-      toast({ title: 'Error', description: 'Failed to load pending applications', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAdmin) {
-      fetchPendingDoctors();
-    }
-  }, [isAdmin]);
+  const doctorsQuery = useApiQuery<PendingDoctor[]>(
+    queryKeys.auth.pendingDoctors,
+    "/auth/doctors/pending",
+    { enabled: isAdmin },
+  );
+  const doctors = doctorsQuery.data ?? [];
+  const reviewDoctor = useApiMutation<void, { id: number; action: "approve" | "reject" }>({
+    invalidate: [queryKeys.auth.pendingDoctors, queryKeys.appointments.doctors],
+    mutationFn: ({ id, action }, request) =>
+      request<void>(`/auth/doctors/${id}/${action}`, { method: "PUT" }),
+  });
 
   const handleAction = async (id: number, action: 'approve' | 'reject') => {
     setActionLoading(id);
     try {
-      const res = await apiFetch(`/auth/doctors/${id}/${action}`, { method: 'PUT' }, tokens, setTokens, logout);
-      if (res.ok) {
-        toast({
-          title: 'Success',
-          description: `Doctor application ${action}d successfully.`,
-        });
-        setDoctors((prev) => prev.filter((d) => d.id !== id));
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast({ title: 'Error', description: err.detail || `Failed to ${action} doctor`, variant: 'destructive' });
-      }
+      await reviewDoctor.mutateAsync({ id, action });
+      toast({
+        title: 'Success',
+        description: `Doctor application ${action}d successfully.`,
+      });
     } catch (err) {
       console.error(err);
-      toast({ title: 'Network Error', description: `Could not ${action} application`, variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : `Could not ${action} application`,
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -92,7 +79,7 @@ export const AdminDashboardPage = () => {
           <p className="text-gray-500 text-sm mt-1">Review and approve new provider applications.</p>
         </div>
 
-        {loading ? (
+        {doctorsQuery.isPending ? (
           <div className="flex justify-center items-center h-64">
             <Loader2 className="h-8 w-8 animate-spin text-medical-blue" />
           </div>

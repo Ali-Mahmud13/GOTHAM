@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Navbar } from '@/components/Navbar';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 
 interface Appointment {
   id: number;
@@ -17,6 +18,9 @@ interface Appointment {
   start_time: string;
   end_time: string;
   timezone: string;
+  schedule_timezone: string;
+  start_at_utc: string;
+  end_at_utc: string;
   status: string;
   notes: string | null;
   created_at: string;
@@ -27,6 +31,9 @@ interface TimeSlot {
   start_time: string;
   end_time: string;
   available: boolean;
+  schedule_timezone: string;
+  start_at_utc: string;
+  end_at_utc: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -35,6 +42,8 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'bg-red-100 text-red-800',
   rescheduled: 'bg-yellow-100 text-yellow-800',
   pending_approval: 'bg-amber-100 text-amber-800',
+  awaiting_outcome: 'bg-amber-100 text-amber-800',
+  no_show: 'bg-slate-100 text-slate-700',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -43,54 +52,52 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
   rescheduled: 'Rescheduled',
   pending_approval: 'Pending Approval',
+  awaiting_outcome: 'Awaiting Outcome',
+  no_show: 'No-show',
 };
 
 const formatDate = (d: string) =>
   new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 
-function tomorrowISO(): string {
+function todayLocalISO(): string {
   const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
-}
-
-function todayISO(): string {
-  return new Date().toISOString().split('T')[0];
+  const offset = d.getTimezoneOffset() * 60_000;
+  return new Date(d.getTime() - offset).toISOString().split('T')[0];
 }
 
 function isFuture(appt: Appointment): boolean {
-  const today = todayISO();
-  const now = new Date().toTimeString().slice(0, 5);
-  if (appt.appointment_date > today) return true;
-  if (appt.appointment_date === today && appt.start_time >= now) return true;
-  return false;
+  return new Date(appt.start_at_utc).getTime() > Date.now();
 }
 
 function getStatusDisplay(appt: Appointment): { label: string; color: string } {
-  if (!isFuture(appt)) {
-    if (appt.status === 'booked') return { label: 'Completed', color: 'bg-green-100 text-green-800' };
-    if (appt.status === 'pending_approval') return { label: 'Expired', color: 'bg-gray-100 text-gray-600' };
-  }
   return {
     label: STATUS_LABELS[appt.status] ?? appt.status,
     color: STATUS_COLORS[appt.status] ?? 'bg-muted text-muted-foreground',
   };
 }
 
+const formatAppointmentDate = (appt: Appointment) =>
+  new Date(appt.start_at_utc).toLocaleDateString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+
+const formatAppointmentTime = (appt: Appointment) =>
+  `${new Date(appt.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(appt.end_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
 export const AppointmentsPage = () => {
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const isDoctor = user?.role === 'doctor';
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [filter, setFilter] = useState<'upcoming' | 'all'>('upcoming');
 
   // Patient-only: registered doctor + unregister
-  const [registeredDoctor, setRegisteredDoctor] = useState<{ id: number; full_name: string } | null | undefined>(undefined);
   const [showUnregisterConfirm, setShowUnregisterConfirm] = useState(false);
   const [unregistering, setUnregistering] = useState(false);
 
@@ -100,46 +107,81 @@ export const AppointmentsPage = () => {
   // Reschedule flow
   const [rescheduleFor, setRescheduleFor] = useState<Appointment | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleSlots, setRescheduleSlots] = useState<TimeSlot[]>([]);
   const [rescheduleSelectedSlot, setRescheduleSelectedSlot] = useState<TimeSlot | null>(null);
-  const [rescheduleLoading, setRescheduleLoading] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
       navigate(isDoctor ? '/doctor/login' : '/patient/login');
-      return;
     }
-    fetchAppointments();
-    if (!isDoctor) loadRegisteredDoctor();
-  }, [isAuthenticated, filter]);
-
-  const loadRegisteredDoctor = async () => {
-    try {
-      const res = await apiFetch(`/appointments/my-doctor`, { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) setRegisteredDoctor(await res.json());
-      else setRegisteredDoctor(null);
-    } catch { setRegisteredDoctor(null); }
-  };
+  }, [isAuthenticated, isDoctor, navigate]);
+  const appointmentsKey = filter === "upcoming"
+    ? queryKeys.appointments.upcoming
+    : queryKeys.appointments.list("all");
+  const appointmentsQuery = useApiQuery<Appointment[]>(
+    appointmentsKey,
+    filter === "upcoming" ? "/appointments/upcoming" : "/appointments/my",
+    { enabled: isAuthenticated, keepPrevious: true },
+  );
+  const registeredDoctorQuery = useApiQuery<{ id: number; full_name: string } | null>(
+    queryKeys.appointments.myDoctor,
+    "/appointments/my-doctor",
+    { enabled: isAuthenticated && !isDoctor, retry: false },
+  );
+  const slotsKey = queryKeys.appointments.slots(
+    rescheduleFor?.doctor_id ?? "none",
+    rescheduleDate,
+    rescheduleFor?.id,
+  );
+  const rescheduleSlotsQuery = useApiQuery<TimeSlot[]>(
+    slotsKey,
+    `/appointments/doctors/${rescheduleFor?.doctor_id ?? ""}/slots?date=${rescheduleDate}`,
+    { enabled: Boolean(rescheduleFor && rescheduleDate), staleTime: 30_000 },
+  );
+  const appointments = appointmentsQuery.data ?? [];
+  const registeredDoctor = registeredDoctorQuery.isPending
+    ? undefined
+    : registeredDoctorQuery.data ?? null;
+  const rescheduleSlots = rescheduleSlotsQuery.data ?? [];
+  const loading = appointmentsQuery.isPending;
+  const appointmentMutation = useApiMutation<void, {
+    path: string;
+    method: "PUT" | "DELETE";
+    body?: unknown;
+  }>({
+    invalidate: [
+      queryKeys.appointments.all,
+      queryKeys.notifications.all,
+      queryKeys.dashboard.stats,
+    ],
+    mutationFn: ({ path, method, body }, request) =>
+      request<void>(path, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+  });
 
   const handleUnregister = async () => {
     setUnregistering(true);
     try {
-      const res = await apiFetch(`/appointments/unregister`, { method: 'DELETE' }, tokens, setTokens, logout);
-      if (res.ok) { setRegisteredDoctor(null); setShowUnregisterConfirm(false); }
-    } catch { } finally { setUnregistering(false); }
+      await appointmentMutation.mutateAsync({ path: "/appointments/unregister", method: "DELETE" });
+      setShowUnregisterConfirm(false);
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not unregister from doctor.",
+      });
+    } finally {
+      setUnregistering(false);
+    }
   };
 
   const fetchAppointments = async () => {
-    setLoading(true);
     setMessage(null);
     try {
-      const endpoint = filter === 'upcoming' ? '/appointments/upcoming' : '/appointments/my';
-      const res = await apiFetch(endpoint, { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) setAppointments(await res.json());
+      await appointmentsQuery.refetch();
     } catch {
       setMessage({ type: 'error', text: 'Failed to load appointments.' });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -149,46 +191,23 @@ export const AppointmentsPage = () => {
     setActionLoading(id);
     setMessage(null);
     try {
-      const res = await apiFetch(`/appointments/${id}/cancel`, { method: 'PUT' }, tokens, setTokens, logout);
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Appointment cancelled.' });
-        setCancelTarget(null);
-        fetchAppointments();
-      } else {
-        const err = await res.json();
-        setMessage({ type: 'error', text: err.detail || 'Could not cancel appointment.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error.' });
+      await appointmentMutation.mutateAsync({ path: `/appointments/${id}/cancel`, method: "PUT" });
+      setMessage({ type: 'success', text: 'Appointment cancelled.' });
+      setCancelTarget(null);
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error.' });
     } finally { setActionLoading(null); }
   };
 
   const openReschedule = (appt: Appointment) => {
     setRescheduleFor(appt);
     setRescheduleDate('');
-    setRescheduleSlots([]);
     setRescheduleSelectedSlot(null);
-  };
-
-  const fetchRescheduleSlots = async (dateStr: string, doctorId: number) => {
-    setRescheduleSelectedSlot(null);
-    setRescheduleLoading(true);
-    try {
-      const res = await apiFetch(
-        `/appointments/doctors/${doctorId}/slots?date=${dateStr}`,
-        { method: 'GET' },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) setRescheduleSlots(await res.json());
-      else setRescheduleSlots([]);
-    } catch { setRescheduleSlots([]); } finally { setRescheduleLoading(false); }
   };
 
   const handleRescheduleDateChange = (dateStr: string) => {
     setRescheduleDate(dateStr);
-    if (dateStr && rescheduleFor) fetchRescheduleSlots(dateStr, rescheduleFor.doctor_id);
+    setRescheduleSelectedSlot(null);
   };
 
   const submitReschedule = async () => {
@@ -196,34 +215,37 @@ export const AppointmentsPage = () => {
     setActionLoading(rescheduleFor.id);
     setMessage(null);
     try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await apiFetch(
-        `/appointments/${rescheduleFor.id}/reschedule`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            appointment_date: rescheduleDate,
-            start_time: rescheduleSelectedSlot.start_time,
-            end_time: rescheduleSelectedSlot.end_time,
-            timezone: tz,
-          }),
+      await appointmentMutation.mutateAsync({
+        path: `/appointments/${rescheduleFor.id}/reschedule`,
+        method: "PUT",
+        body: {
+          appointment_date: rescheduleDate,
+          start_time: rescheduleSelectedSlot.start_time,
+          end_time: rescheduleSelectedSlot.end_time,
         },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Appointment rescheduled successfully.' });
-        setRescheduleFor(null);
-        fetchAppointments();
-      } else {
-        const err = await res.json();
-        setMessage({ type: 'error', text: err.detail || 'Could not reschedule appointment.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error.' });
+      });
+      setMessage({ type: 'success', text: 'Appointment rescheduled successfully.' });
+      setRescheduleFor(null);
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error.' });
     } finally { setActionLoading(null); }
+  };
+
+  const recordOutcome = async (appointment: Appointment, outcome: 'completed' | 'no_show') => {
+    setActionLoading(appointment.id);
+    setMessage(null);
+    try {
+      await appointmentMutation.mutateAsync({
+        path: `/appointments/${appointment.id}/outcome`,
+        method: "PUT",
+        body: { outcome },
+      });
+      setMessage({ type: 'success', text: outcome === 'completed' ? 'Appointment marked completed.' : 'Appointment marked as no-show.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error.' });
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   // Split appointments into future / past for the "All" view
@@ -252,11 +274,11 @@ export const AppointmentsPage = () => {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3 flex-shrink-0" />
-                  {formatDate(appt.appointment_date)}
+                  {formatAppointmentDate(appt)}
                 </span>
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Clock className="h-3 w-3 flex-shrink-0" />
-                  {appt.start_time} – {appt.end_time}
+                  {formatAppointmentTime(appt)}
                 </span>
               </div>
               {appt.notes && (
@@ -290,6 +312,28 @@ export const AppointmentsPage = () => {
           >
             {actionLoading === appt.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
             Cancel
+          </Button>
+        </div>
+      )}
+
+      {isDoctor && appt.status === 'awaiting_outcome' && (
+        <div className="flex flex-col sm:flex-row gap-2 px-5 pb-4">
+          <Button
+            size="sm"
+            disabled={actionLoading === appt.id}
+            onClick={() => recordOutcome(appt, 'completed')}
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            <CheckCircle className="h-3.5 w-3.5 mr-1" /> Mark Completed
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={actionLoading === appt.id}
+            onClick={() => recordOutcome(appt, 'no_show')}
+            className="w-full sm:w-auto"
+          >
+            Mark No-show
           </Button>
         </div>
       )}
@@ -436,7 +480,7 @@ export const AppointmentsPage = () => {
             <div className="bg-card rounded-2xl shadow-xl border border-border/50 max-w-md w-full p-6">
               <h3 className="text-lg font-bold text-foreground mb-2">Unregister from Dr. {registeredDoctor.full_name}?</h3>
               <p className="text-sm text-muted-foreground mb-6">
-                Dr. {registeredDoctor.full_name} will no longer have access to your shared medical records.
+                Dr. {registeredDoctor.full_name} will no longer have access to your shared medical records. Future appointments with this doctor will be cancelled, while your appointment history and login remain available.
               </p>
               <div className="flex flex-col gap-3">
                 <Button onClick={handleUnregister} disabled={unregistering} className="w-full bg-destructive hover:bg-destructive/90 text-destructive-foreground">
@@ -461,7 +505,7 @@ export const AppointmentsPage = () => {
                   : <>Cancel your appointment with <strong>Dr. {cancelTarget.doctor_name}</strong>?</>}
               </p>
               <p className="text-xs text-muted-foreground mb-6">
-                {formatDate(cancelTarget.appointment_date)} at {cancelTarget.start_time}
+                {formatAppointmentDate(cancelTarget)} at {formatAppointmentTime(cancelTarget)}
               </p>
               <div className="flex flex-col gap-3">
                 <Button
@@ -486,7 +530,7 @@ export const AppointmentsPage = () => {
               <div className="p-6 border-b border-border/50">
                 <h3 className="text-lg font-bold text-foreground">Reschedule Appointment</h3>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  Current: <strong>{formatDate(rescheduleFor.appointment_date)}</strong> at <strong>{rescheduleFor.start_time}</strong>
+                  Current: <strong>{formatAppointmentDate(rescheduleFor)}</strong> at <strong>{formatAppointmentTime(rescheduleFor)}</strong>
                 </p>
               </div>
 
@@ -497,7 +541,7 @@ export const AppointmentsPage = () => {
                   <input
                     type="date"
                     value={rescheduleDate}
-                    min={tomorrowISO()}
+                    min={todayLocalISO()}
                     onChange={e => handleRescheduleDateChange(e.target.value)}
                     className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-medical-blue/50"
                   />
@@ -511,7 +555,7 @@ export const AppointmentsPage = () => {
                       <span className="ml-1.5 text-xs font-normal text-muted-foreground">— {localTz}</span>
                     </label>
 
-                    {rescheduleLoading ? (
+                    {rescheduleSlotsQuery.isPending ? (
                       <div className="flex items-center justify-center py-6">
                         <Loader2 className="h-5 w-5 animate-spin text-medical-blue" />
                       </div>
@@ -520,7 +564,7 @@ export const AppointmentsPage = () => {
                         <Clock className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
                         <p className="text-sm text-muted-foreground">No available slots on this date.</p>
                         <button
-                          onClick={() => { setRescheduleDate(''); setRescheduleSlots([]); }}
+                          onClick={() => setRescheduleDate('')}
                           className="inline-flex items-center gap-1 text-xs text-medical-blue hover:underline mt-2"
                         >
                           <ArrowLeft className="h-3 w-3" /> Pick another date
@@ -538,7 +582,9 @@ export const AppointmentsPage = () => {
                                 : 'border-border/60 hover:border-medical-blue/50 hover:bg-blue-500/5 text-foreground'
                             }`}
                           >
-                            <span className="block">{slot.start_time}</span>
+                            <span className="block">
+                              {new Date(slot.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                             <span className="block text-[10px] opacity-70 mt-0.5">
                               {(() => {
                                 const [sh, sm] = slot.start_time.split(':').map(Number);
@@ -555,7 +601,7 @@ export const AppointmentsPage = () => {
                       <div className="mt-3 p-3 bg-blue-500/10 border border-medical-blue/20 rounded-xl">
                         <p className="text-xs font-semibold text-foreground">Selected slot</p>
                         <p className="text-sm font-bold text-medical-blue mt-0.5">
-                          {rescheduleSelectedSlot.start_time} – {rescheduleSelectedSlot.end_time}
+                          {new Date(rescheduleSelectedSlot.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(rescheduleSelectedSlot.end_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </p>
                         <p className="text-xs text-muted-foreground">{formatDate(rescheduleDate)}</p>
                       </div>

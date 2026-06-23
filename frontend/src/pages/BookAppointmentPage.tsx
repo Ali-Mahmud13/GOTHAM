@@ -4,7 +4,8 @@ import { Loader2, Calendar, Clock, ChevronRight, AlertCircle, CheckCircle, Arrow
 import { Button } from '@/components/ui/button';
 import { PatientNavbar } from '@/components/PatientNavbar';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch } from '@/lib/apiClient';
+import { useApiMutation, useApiQuery } from '@/hooks/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -29,6 +30,9 @@ interface TimeSlot {
   start_time: string;
   end_time: string;
   available: boolean;
+  schedule_timezone: string;
+  start_at_utc: string;
+  end_at_utc: string;
 }
 
 interface ScheduleException {
@@ -47,92 +51,88 @@ interface ScheduleException {
 type Step = 'select-date' | 'select-time' | 'confirm';
 
 export const BookAppointmentPage = () => {
-  const { user, isAuthenticated, tokens, setTokens, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const [step, setStep] = useState<Step>('select-date');
-  const [registeredDoctor, setRegisteredDoctor] = useState<Doctor | null | undefined>(undefined);
-  const [availability, setAvailability] = useState<AvailabilitySlot[]>([]);
   const [selectedDate, setSelectedDate] = useState('');
-  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [slotsLoading, setSlotsLoading] = useState(false);
   const [booking, setBooking] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [scheduleExceptions, setScheduleExceptions] = useState<ScheduleException[]>([]);
-  const [minLeadHours, setMinLeadHours] = useState(2);
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== 'patient') {
       navigate('/patient/login');
-      return;
     }
-    loadRegisteredDoctor();
-    loadBookingConfig();
-  }, [isAuthenticated, user]);
-
-  // Once we know the registered doctor, load their availability
-  useEffect(() => {
-    if (registeredDoctor) loadDoctorData(registeredDoctor.id);
-  }, [registeredDoctor?.id]);
-
-  const loadBookingConfig = async () => {
-    try {
-      const res = await apiFetch(`/appointments/booking-config`, { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) {
-        const cfg = await res.json();
-        setMinLeadHours(cfg.min_booking_lead_hours ?? 2);
-      }
-    } catch { }
-  };
-
-  const loadRegisteredDoctor = async () => {
-    setLoading(true);
-    try {
-      const res = await apiFetch(`/appointments/my-doctor`, { method: 'GET' }, tokens, setTokens, logout);
-      if (res.ok) {
-        const data = await res.json();
-        setRegisteredDoctor(data); // null if no registered doctor
-      } else {
-        setRegisteredDoctor(null);
-      }
-    } catch {
-      setRegisteredDoctor(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadDoctorData = async (doctorId: number) => {
-    // Load availability
-    try {
-      const res = await apiFetch(
-        `/appointments/doctors/${doctorId}/availability`,
-        { method: 'GET' },
-        tokens, setTokens, logout,
-      );
-      if (res.ok) setAvailability(await res.json());
-    } catch { setAvailability([]); }
-
-    // Load exceptions for the next 14 days
-    try {
-      const from = new Date();
-      from.setDate(from.getDate() + 1);
-      const fromStr = from.toISOString().split('T')[0];
-      const to = new Date();
-      to.setDate(to.getDate() + 14);
-      const toStr = to.toISOString().split('T')[0];
-      const exRes = await apiFetch(
-        `/appointments/doctors/${doctorId}/exceptions?date_from=${encodeURIComponent(fromStr)}&date_to=${encodeURIComponent(toStr)}`,
-        { method: 'GET' },
-        tokens, setTokens, logout,
-      );
-      if (exRes.ok) setScheduleExceptions(await exRes.json());
-    } catch { setScheduleExceptions([]); }
-  };
+  }, [isAuthenticated, navigate, user]);
+  const enabled = isAuthenticated && user?.role === "patient";
+  const doctorQuery = useApiQuery<Doctor | null>(
+    queryKeys.appointments.myDoctor,
+    "/appointments/my-doctor",
+    { enabled, retry: false },
+  );
+  const configQuery = useApiQuery<{
+    min_booking_lead_hours?: number;
+    booking_horizon_days?: number;
+  }>(
+    queryKeys.appointments.bookingConfig,
+    "/appointments/booking-config",
+    { enabled, staleTime: 30 * 60_000 },
+  );
+  const registeredDoctor = doctorQuery.isPending ? undefined : doctorQuery.data ?? null;
+  const doctorId = registeredDoctor?.id ?? "none";
+  const from = new Date();
+  from.setDate(from.getDate() + 1);
+  const fromStr = from.toISOString().split("T")[0];
+  const to = new Date();
+  to.setDate(to.getDate() + 14);
+  const toStr = to.toISOString().split("T")[0];
+  const availabilityQuery = useApiQuery<AvailabilitySlot[]>(
+    queryKeys.appointments.availability(doctorId),
+    `/appointments/doctors/${doctorId}/availability`,
+    { enabled: Boolean(registeredDoctor), staleTime: 5 * 60_000 },
+  );
+  const exceptionsQuery = useApiQuery<ScheduleException[]>(
+    queryKeys.appointments.exceptions(doctorId),
+    `/appointments/doctors/${doctorId}/exceptions?date_from=${encodeURIComponent(fromStr)}&date_to=${encodeURIComponent(toStr)}`,
+    { enabled: Boolean(registeredDoctor), staleTime: 5 * 60_000 },
+  );
+  const slotsQuery = useApiQuery<TimeSlot[]>(
+    queryKeys.appointments.slots(doctorId, selectedDate),
+    `/appointments/doctors/${doctorId}/slots?date=${selectedDate}`,
+    { enabled: Boolean(registeredDoctor && selectedDate), staleTime: 30_000 },
+  );
+  const availability = availabilityQuery.data ?? [];
+  const scheduleExceptions = useMemo(
+    () => exceptionsQuery.data ?? [],
+    [exceptionsQuery.data],
+  );
+  const timeSlots = slotsQuery.data ?? [];
+  const loading = doctorQuery.isPending;
+  const slotsLoading = slotsQuery.isPending;
+  const minLeadHours = configQuery.data?.min_booking_lead_hours ?? 2;
+  const bookingHorizonDays = configQuery.data?.booking_horizon_days ?? 14;
+  const bookAppointment = useApiMutation<void, {
+    doctor_id: number;
+    appointment_date: string;
+    start_time: string;
+    end_time: string;
+    notes: string | null;
+  }>({
+    invalidate: [
+      queryKeys.appointments.all,
+      queryKeys.notifications.newBookings,
+      queryKeys.dashboard.stats,
+    ],
+    mutationFn: (body, request) =>
+      request<void>("/appointments/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+  });
 
   const availableDays = new Set(availability.map(s => s.day_of_week));
 
@@ -145,12 +145,6 @@ export const BookAppointmentPage = () => {
     [scheduleExceptions],
   );
 
-  const minDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
-  })();
-
   const isDateAvailable = (dateStr: string): boolean => {
     if (blockedDateSet.has(dateStr)) return false;
     if (customDateSet.has(dateStr)) return true;
@@ -159,21 +153,11 @@ export const BookAppointmentPage = () => {
     return availableDays.has(mondayBased);
   };
 
-  const selectDate = async (dateStr: string) => {
+  const selectDate = (dateStr: string) => {
     if (!isDateAvailable(dateStr) || !registeredDoctor) return;
     setSelectedDate(dateStr);
     setSelectedSlot(null);
     setMessage(null);
-    setSlotsLoading(true);
-    try {
-      const res = await apiFetch(
-        `/appointments/doctors/${registeredDoctor.id}/slots?date=${dateStr}`,
-        { method: 'GET' },
-        tokens, setTokens, logout,
-      );
-      const data: TimeSlot[] = await res.json();
-      setTimeSlots(data);
-    } catch { setTimeSlots([]); } finally { setSlotsLoading(false); }
     setStep('select-time');
   };
 
@@ -182,33 +166,17 @@ export const BookAppointmentPage = () => {
     setBooking(true);
     setMessage(null);
     try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await apiFetch(
-        `/appointments/book`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            doctor_id: registeredDoctor.id,
-            appointment_date: selectedDate,
-            start_time: selectedSlot.start_time,
-            end_time: selectedSlot.end_time,
-            timezone: tz,
-            notes: notes || null,
-            request_registration: false,
-          }),
-        },
-        tokens, setTokens, logout,
-      );
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: `Appointment booked for ${formatDate(selectedDate)} at ${selectedSlot.start_time}!` });
-        setStep('confirm');
-      } else {
-        setMessage({ type: 'error', text: data.detail || 'Booking failed. Please try again.' });
-      }
-    } catch {
-      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+      await bookAppointment.mutateAsync({
+        doctor_id: registeredDoctor.id,
+        appointment_date: selectedDate,
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
+        notes: notes || null,
+      });
+      setMessage({ type: 'success', text: `Appointment booked for ${formatDate(selectedDate)} at ${selectedSlot.start_time}!` });
+      setStep('confirm');
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Network error. Please try again.' });
     } finally { setBooking(false); }
   };
 
@@ -220,17 +188,14 @@ export const BookAppointmentPage = () => {
     return (eh * 60 + em) - (sh * 60 + sm);
   };
 
-  const isSlotTooSoon = (dateStr: string, startTime: string): boolean => {
-    try {
-      const [h, m] = startTime.split(':').map(Number);
-      const slotDate = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
-      const threshold = new Date(Date.now() + minLeadHours * 60 * 60 * 1000);
-      return slotDate < threshold;
-    } catch { return false; }
-  };
+  const isSlotTooSoon = (slot: TimeSlot): boolean =>
+    new Date(slot.start_at_utc).getTime() < Date.now() + minLeadHours * 60 * 60 * 1000;
+
+  const localSlotTime = (slot: TimeSlot): string =>
+    `${new Date(slot.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(slot.end_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
   const dateOptions: string[] = [];
-  for (let i = 1; i <= 14; i++) {
+  for (let i = 0; i <= bookingHorizonDays; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
     dateOptions.push(d.toISOString().split('T')[0]);
@@ -313,7 +278,7 @@ export const BookAppointmentPage = () => {
               Select a Date
             </h2>
             <p className="text-sm text-muted-foreground mb-4">
-              Available days are highlighted. Custom one-off hours show a &quot;Mod&quot; tag.
+              Available days are highlighted. One-off replacement hours show a &quot;Custom&quot; tag.
             </p>
             {availability.length === 0 && scheduleExceptions.filter(e => e.kind === 'custom').length === 0 ? (
               <div className="text-center py-8">
@@ -338,7 +303,7 @@ export const BookAppointmentPage = () => {
                       className={`p-3 rounded-xl border text-center transition-all relative ${avail ? 'border-medical-blue/30 bg-blue-50/50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20 cursor-pointer' : 'border-border/50 bg-muted/30 opacity-40 cursor-not-allowed'} ${selectedDate === d ? 'bg-gradient-to-br from-medical-pink to-medical-blue text-white border-transparent' : ''}`}
                     >
                       {isCustomDay && avail && (
-                        <span className="absolute top-1 right-1 text-[9px] font-bold uppercase bg-amber-400 text-amber-950 px-1 rounded">Mod</span>
+                        <span className="absolute top-1 right-1 text-[9px] font-bold uppercase bg-amber-400 text-amber-950 px-1 rounded">Custom</span>
                       )}
                       <p className="text-xs font-medium">{dayLabel}</p>
                       <p className="text-lg font-bold leading-none my-1">{dayNum}</p>
@@ -387,7 +352,7 @@ export const BookAppointmentPage = () => {
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
                   {timeSlots.map((slot, i) => {
-                    const tooSoon = slot.available && isSlotTooSoon(selectedDate, slot.start_time);
+                    const tooSoon = slot.available && isSlotTooSoon(slot);
                     const disabled = !slot.available || tooSoon;
                     return (
                       <button
@@ -402,7 +367,9 @@ export const BookAppointmentPage = () => {
                             : 'border-border/60 hover:border-medical-blue hover:bg-blue-50/50 dark:hover:bg-blue-900/10 cursor-pointer'
                         }`}
                       >
-                        <span className="block">{slot.start_time}</span>
+                        <span className="block">
+                          {new Date(slot.start_at_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
                         <span className="block text-[10px] font-normal mt-0.5 opacity-70">{slotDurationMins(slot)} min</span>
                         {!slot.available && <span className="block text-[10px] font-normal text-destructive">Booked</span>}
                         {slot.available && tooSoon && <span className="block text-[10px] font-normal text-amber-500">Too soon</span>}
@@ -415,8 +382,10 @@ export const BookAppointmentPage = () => {
                   <div className="border-t border-border/50 pt-4">
                     <div className="p-4 bg-blue-500/10 border border-medical-blue/20 rounded-xl mb-4">
                       <p className="text-sm font-semibold text-foreground mb-1">Selected slot</p>
-                      <p className="text-medical-blue font-bold">{selectedSlot.start_time} – {selectedSlot.end_time}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{formatDate(selectedDate)} · Dr. {registeredDoctor.full_name} · {localTz}</p>
+                      <p className="text-medical-blue font-bold">{localSlotTime(selectedSlot)}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Your timezone: {localTz}. Doctor schedule: {selectedSlot.start_time} - {selectedSlot.end_time} ({selectedSlot.schedule_timezone})
+                      </p>
                     </div>
                     <label className="block text-sm font-medium text-foreground mb-1">Notes (optional)</label>
                     <textarea

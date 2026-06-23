@@ -11,6 +11,8 @@ from app.core.rate_limit import limiter
 from app.db import get_session
 from app.models.auth import AuthUser
 from app.models.patient import Patient
+from app.models.appointments import Appointment, RegistrationRequest
+from app.api.appointments.utils import _appointment_is_elapsed, _appointment_is_future
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -98,8 +100,18 @@ def _next_patient_identifier(session: Session) -> str:
 
 
 def _issue_tokens(user: AuthUser) -> tuple[str, str]:
-    access = create_access_token(user_id=user.id, email=user.email, role=user.role)
-    refresh = create_refresh_token(user_id=user.id, email=user.email, role=user.role)
+    access = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        role=user.role,
+        token_version=user.token_version,
+    )
+    refresh = create_refresh_token(
+        user_id=user.id,
+        email=user.email,
+        role=user.role,
+        token_version=user.token_version,
+    )
     return access, refresh
 
 
@@ -294,6 +306,10 @@ class UpdateProfileRequest(BaseModel):
     bio: Optional[str] = None
 
 
+class CloseAccountRequest(BaseModel):
+    confirmation: str
+
+
 @router.get("/me")
 def get_me(
     user: AuthUser = Depends(get_current_user_compat),
@@ -330,6 +346,64 @@ def update_me(
     session.add(user)
     session.commit()
     return {"message": "Profile updated successfully"}
+
+
+@router.post("/me/close-account")
+def close_patient_account(
+    body: CloseAccountRequest,
+    user: AuthUser = Depends(get_current_user_compat),
+    session: Session = Depends(get_session),
+):
+    """Deactivate a patient login while retaining the clinical record."""
+    if user.role != "patient":
+        raise HTTPException(status_code=403, detail="Only patients can close their own account")
+    if body.confirmation.strip().upper() != "CLOSE":
+        raise HTTPException(status_code=400, detail='Type "CLOSE" to confirm account closure')
+
+    now = datetime.utcnow()
+    patient = session.get(Patient, user.patient_id) if user.patient_id else None
+    if patient:
+        patient.doctor_id = None
+        patient.updated_at = now
+        session.add(patient)
+
+    appointments = session.exec(
+        select(Appointment)
+        .where(Appointment.patient_id == user.id)
+        .where(Appointment.status.in_(["booked", "pending_approval"]))
+    ).all()
+    for appointment in appointments:
+        if _appointment_is_future(appointment):
+            appointment.status = "cancelled"
+            appointment.cancelled_by = "patient"
+            appointment.cancellation_reason = "patient_account_closed"
+            appointment.updated_at = now
+            session.add(appointment)
+        elif appointment.status == "booked" and _appointment_is_elapsed(appointment):
+            appointment.status = "awaiting_outcome"
+            appointment.updated_at = now
+            session.add(appointment)
+        elif appointment.status == "pending_approval":
+            appointment.status = "cancelled"
+            appointment.cancellation_reason = "registration_request_expired"
+            appointment.updated_at = now
+            session.add(appointment)
+
+    requests = session.exec(
+        select(RegistrationRequest)
+        .where(RegistrationRequest.patient_id == user.id)
+        .where(RegistrationRequest.status == "pending")
+    ).all()
+    for request in requests:
+        request.status = "declined"
+        request.updated_at = now
+        session.add(request)
+
+    user.is_active = False
+    user.token_version += 1
+    session.add(user)
+    session.commit()
+    return {"detail": "Account closed. Your medical record has been retained."}
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +468,8 @@ def refresh_tokens(body: RefreshRequest, session: Session = Depends(get_session)
     auth_user = session.get(AuthUser, uid)
     if not auth_user or not auth_user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if int(payload.get("ver", 0)) != auth_user.token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
     access, refresh = _issue_tokens(auth_user)
     return LoginResponse(

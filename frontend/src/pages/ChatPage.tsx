@@ -341,7 +341,7 @@ export const ChatPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50/50 via-pink-50/30 to-blue-50/40 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50/50 via-pink-50/30 to-blue-50/40 relative overflow-x-hidden">
       {/* Floating gradient orbs for depth */}
       <div className="absolute top-20 left-10 w-96 h-96 bg-medical-pink/20 rounded-full blur-3xl animate-pulse" />
       <div className="absolute bottom-20 right-10 w-96 h-96 bg-medical-blue/20 rounded-full blur-3xl animate-pulse delay-1000" />
@@ -373,15 +373,15 @@ export const ChatPage = () => {
       </header>
 
       {/* Chat Container */}
-      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-5xl">
-        <div className="h-[calc(100vh-16rem)]">
-          <ScrollArea className="h-full pr-4" ref={scrollRef}>
-            <div className="space-y-6 pb-4">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-5xl w-full min-w-0">
+        <div className="h-[calc(100vh-16rem)] min-w-0">
+          <ScrollArea className="h-full pr-4 overflow-x-hidden" ref={scrollRef}>
+            <div className="space-y-6 pb-4 min-w-0 max-w-full overflow-x-hidden">
               {messages.map((message) => (
                 <div
                   key={message.id}
                   className={cn(
-                    "flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500",
+                    "flex gap-4 min-w-0 max-w-full animate-in fade-in slide-in-from-bottom-2 duration-500",
                     message.role === "user" ? "justify-end" : "justify-start"
                   )}
                 >
@@ -393,19 +393,19 @@ export const ChatPage = () => {
 
                   <div
                     className={cn(
-                      "max-w-[90%] sm:max-w-[80%] rounded-2xl transition-all duration-300",
+                      "max-w-[90%] sm:max-w-[80%] min-w-0 rounded-2xl overflow-hidden transition-all duration-300",
                       message.role === "user"
-                        ? "bg-white/40 backdrop-blur-xl border border-white/30 px-4 sm:px-5 py-3.5 text-foreground ml-auto shadow-[0_4px_20px_0_rgba(31,38,135,0.1)]"
+                        ? "bg-white/40 backdrop-blur-xl border border-white/30 px-4 sm:px-5 py-3.5 text-foreground ml-auto shadow-[0_4px_20px_0_rgba(31,38,135,0.1)] break-words"
                         : "px-0 py-0"
                     )}
                   >
                     {message.role === "assistant" && progressData[message.id] ? (
-                      <div className="bg-gradient-to-br from-white/60 via-white/40 to-white/30 backdrop-blur-2xl border border-white/40 rounded-2xl px-5 py-4 shadow-[0_8px_40px_-8px_rgba(31,38,135,0.12),0_0_0_1px_rgba(255,255,255,0.1)]">
+                      <div className="max-w-full overflow-hidden bg-gradient-to-br from-white/60 via-white/40 to-white/30 backdrop-blur-2xl border border-white/40 rounded-2xl px-5 py-4 shadow-[0_8px_40px_-8px_rgba(31,38,135,0.12),0_0_0_1px_rgba(255,255,255,0.1)]">
                         <AssessmentProgress data={progressData[message.id]} />
                       </div>
                     ) : message.role === "assistant" ? (
-                      <div className="bg-gradient-to-br from-white/60 via-white/40 to-white/30 backdrop-blur-2xl border border-white/40 rounded-2xl px-5 py-5 shadow-[0_8px_40px_-8px_rgba(31,38,135,0.12),0_0_0_1px_rgba(255,255,255,0.1)]">
-                        <div className="text-sm leading-relaxed prose prose-sm max-w-none text-foreground/80">
+                      <div className="max-w-full overflow-hidden bg-gradient-to-br from-white/60 via-white/40 to-white/30 backdrop-blur-2xl border border-white/40 rounded-2xl px-5 py-5 shadow-[0_8px_40px_-8px_rgba(31,38,135,0.12),0_0_0_1px_rgba(255,255,255,0.1)]">
+                        <div className="text-sm leading-relaxed prose prose-sm max-w-full min-w-0 break-words text-foreground/80 [&_*]:max-w-full">
                           <ReactMarkdown
                             components={{
                               h1: ({ node, ...props }) => (
@@ -421,14 +421,14 @@ export const ChatPage = () => {
                                 <h3 className="text-sm font-semibold mb-1.5 mt-3 text-medical-blue" {...props} />
                               ),
                               p: ({ node, ...props }) => (
-                                <p className="mb-2.5 leading-[1.7] text-foreground/75 text-justify" {...props} />
+                                <p className="mb-2.5 leading-[1.7] text-foreground/75 text-left break-words" {...props} />
                               ),
-                              ul: ({ node, ...props }) => <ul className="mb-3 space-y-1.5" {...props} />,
-                              ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-3 space-y-1.5 text-foreground/75" {...props} />,
+                              ul: ({ node, ...props }) => <ul className="mb-3 space-y-1.5 break-words" {...props} />,
+                              ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-3 space-y-1.5 text-foreground/75 break-words" {...props} />,
                               li: ({ node, children, ...props }) => (
                                 <li className="flex gap-2.5 items-start text-foreground/75" {...props}>
                                   <span className="mt-[7px] h-1.5 w-1.5 rounded-full bg-gradient-to-br from-medical-pink to-medical-blue flex-shrink-0" />
-                                  <span className="leading-[1.7]">{children}</span>
+                                  <span className="leading-[1.7] min-w-0 break-words">{children}</span>
                                 </li>
                               ),
                               strong: ({ node, ...props }) => (
@@ -436,26 +436,26 @@ export const ChatPage = () => {
                               ),
                               em: ({ node, ...props }) => <em className="italic text-foreground/60" {...props} />,
                               code: ({ node, ...props }) => (
-                                <code className="bg-medical-blue/8 text-medical-blue px-1.5 py-0.5 rounded-md text-xs font-mono" {...props} />
+                                <code className="bg-medical-blue/8 text-medical-blue px-1.5 py-0.5 rounded-md text-xs font-mono break-all whitespace-pre-wrap" {...props} />
                               ),
                               hr: () => (
                                 <div className="my-5 h-px bg-gradient-to-r from-transparent via-medical-pink/20 to-transparent" />
                               ),
                               blockquote: ({ node, ...props }) => (
-                                <blockquote className="border-l-[3px] border-medical-blue/30 pl-3.5 my-3 py-1 text-foreground/60 italic bg-medical-blue/5 rounded-r-lg" {...props} />
+                                <blockquote className="border-l-[3px] border-medical-blue/30 pl-3.5 my-3 py-1 text-foreground/60 italic bg-medical-blue/5 rounded-r-lg overflow-hidden break-words" {...props} />
                               ),
                               img: ({ node, alt, src, ...props }) => (
-                                <div className="my-5 rounded-2xl overflow-hidden bg-gradient-to-br from-medical-blue/5 via-white/40 to-medical-pink/5 border border-white/40 shadow-[0_8px_32px_-4px_rgba(31,38,135,0.12)]">
+                                <div className="my-5 max-w-full rounded-2xl overflow-hidden bg-gradient-to-br from-medical-blue/5 via-white/40 to-medical-pink/5 border border-white/40 shadow-[0_8px_32px_-4px_rgba(31,38,135,0.12)]">
                                   <button
                                     type="button"
                                     onClick={() => src && setLightbox({ src, alt: alt || "" })}
-                                    className="relative group w-full cursor-zoom-in"
+                                    className="relative group w-full max-w-full cursor-zoom-in"
                                   >
                                     <img
                                       src={src}
                                       alt={alt}
                                       {...props}
-                                      className="w-full object-contain max-h-[350px] bg-black/5"
+                                      className="w-full max-w-full object-contain max-h-[350px] bg-black/5"
                                     />
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                                     <div className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0">
@@ -478,7 +478,7 @@ export const ChatPage = () => {
                         </div>
                       </div>
                     ) : (
-                      <p className="whitespace-pre-wrap px-4 sm:px-5 py-3.5">{message.content}</p>
+                      <p className="whitespace-pre-wrap break-words px-4 sm:px-5 py-3.5">{message.content}</p>
                     )}
                   </div>
 
@@ -497,7 +497,7 @@ export const ChatPage = () => {
         </div>
 
         {/* Input Area */}
-        <div className="sticky bottom-0 pt-4 sm:pt-6 pb-6 sm:pb-8">
+        <div className="sticky bottom-0 pt-4 sm:pt-6 pb-6 sm:pb-8 min-w-0 max-w-full">
           {showQuickActions && !isLoading && (
             <div className="flex flex-wrap gap-2 mb-3 animate-in fade-in duration-500">
               {PROMPT_SUGGESTIONS.map((prompt) => (
@@ -528,21 +528,21 @@ export const ChatPage = () => {
               ))}
             </div>
           )}
-          <div className="relative backdrop-blur-2xl bg-white/30 border border-white/30 rounded-2xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] px-4 py-3">
+          <div className="relative min-w-0 max-w-full backdrop-blur-2xl bg-white/30 border border-white/30 rounded-2xl shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] px-4 py-3">
             <Textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask me anything, or click the mic to dictate..."
-              className="min-h-[60px] max-h-[140px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm"
+              className="min-h-[60px] max-h-[140px] min-w-0 resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm"
               disabled={isLoading}
             />
             <div className="flex items-center justify-between gap-3 mt-2 pt-2 border-t border-white/15">
               <p className="text-[11px] text-muted-foreground/70">
                 {isLoading ? "Thinking..." : "Enter to send \u00b7 Shift+Enter for new line"}
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-end gap-2 flex-wrap">
                 <div className="flex items-center rounded-full border border-white/30 bg-white/20 p-0.5">
                   <button
                     type="button"

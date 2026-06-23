@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, XAxis, YAxis } from "recharts";
-import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
-import { apiFetch } from "@/lib/apiClient";
+import { useApiQuery } from "@/hooks/useApiQuery";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface TrendPoint {
   day: string;
@@ -14,37 +14,13 @@ interface TrendPoint {
 const WINDOW_OPTIONS = [7, 14, 30] as const;
 
 export const RiskTrendChart = () => {
-  const { user, tokens, setTokens, logout } = useAuth();
   const [selectedWindow, setSelectedWindow] = useState<(typeof WINDOW_OPTIONS)[number]>(30);
-  const [data, setData] = useState<TrendPoint[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (user?.email) {
-      fetchTrendData(selectedWindow);
-    }
-  }, [user?.email, selectedWindow]);
-
-  const fetchTrendData = async (days: number) => {
-    setLoading(true);
-    try {
-      const response = await apiFetch(
-        `/api/dashboard/risk-trends?days=${days}`,
-        { method: "GET" },
-        tokens,
-        setTokens,
-        logout,
-      );
-      if (response.ok) {
-        const payload: { data?: TrendPoint[] } = await response.json();
-        setData(payload.data || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch trend data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const trendQuery = useApiQuery<{ data?: TrendPoint[] }>(
+    queryKeys.dashboard.riskTrends(selectedWindow),
+    `/api/dashboard/risk-trends?days=${selectedWindow}`,
+    { keepPrevious: true },
+  );
+  const data = trendQuery.data?.data ?? [];
 
   return (
     <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-soft h-full">
@@ -83,7 +59,7 @@ export const RiskTrendChart = () => {
       </div>
 
       <div className="h-[250px] w-full">
-        {loading ? (
+        {trendQuery.isPending ? (
           <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
             Loading trend data...
           </div>
